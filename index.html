@@ -8,11 +8,9 @@
     name="description"
     content="Luxury flower wall rentals for weddings, showers, birthdays, and special events across Williamson County and Middle Tennessee."
   />
-  <meta
-    name="keywords"
-    content="flower wall rentals, wedding backdrop, bridal shower backdrop, baby shower backdrop, event rentals, Williamson County, Franklin TN"
-  />
+  <meta name="robots" content="index,follow" />
   <meta name="theme-color" content="#f7f4ef" />
+  <link rel="canonical" href="https://www.williamsonwallflowers.com/" />
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <link rel="shortcut icon" href="favicon.svg" />
 
@@ -22,7 +20,38 @@
     content="Luxury flower wall rentals for beautiful celebrations in Williamson County and Middle Tennessee."
   />
   <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.williamsonwallflowers.com/" />
+  <meta property="og:site_name" content="Williamson Wallflowers" />
   <meta property="og:image" content="https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=1400&q=80" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Williamson Wallflowers" />
+  <meta
+    name="twitter:description"
+    content="Luxury flower wall rentals for beautiful celebrations in Williamson County and Middle Tennessee."
+  />
+  <meta name="twitter:image" content="https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=1400&q=80" />
+
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "LocalBusiness",
+      "name": "Williamson Wallflowers",
+      "url": "https://www.williamsonwallflowers.com/",
+      "image": "https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=1400&q=80",
+      "description": "Luxury flower wall rentals for weddings, showers, birthdays, and special events across Williamson County and Middle Tennessee.",
+      "email": "jamicarswell@gmail.com",
+      "areaServed": [
+        "Williamson County, Tennessee",
+        "Franklin, Tennessee",
+        "Brentwood, Tennessee",
+        "Nolensville, Tennessee",
+        "Spring Hill, Tennessee",
+        "Thompson's Station, Tennessee",
+        "Middle Tennessee"
+      ],
+      "serviceType": "Flower wall rentals"
+    }
+  </script>
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -37,10 +66,10 @@
       --bg-soft: #f2ece5;
       --card: #fbf8f4;
       --text: #2f2b28;
-      --muted: #766b63;
+      --muted: #655b54;
       --line: #ddd2c7;
       --accent: #cdbdad;
-      --accent-dark: #b29f8b;
+      --accent-dark: #a8917c;
       --white: #ffffff;
       --shadow: 0 20px 50px rgba(47, 43, 40, 0.08);
       --radius: 22px;
@@ -71,6 +100,32 @@
     a {
       color: inherit;
       text-decoration: none;
+    }
+
+    a:focus-visible,
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible,
+    summary:focus-visible {
+      outline: 3px solid var(--accent-dark);
+      outline-offset: 3px;
+    }
+
+    .skip-link {
+      position: absolute;
+      left: 1rem;
+      top: -4rem;
+      z-index: 100;
+      padding: 0.85rem 1rem;
+      border-radius: 999px;
+      background: var(--text);
+      color: var(--white);
+      transition: top 0.2s ease;
+    }
+
+    .skip-link:focus {
+      top: 1rem;
     }
 
     .container {
@@ -137,6 +192,7 @@
       font-weight: 600;
       transition: 0.25s ease;
       min-height: 48px;
+      cursor: pointer;
     }
 
     .btn:hover {
@@ -362,6 +418,31 @@
       color: var(--text);
     }
 
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.25rem;
+      margin-top: 2rem;
+    }
+
+    .info-card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      box-shadow: var(--shadow);
+    }
+
+    .info-list {
+      margin: 0;
+      padding-left: 1.1rem;
+      color: var(--muted);
+    }
+
+    .info-list li + li {
+      margin-top: 0.45rem;
+    }
+
     .faq {
       display: grid;
       gap: 1rem;
@@ -412,13 +493,18 @@
       margin-top: 1.5rem;
     }
 
-    .contact-item small {
+    .contact-item small,
+    .form-note-label {
       display: block;
       text-transform: uppercase;
       letter-spacing: 0.14em;
       color: var(--muted);
       font-size: 0.72rem;
       margin-bottom: 0.35rem;
+    }
+
+    .quick-book {
+      margin-top: 1.5rem;
     }
 
     form {
@@ -457,6 +543,12 @@
       resize: vertical;
     }
 
+    .form-note {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
     .footer {
       padding: 2rem 0 3rem;
       border-top: 1px solid var(--line);
@@ -476,7 +568,8 @@
       .contact-wrap,
       .cards,
       .steps,
-      .feature-grid {
+      .feature-grid,
+      .info-grid {
         grid-template-columns: 1fr;
       }
 
@@ -535,17 +628,26 @@
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+
   <header class="site-header">
     <div class="container nav">
       <a href="#top" class="brand">Williamson Wallflowers</a>
 
-      <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu" aria-expanded="false">
+      <button
+        class="menu-toggle"
+        id="menuToggle"
+        aria-label="Toggle menu"
+        aria-expanded="false"
+        aria-controls="navLinks"
+      >
         Menu
       </button>
 
-      <nav class="nav-links" id="navLinks">
+      <nav class="nav-links" id="navLinks" aria-label="Primary navigation">
         <a href="#collection">Collection</a>
         <a href="#about">About</a>
+        <a href="#included">What's Included</a>
         <a href="#how-it-works">How It Works</a>
         <a href="#faq">FAQ</a>
         <a href="#contact">Book</a>
@@ -553,11 +655,11 @@
     </div>
   </header>
 
-  <main id="top">
-    <section class="hero">
+  <main id="main-content">
+    <section class="hero" id="top">
       <div class="container hero-grid">
         <div class="hero-copy">
-          <span class="eyebrow">Williamson County & Middle Tennessee</span>
+          <span class="eyebrow">Williamson County &amp; Middle Tennessee</span>
           <h1>Luxury flower walls for the moments everyone remembers.</h1>
           <p class="muted">
             Elegant floral backdrops for weddings, showers, birthdays, and celebrations that deserve a beautiful focal point.
@@ -572,15 +674,40 @@
           <div class="hero-note">
             <span>Delivery + setup available</span>
             <span>Luxury-inspired styling</span>
-            <span>Perfect for photos & statement moments</span>
+            <span>Perfect for photos &amp; statement moments</span>
           </div>
         </div>
 
         <div class="hero-collage" aria-hidden="true">
-          <img src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=900&q=80" alt="" />
-          <img src="https://images.unsplash.com/photo-1520854221256-17451cc331bf?auto=format&fit=crop&w=900&q=80" alt="" />
-          <img src="https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=900&q=80" alt="" />
-          <img src="https://images.unsplash.com/photo-1469371670807-013ccf25f16a?auto=format&fit=crop&w=900&q=80" alt="" />
+          <img
+            src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=900&q=80"
+            alt=""
+            width="900"
+            height="1100"
+            fetchpriority="high"
+            decoding="async"
+          />
+          <img
+            src="https://images.unsplash.com/photo-1520854221256-17451cc331bf?auto=format&fit=crop&w=900&q=80"
+            alt=""
+            width="900"
+            height="1100"
+            decoding="async"
+          />
+          <img
+            src="https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=900&q=80"
+            alt=""
+            width="900"
+            height="1100"
+            decoding="async"
+          />
+          <img
+            src="https://images.unsplash.com/photo-1469371670807-013ccf25f16a?auto=format&fit=crop&w=900&q=80"
+            alt=""
+            width="900"
+            height="1100"
+            decoding="async"
+          />
         </div>
       </div>
     </section>
@@ -609,7 +736,14 @@
 
         <div class="cards">
           <article class="card">
-            <img src="https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&w=1200&q=80" alt="Elegant white floral backdrop for a wedding reception" />
+            <img
+              src="https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&w=1200&q=80"
+              alt="Elegant white floral backdrop for a wedding reception"
+              width="1200"
+              height="900"
+              loading="lazy"
+              decoding="async"
+            />
             <div class="card-body">
               <h3>The Signature Bloom</h3>
               <p class="muted">
@@ -625,7 +759,14 @@
           </article>
 
           <article class="card">
-            <img src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=1200&q=80" alt="Soft floral backdrop for bridal shower or baby shower" />
+            <img
+              src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=1200&q=80"
+              alt="Soft floral backdrop for bridal shower or baby shower"
+              width="1200"
+              height="900"
+              loading="lazy"
+              decoding="async"
+            />
             <div class="card-body">
               <h3>The Garden Party</h3>
               <p class="muted">
@@ -635,13 +776,20 @@
               <div class="tags">
                 <span class="tag">Baby Showers</span>
                 <span class="tag">Bridal Showers</span>
-                <span class="tag">Soft & Fresh</span>
+                <span class="tag">Soft &amp; Fresh</span>
               </div>
             </div>
           </article>
 
           <article class="card">
-            <img src="https://images.unsplash.com/photo-1517457373958-b7bdd4587205?auto=format&fit=crop&w=1200&q=80" alt="Neutral floral event backdrop with clean styling" />
+            <img
+              src="https://images.unsplash.com/photo-1517457373958-b7bdd4587205?auto=format&fit=crop&w=1200&q=80"
+              alt="Neutral floral event backdrop with clean styling"
+              width="1200"
+              height="900"
+              loading="lazy"
+              decoding="async"
+            />
             <div class="card-body">
               <h3>The Modern Neutral</h3>
               <p class="muted">
@@ -689,6 +837,40 @@
         <div class="feature">
           <h3>Styled for your event</h3>
           <p class="muted">Thoughtful floral looks that fit everything from timeless weddings to modern celebrations.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="included">
+      <div class="container">
+        <span class="eyebrow">What’s Included</span>
+        <div class="split">
+          <h2>Clearer booking expectations for clients.</h2>
+          <p class="muted">
+            This section answers the common questions clients usually ask before they book and makes the site feel more complete.
+          </p>
+        </div>
+
+        <div class="info-grid">
+          <div class="info-card">
+            <h3>Included with your rental</h3>
+            <ul class="info-list">
+              <li>Booking coordination with Jami Ferguson</li>
+              <li>Delivery and on-site setup when included in your package</li>
+              <li>Pickup after the event window</li>
+              <li>Backdrop guidance based on your event style and placement</li>
+            </ul>
+          </div>
+          <div class="info-card">
+            <h3>Service area</h3>
+            <p class="muted">
+              Proudly serving Williamson County and nearby Middle Tennessee communities, including Franklin, Brentwood,
+              Nolensville, Spring Hill, Thompson’s Station, and surrounding areas.
+            </p>
+            <p class="muted">
+              For venues outside the standard service area, custom quotes can be provided based on location and logistics.
+            </p>
+          </div>
         </div>
       </div>
     </section>
@@ -795,15 +977,17 @@
             </div>
             <div class="contact-item">
               <small>Service Area</small>
-              <span>Williamson County & Middle Tennessee</span>
+              <span>Williamson County &amp; Middle Tennessee</span>
             </div>
+          </div>
+
+          <div class="quick-book">
+            <a class="btn btn-secondary" href="mailto:jamicarswell@gmail.com?subject=Williamson%20Wallflowers%20Inquiry">Email Jami Directly</a>
           </div>
         </div>
 
         <div class="form-card">
-          <form name="inquiry" method="POST" data-netlify="true">
-            <input type="hidden" name="form-name" value="inquiry" />
-
+          <form id="inquiryForm" name="inquiry">
             <div class="form-grid">
               <div>
                 <label for="name" class="muted">Name</label>
@@ -850,7 +1034,10 @@
               <textarea id="details" name="details" placeholder="Event style, guest count, colors, or anything you'd like us to know"></textarea>
             </div>
 
-            <button class="btn btn-primary" type="submit">Send Inquiry</button>
+            <button class="btn btn-primary" type="submit">Open Email Draft</button>
+            <p class="form-note">
+              This booking form works on GitHub Pages by opening your email app with the details pre-filled for Jami.
+            </p>
           </form>
         </div>
       </div>
@@ -861,7 +1048,7 @@
     <div class="container footer-row">
       <div>
         <strong>Williamson Wallflowers</strong><br />
-        Luxury flower wall rentals for Williamson County & Middle Tennessee.
+        Luxury flower wall rentals for Williamson County &amp; Middle Tennessee.
       </div>
       <div>© 2026 Williamson Wallflowers. All rights reserved.</div>
     </div>
@@ -870,17 +1057,68 @@
   <script>
     const menuToggle = document.getElementById("menuToggle");
     const navLinks = document.getElementById("navLinks");
+    const inquiryForm = document.getElementById("inquiryForm");
+
+    function closeMenu() {
+      navLinks.classList.remove("open");
+      menuToggle.setAttribute("aria-expanded", "false");
+    }
 
     menuToggle.addEventListener("click", () => {
       const isOpen = navLinks.classList.toggle("open");
       menuToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
     });
 
-    navLinks.querySelectorAll("a").forEach(link => {
-      link.addEventListener("click", () => {
-        navLinks.classList.remove("open");
-        menuToggle.setAttribute("aria-expanded", "false");
-      });
+    navLinks.querySelectorAll("a").forEach((link) => {
+      link.addEventListener("click", closeMenu);
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closeMenu();
+      }
+    });
+
+    document.addEventListener("click", (event) => {
+      if (
+        navLinks.classList.contains("open") &&
+        !navLinks.contains(event.target) &&
+        !menuToggle.contains(event.target)
+      ) {
+        closeMenu();
+      }
+    });
+
+    inquiryForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+
+      const formData = new FormData(inquiryForm);
+      const name = formData.get("name") || "";
+      const email = formData.get("email") || "";
+      const eventDate = formData.get("event-date") || "";
+      const eventType = formData.get("event-type") || "";
+      const venue = formData.get("venue") || "";
+      const preferredWall = formData.get("preferred-wall") || "";
+      const details = formData.get("details") || "";
+
+      const subject = `Williamson Wallflowers Inquiry${eventType ? ` - ${eventType}` : ""}`;
+      const body = [
+        "Hello Jami,",
+        "",
+        "I would like to inquire about Williamson Wallflowers.",
+        "",
+        `Name: ${name}`,
+        `Email: ${email}`,
+        `Event Date: ${eventDate}`,
+        `Event Type: ${eventType}`,
+        `Venue / Location: ${venue}`,
+        `Preferred Wall: ${preferredWall}`,
+        "",
+        "Event Details:",
+        details
+      ].join("\n");
+
+      window.location.href = `mailto:jamicarswell@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     });
   </script>
 </body>
