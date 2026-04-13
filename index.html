@@ -65,16 +65,20 @@
       --bg: #f7f4ef;
       --bg-soft: #f2ece5;
       --bg-tint: #f9f5f1;
+      --surface: rgba(255, 255, 255, 0.66);
+      --surface-strong: #fbf8f4;
       --card: #fbf8f4;
       --text: #2f2b28;
       --muted: #655b54;
       --line: #ddd2c7;
       --accent: #cdbdad;
       --accent-dark: #a8917c;
+      --accent-soft: rgba(205, 189, 173, 0.16);
       --white: #ffffff;
       --shadow: 0 20px 50px rgba(47, 43, 40, 0.08);
       --shadow-soft: 0 14px 30px rgba(47, 43, 40, 0.08);
-      --radius: 22px;
+      --radius: 24px;
+      --radius-lg: 32px;
       --max: 1200px;
     }
 
@@ -89,8 +93,9 @@
     body {
       margin: 0;
       background:
-        radial-gradient(circle at top left, rgba(205, 189, 173, 0.12), transparent 28%),
-        linear-gradient(180deg, #fbf8f4 0%, var(--bg) 100%);
+        radial-gradient(circle at top left, rgba(205, 189, 173, 0.16), transparent 26%),
+        radial-gradient(circle at bottom right, rgba(242, 236, 229, 0.75), transparent 32%),
+        linear-gradient(180deg, #fcfaf7 0%, var(--bg) 100%);
       color: var(--text);
       font-family: "Manrope", sans-serif;
       line-height: 1.65;
@@ -138,14 +143,14 @@
     }
 
     .section {
-      padding: 5.5rem 0;
+      padding: 5.75rem 0;
       position: relative;
     }
 
     .section-soft {
-      background: linear-gradient(180deg, rgba(255,255,255,0.4), rgba(242,236,229,0.55));
-      border-top: 1px solid rgba(221, 210, 199, 0.7);
-      border-bottom: 1px solid rgba(221, 210, 199, 0.7);
+      background: linear-gradient(180deg, rgba(255,255,255,0.48), rgba(242,236,229,0.6));
+      border-top: 1px solid rgba(221, 210, 199, 0.72);
+      border-bottom: 1px solid rgba(221, 210, 199, 0.72);
     }
 
     .section-divider {
@@ -182,22 +187,22 @@
     h1, h2, h3 {
       font-family: "Cormorant Garamond", serif;
       font-weight: 600;
-      line-height: 1.03;
+      line-height: 1.02;
       letter-spacing: 0.01em;
     }
 
     h1 {
-      font-size: clamp(3rem, 7vw, 6rem);
+      font-size: clamp(3rem, 7vw, 6.25rem);
       margin: 0 0 1rem;
     }
 
     h2 {
-      font-size: clamp(2.2rem, 5vw, 4rem);
+      font-size: clamp(2.25rem, 5vw, 4.1rem);
       margin: 0 0 0.65rem;
     }
 
     h3 {
-      font-size: 1.8rem;
+      font-size: 1.85rem;
       margin: 0 0 0.75rem;
     }
 
@@ -221,7 +226,7 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      padding: 0.95rem 1.4rem;
+      padding: 0.95rem 1.45rem;
       border-radius: 999px;
       border: 1px solid var(--text);
       font-weight: 600;
@@ -269,7 +274,7 @@
       top: 0;
       z-index: 20;
       backdrop-filter: blur(14px);
-      background: rgba(247, 244, 239, 0.86);
+      background: rgba(247, 244, 239, 0.88);
       border-bottom: 1px solid rgba(221, 210, 199, 0.65);
     }
 
@@ -291,7 +296,7 @@
     .nav-links {
       display: flex;
       align-items: center;
-      gap: 1.2rem;
+      gap: 1.15rem;
       font-size: 0.96rem;
       color: var(--muted);
     }
@@ -319,25 +324,64 @@
     }
 
     .hero {
-      padding: 5rem 0 4rem;
+      padding: 4.2rem 0 3.5rem;
+    }
+
+    .hero-frame {
+      position: relative;
+      overflow: hidden;
+      padding: clamp(1.25rem, 2vw, 1.6rem);
+      border-radius: var(--radius-lg);
+      background: linear-gradient(180deg, rgba(255,255,255,0.7), rgba(249,245,241,0.82));
+      border: 1px solid rgba(221, 210, 199, 0.9);
+      box-shadow: 0 30px 70px rgba(47, 43, 40, 0.08);
+    }
+
+    .hero-frame::before,
+    .hero-frame::after {
+      content: "";
+      position: absolute;
+      border-radius: 999px;
+      pointer-events: none;
+      filter: blur(8px);
+      opacity: 0.6;
+    }
+
+    .hero-frame::before {
+      width: 260px;
+      height: 260px;
+      background: rgba(205, 189, 173, 0.18);
+      top: -80px;
+      right: -70px;
+    }
+
+    .hero-frame::after {
+      width: 220px;
+      height: 220px;
+      background: rgba(242, 236, 229, 0.9);
+      bottom: -90px;
+      left: -70px;
     }
 
     .hero-grid {
+      position: relative;
       display: grid;
-      grid-template-columns: 1.05fr 0.95fr;
-      gap: 2.25rem;
+      grid-template-columns: 1.02fr 0.98fr;
+      gap: 2rem;
       align-items: center;
+      z-index: 1;
     }
 
     .hero-copy {
       max-width: 640px;
+      padding: 0.4rem 0.4rem 0.2rem;
     }
 
     .hero-badge {
       display: inline-flex;
       align-items: center;
       gap: 0.55rem;
-      padding: 0.55rem 0.9rem;
+      padding: 0.58rem 0.92rem;
       margin-bottom: 1rem;
       border-radius: 999px;
       background: rgba(205, 189, 173, 0.18);
@@ -363,9 +407,14 @@
       display: flex;
       flex-wrap: wrap;
       gap: 0.8rem 1.4rem;
-      margin-top: 1.75rem;
+      margin-top: 1.65rem;
       color: var(--muted);
       font-size: 0.95rem;
+    }
+
+    .hero-panel {
+      display: grid;
+      gap: 1rem;
     }
 
     .hero-collage {
@@ -378,44 +427,83 @@
       width: 100%;
       height: 260px;
       object-fit: cover;
-      border-radius: var(--radius);
+      border-radius: calc(var(--radius) - 2px);
       box-shadow: var(--shadow);
     }
 
     .hero-collage img:nth-child(1) {
-      margin-top: 2rem;
+      margin-top: 1.8rem;
     }
 
     .hero-collage img:nth-child(3) {
-      margin-top: -2.5rem;
+      margin-top: -2.2rem;
     }
 
     .hero-collage img:nth-child(4) {
-      margin-top: 1.25rem;
+      margin-top: 1.15rem;
+    }
+
+    .hero-aside-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.85rem;
+      margin-top: 1rem;
+    }
+
+    .mini-card {
+      padding: 1rem 0.95rem;
+      border-radius: 20px;
+      border: 1px solid rgba(221, 210, 199, 0.92);
+      background: rgba(255,255,255,0.72);
+      box-shadow: var(--shadow-soft);
+    }
+
+    .mini-card strong {
+      display: block;
+      font-size: 0.98rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .mini-card span {
+      color: var(--muted);
+      font-size: 0.85rem;
     }
 
     .intro-band {
-      background: var(--bg-soft);
-      border-top: 1px solid var(--line);
-      border-bottom: 1px solid var(--line);
+      padding: 1.35rem 0 0;
     }
 
     .intro-band .container {
-      padding: 1.1rem 0;
       display: flex;
       flex-wrap: wrap;
-      gap: 1rem 2rem;
-      justify-content: space-between;
+      gap: 0.8rem;
+      justify-content: center;
+    }
+
+    .intro-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.6rem 0.9rem;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.72);
+      border: 1px solid rgba(221, 210, 199, 0.8);
       color: var(--muted);
-      font-size: 0.95rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      box-shadow: var(--shadow-soft);
+    }
+
+    .section-intro {
+      max-width: 980px;
     }
 
     .split {
       display: grid;
-      grid-template-columns: 0.9fr 1.1fr;
+      grid-template-columns: 0.92fr 1.08fr;
       gap: 2rem;
       align-items: start;
-      margin-bottom: 0.6rem;
+      margin-bottom: 0.9rem;
     }
 
     .cards {
@@ -445,14 +533,52 @@
       box-shadow: 0 24px 52px rgba(47, 43, 40, 0.1);
     }
 
+    .card-media {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card-media::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0;
+      height: 50%;
+      background: linear-gradient(180deg, transparent, rgba(47,43,40,0.08));
+      pointer-events: none;
+    }
+
     .card img {
-      height: 260px;
+      height: 280px;
       width: 100%;
       object-fit: cover;
     }
 
     .card-body {
-      padding: 1.4rem;
+      padding: 1.45rem;
+    }
+
+    .card-meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      margin-bottom: 0.8rem;
+      padding: 0.4rem 0.7rem;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .card-footer-note {
+      margin-top: 1rem;
+      padding-top: 0.9rem;
+      border-top: 1px solid rgba(221, 210, 199, 0.7);
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 600;
     }
 
     .tags {
@@ -489,26 +615,18 @@
       border-radius: var(--radius);
       box-shadow: var(--shadow);
       transition: transform 0.28s ease, box-shadow 0.28s ease;
-    }
-
-    .feature,
-    .step,
-    .info-card,
-    .testimonial-card,
-    .contact-card,
-    .form-card {
-      padding: 1.5rem;
+      padding: 1.55rem;
     }
 
     .testimonial-row {
       display: grid;
       grid-template-columns: 1.15fr 0.85fr;
       gap: 1.25rem;
-      margin-top: 1.6rem;
+      margin-top: 1.75rem;
     }
 
     .testimonial-card {
-      background: linear-gradient(180deg, rgba(255,255,255,0.72), rgba(242,236,229,0.72));
+      background: linear-gradient(180deg, rgba(255,255,255,0.76), rgba(242,236,229,0.72));
     }
 
     .quote-mark {
@@ -575,12 +693,33 @@
       border-radius: 18px;
       padding: 1rem 1.2rem;
       box-shadow: var(--shadow-soft);
+      transition: box-shadow 0.25s ease, transform 0.25s ease;
+    }
+
+    details:hover {
+      transform: translateY(-1px);
+      box-shadow: var(--shadow);
     }
 
     summary {
       cursor: pointer;
       font-weight: 700;
       list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    summary::after {
+      content: "+";
+      font-size: 1.35rem;
+      color: var(--accent-dark);
+      line-height: 1;
+    }
+
+    details[open] summary::after {
+      content: "−";
     }
 
     summary::-webkit-details-marker {
@@ -592,10 +731,18 @@
       color: var(--muted);
     }
 
+    .contact-shell {
+      padding: 1rem;
+      border-radius: var(--radius-lg);
+      background: linear-gradient(180deg, rgba(255,255,255,0.62), rgba(249,245,241,0.9));
+      border: 1px solid rgba(221, 210, 199, 0.82);
+      box-shadow: var(--shadow);
+    }
+
     .contact-wrap {
       display: grid;
-      grid-template-columns: 0.9fr 1.1fr;
-      gap: 2rem;
+      grid-template-columns: 0.94fr 1.06fr;
+      gap: 1rem;
       align-items: start;
     }
 
@@ -670,6 +817,10 @@
       margin-top: 1.5rem;
     }
 
+    .form-head {
+      margin-bottom: 1rem;
+    }
+
     form {
       display: grid;
       gap: 1rem;
@@ -707,7 +858,7 @@
     }
 
     .footer {
-      padding: 2rem 0 3rem;
+      padding: 2.2rem 0 3rem;
       border-top: 1px solid var(--line);
       color: var(--muted);
     }
@@ -717,6 +868,12 @@
       flex-wrap: wrap;
       justify-content: space-between;
       gap: 1rem;
+      align-items: center;
+    }
+
+    .footer-link {
+      color: var(--accent-dark);
+      font-weight: 600;
     }
 
     .reveal {
@@ -744,6 +901,7 @@
       .testimonial-card,
       .contact-card,
       .form-card,
+      details,
       .btn {
         transition: none;
         transform: none;
@@ -759,7 +917,8 @@
       .steps,
       .feature-grid,
       .info-grid,
-      .testimonial-row {
+      .testimonial-row,
+      .hero-aside-grid {
         grid-template-columns: 1fr;
       }
 
@@ -797,6 +956,10 @@
         padding-top: 3rem;
       }
 
+      .hero-frame {
+        padding: 1rem;
+      }
+
       .hero-collage {
         grid-template-columns: 1fr 1fr;
       }
@@ -812,7 +975,7 @@
       }
 
       .section {
-        padding: 4rem 0;
+        padding: 4.15rem 0;
       }
     }
   </style>
@@ -847,78 +1010,101 @@
 
   <main id="main-content">
     <section class="hero" id="top">
-      <div class="container hero-grid">
-        <div class="hero-copy reveal">
-          <span class="hero-badge"><span class="hero-badge-dot"></span>Serving Williamson County celebrations</span>
-          <span class="eyebrow">Williamson County &amp; Middle Tennessee</span>
-          <h1>Luxury flower walls for the moments everyone remembers.</h1>
-          <p class="muted">
-            Elegant floral backdrops for weddings, showers, birthdays, and celebrations that deserve a beautiful focal point.
-            Williamson Wallflowers creates soft, romantic statement pieces that feel timeless in person and stunning in photos.
-          </p>
+      <div class="container">
+        <div class="hero-frame">
+          <div class="hero-grid">
+            <div class="hero-copy reveal">
+              <span class="hero-badge"><span class="hero-badge-dot"></span>Serving Williamson County celebrations</span>
+              <span class="eyebrow">Williamson County &amp; Middle Tennessee</span>
+              <h1>Luxury flower walls for the moments everyone remembers.</h1>
+              <p class="muted">
+                Elegant floral backdrops for weddings, showers, birthdays, and celebrations that deserve a beautiful focal point.
+                Williamson Wallflowers creates soft, romantic statement pieces that feel timeless in person and stunning in photos.
+              </p>
 
-          <div class="btn-row">
-            <a class="btn btn-primary" href="#contact">Request Availability</a>
-            <a class="btn btn-secondary" href="#collection">Browse the Collection</a>
+              <div class="btn-row">
+                <a class="btn btn-primary" href="#contact">Request Availability</a>
+                <a class="btn btn-secondary" href="#collection">Browse the Collection</a>
+              </div>
+
+              <div class="hero-note">
+                <span>Delivery + setup available</span>
+                <span>Luxury-inspired styling</span>
+                <span>Perfect for photos &amp; statement moments</span>
+              </div>
+            </div>
+
+            <div class="hero-panel reveal" aria-hidden="true">
+              <div class="hero-collage">
+                <img
+                  src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=900&q=80"
+                  alt=""
+                  width="900"
+                  height="1100"
+                  fetchpriority="high"
+                  decoding="async"
+                />
+                <img
+                  src="https://images.unsplash.com/photo-1520854221256-17451cc331bf?auto=format&fit=crop&w=900&q=80"
+                  alt=""
+                  width="900"
+                  height="1100"
+                  decoding="async"
+                />
+                <img
+                  src="https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=900&q=80"
+                  alt=""
+                  width="900"
+                  height="1100"
+                  decoding="async"
+                />
+                <img
+                  src="https://images.unsplash.com/photo-1469371670807-013ccf25f16a?auto=format&fit=crop&w=900&q=80"
+                  alt=""
+                  width="900"
+                  height="1100"
+                  decoding="async"
+                />
+              </div>
+
+              <div class="hero-aside-grid">
+                <div class="mini-card">
+                  <strong>Weddings</strong>
+                  <span>Romantic statement backdrops for the biggest day.</span>
+                </div>
+                <div class="mini-card">
+                  <strong>Showers</strong>
+                  <span>Soft, airy styling for baby and bridal celebrations.</span>
+                </div>
+                <div class="mini-card">
+                  <strong>Events</strong>
+                  <span>Beautiful focal pieces for birthdays and brand moments.</span>
+                </div>
+              </div>
+            </div>
           </div>
-
-          <div class="hero-note">
-            <span>Delivery + setup available</span>
-            <span>Luxury-inspired styling</span>
-            <span>Perfect for photos &amp; statement moments</span>
-          </div>
-        </div>
-
-        <div class="hero-collage reveal" aria-hidden="true">
-          <img
-            src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=900&q=80"
-            alt=""
-            width="900"
-            height="1100"
-            fetchpriority="high"
-            decoding="async"
-          />
-          <img
-            src="https://images.unsplash.com/photo-1520854221256-17451cc331bf?auto=format&fit=crop&w=900&q=80"
-            alt=""
-            width="900"
-            height="1100"
-            decoding="async"
-          />
-          <img
-            src="https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=900&q=80"
-            alt=""
-            width="900"
-            height="1100"
-            decoding="async"
-          />
-          <img
-            src="https://images.unsplash.com/photo-1469371670807-013ccf25f16a?auto=format&fit=crop&w=900&q=80"
-            alt=""
-            width="900"
-            height="1100"
-            decoding="async"
-          />
         </div>
       </div>
     </section>
 
     <section class="intro-band">
-      <div class="container">
-        <span>Weddings</span>
-        <span>Baby Showers</span>
-        <span>Bridal Showers</span>
-        <span>Birthdays</span>
-        <span>Corporate Events</span>
+      <div class="container reveal">
+        <span class="intro-pill">✿ Weddings</span>
+        <span class="intro-pill">✿ Baby Showers</span>
+        <span class="intro-pill">✿ Bridal Showers</span>
+        <span class="intro-pill">✿ Birthdays</span>
+        <span class="intro-pill">✿ Corporate Events</span>
       </div>
     </section>
 
     <section class="section" id="collection">
       <div class="container">
         <div class="section-divider" aria-hidden="true"><span></span><span></span><span></span></div>
-        <span class="eyebrow">Our Collection</span>
-        <div class="split reveal">
-          <h2>Designed to feel elevated, airy, and timeless.</h2>
+        <div class="section-intro split reveal">
+          <div>
+            <span class="eyebrow">Our Collection</span>
+            <h2>Designed to feel elevated, airy, and timeless.</h2>
+          </div>
           <p class="muted">
             Each floral wall is styled to create a polished focal point for your event — whether you want something romantic,
             classic, soft and feminine, or clean and modern. Perfect behind sweetheart tables, welcome moments, dessert displays,
@@ -928,15 +1114,18 @@
 
         <div class="cards">
           <article class="card reveal">
-            <img
-              src="https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&w=1200&q=80"
-              alt="Elegant white floral backdrop for a wedding reception"
-              width="1200"
-              height="900"
-              loading="lazy"
-              decoding="async"
-            />
+            <div class="card-media">
+              <img
+                src="https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&w=1200&q=80"
+                alt="Elegant white floral backdrop for a wedding reception"
+                width="1200"
+                height="900"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
             <div class="card-body">
+              <span class="card-meta">Classic Luxury</span>
               <h3>The Signature Bloom</h3>
               <p class="muted">
                 A classic white-and-ivory floral wall with a clean, romantic look. Perfect for weddings, receptions,
@@ -947,19 +1136,23 @@
                 <span class="tag">Photo Moments</span>
                 <span class="tag">Timeless</span>
               </div>
+              <div class="card-footer-note">Best for sweetheart tables, ceremony styling, and portraits.</div>
             </div>
           </article>
 
           <article class="card reveal">
-            <img
-              src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=1200&q=80"
-              alt="Soft floral backdrop for bridal shower or baby shower"
-              width="1200"
-              height="900"
-              loading="lazy"
-              decoding="async"
-            />
+            <div class="card-media">
+              <img
+                src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=1200&q=80"
+                alt="Soft floral backdrop for bridal shower or baby shower"
+                width="1200"
+                height="900"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
             <div class="card-body">
+              <span class="card-meta">Soft &amp; Fresh</span>
               <h3>The Garden Party</h3>
               <p class="muted">
                 Soft florals with fresh greenery for a light, romantic setting that works beautifully for showers,
@@ -968,21 +1161,25 @@
               <div class="tags">
                 <span class="tag">Baby Showers</span>
                 <span class="tag">Bridal Showers</span>
-                <span class="tag">Soft &amp; Fresh</span>
+                <span class="tag">Brunch Events</span>
               </div>
+              <div class="card-footer-note">Ideal for pastel palettes, daytime events, and airy spaces.</div>
             </div>
           </article>
 
           <article class="card reveal">
-            <img
-              src="https://images.unsplash.com/photo-1517457373958-b7bdd4587205?auto=format&fit=crop&w=1200&q=80"
-              alt="Neutral floral event backdrop with clean styling"
-              width="1200"
-              height="900"
-              loading="lazy"
-              decoding="async"
-            />
+            <div class="card-media">
+              <img
+                src="https://images.unsplash.com/photo-1517457373958-b7bdd4587205?auto=format&fit=crop&w=1200&q=80"
+                alt="Neutral floral event backdrop with clean styling"
+                width="1200"
+                height="900"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
             <div class="card-body">
+              <span class="card-meta">Modern Neutral</span>
               <h3>The Modern Neutral</h3>
               <p class="muted">
                 A refined floral-and-greenery blend with understated luxury for clients who want something versatile,
@@ -993,6 +1190,7 @@
                 <span class="tag">Corporate Events</span>
                 <span class="tag">Minimal</span>
               </div>
+              <div class="card-footer-note">Great for clean palettes, branded moments, and modern venues.</div>
             </div>
           </article>
         </div>
@@ -1056,9 +1254,11 @@
     <section class="section" id="included">
       <div class="container">
         <div class="section-divider" aria-hidden="true"><span></span><span></span><span></span></div>
-        <span class="eyebrow">What’s Included</span>
-        <div class="split reveal">
-          <h2>Clearer booking expectations for clients.</h2>
+        <div class="section-intro split reveal">
+          <div>
+            <span class="eyebrow">What’s Included</span>
+            <h2>Clearer booking expectations for clients.</h2>
+          </div>
           <p class="muted">
             This section answers the common questions clients usually ask before they book and makes the site feel more complete.
           </p>
@@ -1091,9 +1291,11 @@
     <section class="section section-soft" id="how-it-works">
       <div class="container">
         <div class="section-divider" aria-hidden="true"><span></span><span></span><span></span></div>
-        <span class="eyebrow">How It Works</span>
-        <div class="split reveal">
-          <h2>Simple, polished, and easy to book.</h2>
+        <div class="section-intro split reveal">
+          <div>
+            <span class="eyebrow">How It Works</span>
+            <h2>Simple, polished, and easy to book.</h2>
+          </div>
           <p class="muted">
             From your first inquiry to event-day setup, the process is designed to feel seamless so you can focus on celebrating.
           </p>
@@ -1128,9 +1330,11 @@
     <section class="section" id="faq">
       <div class="container">
         <div class="section-divider" aria-hidden="true"><span></span><span></span><span></span></div>
-        <span class="eyebrow">FAQ</span>
-        <div class="split reveal">
-          <h2>Helpful answers before you reach out.</h2>
+        <div class="section-intro split reveal">
+          <div>
+            <span class="eyebrow">FAQ</span>
+            <h2>Helpful answers before you reach out.</h2>
+          </div>
           <p class="muted">
             A few common questions about timing, setup, and customization.
           </p>
@@ -1171,106 +1375,114 @@
     <section class="section section-soft" id="contact">
       <div class="container">
         <div class="section-divider" aria-hidden="true"><span></span><span></span><span></span></div>
-        <div class="contact-wrap">
-          <div class="contact-card reveal">
-            <span class="eyebrow">Book Your Date</span>
-            <h2>Let’s make your event bloom.</h2>
-            <p class="muted">
-              Ready to book or want to check availability? Reach out with your event details and Jami will help you find the right setup.
-            </p>
+        <div class="contact-shell reveal">
+          <div class="contact-wrap">
+            <div class="contact-card">
+              <span class="eyebrow">Book Your Date</span>
+              <h2>Let’s make your event bloom.</h2>
+              <p class="muted">
+                Ready to book or want to check availability? Reach out with your event details and Jami will help you find the right setup.
+              </p>
 
-            <div class="trust-row">
-              <span class="trust-pill">✿ Delivery + setup</span>
-              <span class="trust-pill">✿ Williamson County service</span>
-              <span class="trust-pill">✿ Custom event styling</span>
+              <div class="trust-row">
+                <span class="trust-pill">✿ Delivery + setup</span>
+                <span class="trust-pill">✿ Williamson County service</span>
+                <span class="trust-pill">✿ Custom event styling</span>
+              </div>
+
+              <div class="contact-list">
+                <div class="contact-item">
+                  <span class="contact-icon">✿</span>
+                  <div>
+                    <small>Booking Contact</small>
+                    <strong>Jami Ferguson</strong>
+                  </div>
+                </div>
+                <div class="contact-item">
+                  <span class="contact-icon">✉</span>
+                  <div>
+                    <small>Email</small>
+                    <a href="mailto:jamicarswell@gmail.com">jamicarswell@gmail.com</a>
+                  </div>
+                </div>
+                <div class="contact-item">
+                  <span class="contact-icon">◎</span>
+                  <div>
+                    <small>Instagram</small>
+                    <a href="https://www.instagram.com/williamsonflowerwalls" target="_blank" rel="noopener noreferrer">@williamsonflowerwalls</a>
+                  </div>
+                </div>
+                <div class="contact-item">
+                  <span class="contact-icon">⌂</span>
+                  <div>
+                    <small>Service Area</small>
+                    <span>Williamson County &amp; Middle Tennessee</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="quick-book">
+                <a class="btn btn-secondary" href="mailto:jamicarswell@gmail.com?subject=Williamson%20Wallflowers%20Inquiry">Contact Jami</a>
+              </div>
             </div>
 
-            <div class="contact-list">
-              <div class="contact-item">
-                <span class="contact-icon">✿</span>
-                <div>
-                  <small>Booking Contact</small>
-                  <strong>Jami Ferguson</strong>
-                </div>
+            <div class="form-card">
+              <div class="form-head">
+                <span class="eyebrow">Start your inquiry</span>
+                <h3>Tell us about your event.</h3>
+                <p class="muted">Share a few quick details and your email app will open with everything pre-filled for Jami.</p>
               </div>
-              <div class="contact-item">
-                <span class="contact-icon">✉</span>
-                <div>
-                  <small>Email</small>
-                  <a href="mailto:jamicarswell@gmail.com">jamicarswell@gmail.com</a>
+
+              <form id="inquiryForm" name="inquiry">
+                <div class="form-grid">
+                  <div>
+                    <label for="name" class="muted">Name</label>
+                    <input id="name" name="name" type="text" required />
+                  </div>
+                  <div>
+                    <label for="email" class="muted">Email</label>
+                    <input id="email" name="email" type="email" required />
+                  </div>
                 </div>
-              </div>
-              <div class="contact-item">
-                <span class="contact-icon">◎</span>
-                <div>
-                  <small>Instagram</small>
-                  <a href="https://www.instagram.com/williamsonflowerwalls" target="_blank" rel="noopener noreferrer">@williamsonflowerwalls</a>
+
+                <div class="form-grid">
+                  <div>
+                    <label for="date" class="muted">Event Date</label>
+                    <input id="date" name="event-date" type="date" />
+                  </div>
+                  <div>
+                    <label for="type" class="muted">Event Type</label>
+                    <select id="type" name="event-type">
+                      <option value="">Select an option</option>
+                      <option>Wedding</option>
+                      <option>Baby Shower</option>
+                      <option>Bridal Shower</option>
+                      <option>Birthday</option>
+                      <option>Corporate Event</option>
+                      <option>Other</option>
+                    </select>
+                  </div>
                 </div>
-              </div>
-              <div class="contact-item">
-                <span class="contact-icon">⌂</span>
-                <div>
-                  <small>Service Area</small>
-                  <span>Williamson County &amp; Middle Tennessee</span>
+
+                <div class="form-grid">
+                  <div>
+                    <label for="venue" class="muted">Venue / Location</label>
+                    <input id="venue" name="venue" type="text" />
+                  </div>
+                  <div>
+                    <label for="wall" class="muted">Preferred Wall</label>
+                    <input id="wall" name="preferred-wall" type="text" />
+                  </div>
                 </div>
-              </div>
+
+                <div>
+                  <label for="details" class="muted">Tell us about your event</label>
+                  <textarea id="details" name="details" placeholder="Event style, guest count, colors, or anything you'd like us to know"></textarea>
+                </div>
+
+                <button class="btn btn-primary" type="submit">Start Your Inquiry</button>
+              </form>
             </div>
-
-            <div class="quick-book">
-              <a class="btn btn-secondary" href="mailto:jamicarswell@gmail.com?subject=Williamson%20Wallflowers%20Inquiry">Contact Jami</a>
-            </div>
-          </div>
-
-          <div class="form-card reveal">
-            <form id="inquiryForm" name="inquiry">
-              <div class="form-grid">
-                <div>
-                  <label for="name" class="muted">Name</label>
-                  <input id="name" name="name" type="text" required />
-                </div>
-                <div>
-                  <label for="email" class="muted">Email</label>
-                  <input id="email" name="email" type="email" required />
-                </div>
-              </div>
-
-              <div class="form-grid">
-                <div>
-                  <label for="date" class="muted">Event Date</label>
-                  <input id="date" name="event-date" type="date" />
-                </div>
-                <div>
-                  <label for="type" class="muted">Event Type</label>
-                  <select id="type" name="event-type">
-                    <option value="">Select an option</option>
-                    <option>Wedding</option>
-                    <option>Baby Shower</option>
-                    <option>Bridal Shower</option>
-                    <option>Birthday</option>
-                    <option>Corporate Event</option>
-                    <option>Other</option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="form-grid">
-                <div>
-                  <label for="venue" class="muted">Venue / Location</label>
-                  <input id="venue" name="venue" type="text" />
-                </div>
-                <div>
-                  <label for="wall" class="muted">Preferred Wall</label>
-                  <input id="wall" name="preferred-wall" type="text" />
-                </div>
-              </div>
-
-              <div>
-                <label for="details" class="muted">Tell us about your event</label>
-                <textarea id="details" name="details" placeholder="Event style, guest count, colors, or anything you'd like us to know"></textarea>
-              </div>
-
-              <button class="btn btn-primary" type="submit">Start Your Inquiry</button>
-            </form>
           </div>
         </div>
       </div>
@@ -1283,7 +1495,9 @@
         <strong>Williamson Wallflowers</strong><br />
         Luxury flower wall rentals for Williamson County &amp; Middle Tennessee.
       </div>
-      <div>© 2026 Williamson Wallflowers. All rights reserved.</div>
+      <div>
+        <a class="footer-link" href="https://www.instagram.com/williamsonflowerwalls" target="_blank" rel="noopener noreferrer">Follow on Instagram</a>
+      </div>
     </div>
   </footer>
 
