@@ -30,7 +30,7 @@
 - [ ] Move CSS into a separate stylesheet after the design stabilizes
 - [ ] Self-host optimized images instead of hotlinking remote image URLs
 - [ ] Consider self-hosting fonts for better performance and reliability
-- [ ] Add Instagram profile link once the final account URL is confirmed
+- [ ] Confirm the final Instagram profile URL
 - [ ] Add a custom 404 page for the custom domain
 - [ ] Add a thank-you page or on-page confirmation experience if a true form backend is added later
 
