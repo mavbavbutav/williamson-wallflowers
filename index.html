@@ -3,24 +3,46 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Williamson Flowerwalls | Luxury Flower Wall Rentals</title>
+  <title>Williamson Wallflowers | Luxury Flower Wall Rentals</title>
   <meta
     name="description"
-    content="Williamson Flowerwalls offers luxury flower wall rentals for weddings, baby showers, bridal showers, birthdays, and special events across Williamson County and Middle Tennessee."
+    content="Luxury flower wall rentals for weddings, showers, birthdays, and special events across Williamson County and Middle Tennessee."
   />
+  <meta
+    name="keywords"
+    content="flower wall rentals, wedding backdrop, bridal shower backdrop, baby shower backdrop, event rentals, Williamson County, Franklin TN"
+  />
+  <meta name="theme-color" content="#f7f4ef" />
+
+  <meta property="og:title" content="Williamson Wallflowers" />
+  <meta
+    property="og:description"
+    content="Luxury flower wall rentals for beautiful celebrations in Williamson County and Middle Tennessee."
+  />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=1400&q=80" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
+
   <style>
     :root {
-      --bg: #fffaf8;
-      --surface: #ffffff;
-      --surface-soft: #f8f1ed;
-      --primary: #b98c80;
-      --primary-dark: #946c62;
-      --text: #2f2725;
-      --muted: #6e615d;
-      --border: #eadfd9;
-      --shadow: 0 20px 50px rgba(64, 41, 33, 0.08);
-      --radius: 18px;
-      --container: 1160px;
+      --bg: #f7f4ef;
+      --bg-soft: #f2ece5;
+      --card: #fbf8f4;
+      --text: #2f2b28;
+      --muted: #766b63;
+      --line: #ddd2c7;
+      --accent: #cdbdad;
+      --accent-dark: #b29f8b;
+      --white: #ffffff;
+      --shadow: 0 20px 50px rgba(47, 43, 40, 0.08);
+      --radius: 22px;
+      --max: 1200px;
     }
 
     * {
@@ -33,12 +55,10 @@
 
     body {
       margin: 0;
-      font-family: Inter, "Helvetica Neue", Helvetica, Arial, sans-serif;
+      background: var(--bg);
       color: var(--text);
-      background:
-        radial-gradient(circle at top left, rgba(185, 140, 128, 0.12), transparent 28%),
-        linear-gradient(180deg, #fffdfc 0%, var(--bg) 100%);
-      line-height: 1.6;
+      font-family: "Manrope", sans-serif;
+      line-height: 1.65;
     }
 
     img {
@@ -48,61 +68,120 @@
 
     a {
       color: inherit;
+      text-decoration: none;
     }
 
     .container {
-      width: min(var(--container), calc(100% - 2rem));
+      width: min(calc(100% - 2rem), var(--max));
       margin: 0 auto;
+    }
+
+    .section {
+      padding: 5.5rem 0;
+    }
+
+    .eyebrow {
+      display: inline-block;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+
+    h1, h2, h3 {
+      font-family: "Cormorant Garamond", serif;
+      font-weight: 600;
+      line-height: 1.05;
+      margin: 0 0 1rem;
+      letter-spacing: 0.01em;
+    }
+
+    h1 {
+      font-size: clamp(3rem, 7vw, 6rem);
+    }
+
+    h2 {
+      font-size: clamp(2.2rem, 5vw, 4rem);
+    }
+
+    h3 {
+      font-size: 1.8rem;
+    }
+
+    p {
+      margin: 0 0 1rem;
+      color: var(--text);
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.9rem;
+      margin-top: 2rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.95rem 1.4rem;
+      border-radius: 999px;
+      border: 1px solid var(--text);
+      font-weight: 600;
+      transition: 0.25s ease;
+      min-height: 48px;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      background: var(--text);
+      color: var(--white);
+      border-color: var(--text);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--text);
+      border-color: var(--line);
     }
 
     .site-header {
       position: sticky;
       top: 0;
-      z-index: 1000;
+      z-index: 20;
       backdrop-filter: blur(14px);
-      background: rgba(255, 250, 248, 0.84);
-      border-bottom: 1px solid rgba(234, 223, 217, 0.8);
+      background: rgba(247, 244, 239, 0.84);
+      border-bottom: 1px solid rgba(221, 210, 199, 0.65);
     }
 
     .nav {
+      min-height: 82px;
       display: flex;
-      justify-content: space-between;
       align-items: center;
+      justify-content: space-between;
       gap: 1rem;
-      padding: 1rem 0;
     }
 
     .brand {
-      display: flex;
-      flex-direction: column;
-      text-decoration: none;
-      min-width: 0;
-    }
-
-    .brand-title {
-      font-size: 1.25rem;
-      font-weight: 800;
-      letter-spacing: 0.02em;
-    }
-
-    .brand-subtitle {
-      font-size: 0.78rem;
-      color: var(--muted);
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
+      font-family: "Cormorant Garamond", serif;
+      font-size: 2rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
     }
 
     .nav-links {
       display: flex;
       align-items: center;
-      gap: 1.2rem;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
-
-    .nav-links a {
-      text-decoration: none;
-      font-weight: 600;
+      gap: 1.5rem;
+      font-size: 0.96rem;
       color: var(--muted);
     }
 
@@ -110,417 +189,234 @@
       color: var(--text);
     }
 
-    .btn,
-    button.btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      border: none;
-      border-radius: 999px;
-      padding: 0.92rem 1.35rem;
-      font-weight: 700;
-      text-decoration: none;
-      cursor: pointer;
-      transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
-    }
-
-    .btn:hover,
-    button.btn:hover {
-      transform: translateY(-1px);
-    }
-
-    .btn-primary {
-      background: var(--primary);
-      color: #fff;
-      box-shadow: 0 14px 28px rgba(185, 140, 128, 0.22);
-    }
-
-    .btn-primary:hover {
-      background: var(--primary-dark);
-    }
-
-    .btn-secondary {
+    .menu-toggle {
+      display: none;
+      border: 1px solid var(--line);
       background: transparent;
+      border-radius: 999px;
+      padding: 0.7rem 1rem;
+      font: inherit;
       color: var(--text);
-      border: 1px solid var(--border);
     }
 
     .hero {
-      padding: 4.8rem 0 3rem;
+      padding: 5rem 0 4rem;
     }
 
-    .hero-wrap {
+    .hero-grid {
       display: grid;
-      grid-template-columns: 1.12fr 0.88fr;
-      gap: 2rem;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 2.25rem;
       align-items: center;
     }
 
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.45rem 0.8rem;
-      border-radius: 999px;
-      background: rgba(185, 140, 128, 0.12);
-      color: var(--primary-dark);
-      font-size: 0.83rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
+    .hero-copy {
+      max-width: 640px;
     }
 
-    .hero h1 {
-      font-family: Georgia, "Times New Roman", serif;
-      font-size: clamp(2.5rem, 6vw, 4.85rem);
-      line-height: 1.04;
-      margin: 1rem 0 1rem;
-      letter-spacing: -0.03em;
-    }
-
-    .hero p {
+    .hero-copy p {
       font-size: 1.08rem;
-      color: var(--muted);
-      max-width: 42rem;
-      margin: 0 0 1.5rem;
+      max-width: 580px;
     }
 
-    .hero-actions {
-      display: flex;
-      gap: 0.9rem;
-      flex-wrap: wrap;
-      margin-bottom: 1.3rem;
-    }
-
-    .hero-points {
+    .hero-note {
       display: flex;
       flex-wrap: wrap;
-      gap: 1rem 1.5rem;
+      gap: 0.8rem 1.4rem;
+      margin-top: 1.75rem;
       color: var(--muted);
-      font-weight: 600;
       font-size: 0.95rem;
     }
 
-    .hero-card {
-      background: linear-gradient(180deg, #fff 0%, #fcf6f3 100%);
-      border: 1px solid var(--border);
-      border-radius: calc(var(--radius) + 6px);
-      box-shadow: var(--shadow);
-      padding: 1rem;
-    }
-
-    .mock-wall {
-      min-height: 470px;
-      border-radius: calc(var(--radius) - 4px);
-      position: relative;
-      overflow: hidden;
-      background:
-        radial-gradient(circle at 15% 18%, rgba(255,255,255,0.92) 0 11%, transparent 11.5%),
-        radial-gradient(circle at 31% 28%, rgba(243,221,214,0.95) 0 12%, transparent 12.5%),
-        radial-gradient(circle at 52% 18%, rgba(239,210,203,0.95) 0 10%, transparent 10.5%),
-        radial-gradient(circle at 72% 24%, rgba(255,255,255,0.92) 0 13%, transparent 13.5%),
-        radial-gradient(circle at 84% 14%, rgba(232,196,188,0.95) 0 9%, transparent 9.5%),
-        radial-gradient(circle at 18% 52%, rgba(244,227,220,0.96) 0 14%, transparent 14.5%),
-        radial-gradient(circle at 36% 50%, rgba(255,255,255,0.93) 0 13%, transparent 13.5%),
-        radial-gradient(circle at 57% 52%, rgba(237,208,199,0.95) 0 14%, transparent 14.5%),
-        radial-gradient(circle at 77% 48%, rgba(255,255,255,0.92) 0 12%, transparent 12.5%),
-        radial-gradient(circle at 89% 55%, rgba(240,214,206,0.95) 0 10%, transparent 10.5%),
-        radial-gradient(circle at 25% 80%, rgba(255,255,255,0.92) 0 13%, transparent 13.5%),
-        radial-gradient(circle at 47% 78%, rgba(242,220,213,0.95) 0 15%, transparent 15.5%),
-        radial-gradient(circle at 68% 79%, rgba(255,255,255,0.93) 0 12%, transparent 12.5%),
-        radial-gradient(circle at 84% 82%, rgba(237,208,199,0.95) 0 11%, transparent 11.5%),
-        linear-gradient(135deg, #f4e7e1 0%, #fff6f2 45%, #efe0d9 100%);
-      border: 1px solid rgba(255,255,255,0.9);
-    }
-
-    .mock-wall::before,
-    .mock-wall::after {
-      content: "";
-      position: absolute;
-      inset: auto;
-      border-radius: 50%;
-      filter: blur(2px);
-      opacity: 0.65;
-    }
-
-    .mock-wall::before {
-      width: 190px;
-      height: 190px;
-      background: rgba(255,255,255,0.38);
-      top: -30px;
-      right: -20px;
-    }
-
-    .mock-wall::after {
-      width: 220px;
-      height: 220px;
-      background: rgba(185, 140, 128, 0.15);
-      bottom: -40px;
-      left: -35px;
-    }
-
-    .floating-note {
-      position: absolute;
-      right: 1rem;
-      bottom: 1rem;
-      background: rgba(255,255,255,0.95);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 0.9rem 1rem;
-      max-width: 220px;
-      box-shadow: 0 16px 35px rgba(0,0,0,0.08);
-    }
-
-    .floating-note strong {
-      display: block;
-      margin-bottom: 0.2rem;
-    }
-
-    .section {
-      padding: 4.8rem 0;
-    }
-
-    .section-head {
-      max-width: 760px;
-      margin-bottom: 2rem;
-    }
-
-    .section-head h2 {
-      font-family: Georgia, "Times New Roman", serif;
-      font-size: clamp(2rem, 4vw, 3rem);
-      line-height: 1.08;
-      margin: 0.3rem 0 0.8rem;
-    }
-
-    .section-head p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 1.03rem;
-    }
-
-    .stats {
+    .hero-collage {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: 1fr 1fr;
       gap: 1rem;
+    }
+
+    .hero-collage img {
+      width: 100%;
+      height: 260px;
+      object-fit: cover;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .hero-collage img:nth-child(1) {
       margin-top: 2rem;
     }
 
-    .stat {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 1.25rem;
-      box-shadow: var(--shadow);
+    .hero-collage img:nth-child(3) {
+      margin-top: -2.5rem;
     }
 
-    .stat strong {
-      display: block;
-      font-size: 1.7rem;
-      margin-bottom: 0.35rem;
+    .hero-collage img:nth-child(4) {
+      margin-top: 1.25rem;
+    }
+
+    .intro-band {
+      background: var(--bg-soft);
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .intro-band .container {
+      padding: 1.1rem 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem 2rem;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 2rem;
+      align-items: start;
     }
 
     .cards {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 1.2rem;
+      gap: 1.25rem;
+      margin-top: 2rem;
     }
 
     .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
+      background: var(--card);
+      border: 1px solid var(--line);
       border-radius: var(--radius);
-      padding: 1.4rem;
+      overflow: hidden;
       box-shadow: var(--shadow);
     }
 
-    .card h3,
-    .card h4 {
-      margin-top: 0;
-      margin-bottom: 0.6rem;
+    .card img {
+      height: 260px;
+      width: 100%;
+      object-fit: cover;
     }
 
-    .card p,
-    .card li {
-      color: var(--muted);
+    .card-body {
+      padding: 1.4rem;
     }
 
-    .collection-card {
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      padding: 0;
-    }
-
-    .collection-visual {
-      aspect-ratio: 4 / 3;
-      background-size: cover;
-      background-position: center;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .collection-visual.one {
-      background:
-        radial-gradient(circle at 30% 35%, rgba(255,255,255,0.95) 0 12%, transparent 12.5%),
-        radial-gradient(circle at 52% 35%, rgba(245,229,223,0.96) 0 14%, transparent 14.5%),
-        radial-gradient(circle at 70% 45%, rgba(255,255,255,0.96) 0 13%, transparent 13.5%),
-        linear-gradient(135deg, #efe0d8, #fff7f4);
-    }
-
-    .collection-visual.two {
-      background:
-        radial-gradient(circle at 30% 35%, rgba(244,221,214,0.95) 0 11%, transparent 11.5%),
-        radial-gradient(circle at 52% 35%, rgba(235,240,227,0.98) 0 14%, transparent 14.5%),
-        radial-gradient(circle at 70% 45%, rgba(255,255,255,0.95) 0 13%, transparent 13.5%),
-        linear-gradient(135deg, #edf2ea, #fff8f4);
-    }
-
-    .collection-visual.three {
-      background:
-        radial-gradient(circle at 28% 32%, rgba(255,255,255,0.95) 0 10%, transparent 10.5%),
-        radial-gradient(circle at 50% 38%, rgba(233,240,233,0.96) 0 13%, transparent 13.5%),
-        radial-gradient(circle at 72% 42%, rgba(246,234,229,0.95) 0 11%, transparent 11.5%),
-        linear-gradient(135deg, #eef4ef, #f8efea);
-    }
-
-    .collection-content {
-      padding: 1.35rem;
-    }
-
-    .pill-row {
+    .tags {
       display: flex;
       flex-wrap: wrap;
       gap: 0.55rem;
       margin-top: 1rem;
     }
 
-    .pill {
-      font-size: 0.78rem;
-      padding: 0.38rem 0.7rem;
+    .tag {
+      border: 1px solid var(--line);
       border-radius: 999px;
-      background: var(--surface-soft);
-      color: var(--primary-dark);
-      border: 1px solid var(--border);
-      font-weight: 700;
+      padding: 0.45rem 0.8rem;
+      font-size: 0.82rem;
+      color: var(--muted);
+      background: rgba(255,255,255,0.55);
     }
 
-    .split {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1.4rem;
-      align-items: start;
-    }
-
-    .check-list {
-      padding: 0;
-      margin: 0;
-      list-style: none;
-      display: grid;
-      gap: 0.85rem;
-    }
-
-    .check-list li {
-      display: grid;
-      grid-template-columns: 24px 1fr;
-      gap: 0.75rem;
-      align-items: start;
-    }
-
-    .check-list li::before {
-      content: "✓";
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      display: inline-grid;
-      place-items: center;
-      font-size: 0.85rem;
-      font-weight: 800;
-      color: #fff;
-      background: var(--primary);
-      margin-top: 0.1rem;
-    }
-
-    .process {
+    .feature-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 1rem;
+      gap: 1.25rem;
+      margin-top: 2rem;
+    }
+
+    .feature {
+      padding: 1.5rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--card);
+    }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.25rem;
+      margin-top: 2rem;
+    }
+
+    .step {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 1.5rem;
     }
 
     .step-number {
-      width: 40px;
-      height: 40px;
+      width: 42px;
+      height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       border-radius: 50%;
-      background: rgba(185, 140, 128, 0.13);
-      color: var(--primary-dark);
-      display: grid;
-      place-items: center;
-      font-weight: 800;
-      margin-bottom: 0.9rem;
-    }
-
-    .testimonial {
-      position: relative;
-      padding-top: 2rem;
-    }
-
-    .testimonial::before {
-      content: "“";
-      position: absolute;
-      top: -0.55rem;
-      left: 0;
-      font-size: 4.5rem;
-      line-height: 1;
-      color: rgba(185, 140, 128, 0.16);
-      font-family: Georgia, serif;
+      background: var(--bg-soft);
+      border: 1px solid var(--line);
+      margin-bottom: 1rem;
+      font-weight: 700;
+      color: var(--text);
     }
 
     .faq {
       display: grid;
       gap: 1rem;
+      margin-top: 2rem;
     }
 
-    .faq-item {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 1.15rem 1.2rem;
-      box-shadow: var(--shadow);
+    details {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 1rem 1.2rem;
     }
 
-    .faq-item h4 {
-      margin: 0 0 0.35rem;
-      font-size: 1.02rem;
+    summary {
+      cursor: pointer;
+      font-weight: 700;
+      list-style: none;
+    }
+
+    summary::-webkit-details-marker {
+      display: none;
+    }
+
+    details p {
+      margin-top: 0.9rem;
+      color: var(--muted);
     }
 
     .contact-wrap {
       display: grid;
-      grid-template-columns: 0.95fr 1.05fr;
-      gap: 1.4rem;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 2rem;
+      align-items: start;
     }
 
     .contact-card,
     .form-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: calc(var(--radius) + 2px);
-      padding: 1.4rem;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 1.5rem;
       box-shadow: var(--shadow);
     }
 
     .contact-list {
       display: grid;
       gap: 1rem;
-      margin-top: 1rem;
+      margin-top: 1.5rem;
     }
 
-    .contact-list div {
-      padding-bottom: 1rem;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .contact-list div:last-child {
-      border-bottom: 0;
-      padding-bottom: 0;
+    .contact-item small {
+      display: block;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--muted);
+      font-size: 0.72rem;
+      margin-bottom: 0.35rem;
     }
 
     form {
@@ -534,23 +430,24 @@
       gap: 1rem;
     }
 
-    label {
-      display: grid;
-      gap: 0.38rem;
-      font-weight: 700;
-      font-size: 0.95rem;
-    }
-
     input,
     select,
     textarea {
       width: 100%;
-      border: 1px solid var(--border);
+      padding: 0.95rem 1rem;
       border-radius: 14px;
-      padding: 0.9rem 1rem;
+      border: 1px solid var(--line);
+      background: #fffdfa;
       font: inherit;
       color: var(--text);
-      background: #fff;
+      outline: none;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: var(--accent-dark);
+      box-shadow: 0 0 0 4px rgba(205, 189, 173, 0.18);
     }
 
     textarea {
@@ -558,92 +455,75 @@
       resize: vertical;
     }
 
-    input:focus,
-    select:focus,
-    textarea:focus {
-      outline: 2px solid rgba(185, 140, 128, 0.2);
-      border-color: var(--primary);
-    }
-
-    .form-note {
-      margin: 0;
-      font-size: 0.88rem;
-      color: var(--muted);
-    }
-
-    .cta-band {
-      padding: 1.2rem 1.4rem;
-      border-radius: calc(var(--radius) + 6px);
-      background: linear-gradient(135deg, #f2e5df, #fffaf7);
-      border: 1px solid var(--border);
-      box-shadow: var(--shadow);
-      display: flex;
-      justify-content: space-between;
-      gap: 1rem;
-      align-items: center;
-      margin-top: 2rem;
-    }
-
-    .site-footer {
+    .footer {
       padding: 2rem 0 3rem;
+      border-top: 1px solid var(--line);
       color: var(--muted);
     }
 
     .footer-row {
       display: flex;
+      flex-wrap: wrap;
       justify-content: space-between;
       gap: 1rem;
-      flex-wrap: wrap;
-      border-top: 1px solid var(--border);
-      padding-top: 1.4rem;
-    }
-
-    .tiny {
-      font-size: 0.86rem;
-      color: var(--muted);
     }
 
     @media (max-width: 980px) {
-      .hero-wrap,
+      .hero-grid,
       .split,
       .contact-wrap,
       .cards,
-      .process,
-      .stats {
+      .steps,
+      .feature-grid {
         grid-template-columns: 1fr;
       }
 
-      .form-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .hero {
-        padding-top: 3.6rem;
-      }
-
-      .mock-wall {
-        min-height: 360px;
+      .hero-collage img,
+      .card img {
+        height: 240px;
       }
     }
 
     @media (max-width: 760px) {
-      .nav {
-        align-items: flex-start;
-        flex-direction: column;
+      .menu-toggle {
+        display: inline-flex;
       }
 
       .nav-links {
-        justify-content: flex-start;
-      }
-
-      .cta-band,
-      .footer-row {
+        display: none;
+        position: absolute;
+        left: 1rem;
+        right: 1rem;
+        top: 78px;
+        background: rgba(251, 248, 244, 0.98);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 1rem;
         flex-direction: column;
         align-items: flex-start;
+        box-shadow: var(--shadow);
       }
 
-      .hero h1 {
-        font-size: clamp(2.2rem, 11vw, 3.2rem);
+      .nav-links.open {
+        display: flex;
+      }
+
+      .hero {
+        padding-top: 3rem;
+      }
+
+      .hero-collage {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .hero-collage img:nth-child(1),
+      .hero-collage img:nth-child(3),
+      .hero-collage img:nth-child(4) {
+        margin-top: 0;
+      }
+
+      .form-grid {
+        grid-template-columns: 1fr;
       }
 
       .section {
@@ -655,129 +535,121 @@
 <body>
   <header class="site-header">
     <div class="container nav">
-      <a href="#top" class="brand" aria-label="Williamson Flowerwalls home">
-        <span class="brand-title">Williamson Flowerwalls</span>
-        <span class="brand-subtitle">Flower Wall Rentals</span>
-      </a>
-      <nav class="nav-links" aria-label="Primary navigation">
+      <a href="#top" class="brand">Williamson Wallflowers</a>
+
+      <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu" aria-expanded="false">
+        Menu
+      </button>
+
+      <nav class="nav-links" id="navLinks">
         <a href="#collection">Collection</a>
         <a href="#about">About</a>
-        <a href="#process">How It Works</a>
+        <a href="#how-it-works">How It Works</a>
         <a href="#faq">FAQ</a>
-        <a href="#contact" class="btn btn-primary">Check Availability</a>
+        <a href="#contact">Book</a>
       </nav>
     </div>
   </header>
 
   <main id="top">
     <section class="hero">
-      <div class="container hero-wrap">
-        <div>
-          <span class="eyebrow">Williamson County &amp; Middle Tennessee</span>
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <span class="eyebrow">Williamson County & Middle Tennessee</span>
           <h1>Luxury flower walls for the moments everyone remembers.</h1>
-          <p>
-            Williamson Flowerwalls creates elegant floral backdrops for weddings, baby showers,
-            bridal showers, birthdays, corporate events, and celebrations that deserve a beautiful focal point.
+          <p class="muted">
+            Elegant floral backdrops for weddings, showers, birthdays, and celebrations that deserve a beautiful focal point.
+            Williamson Wallflowers creates soft, romantic statement pieces that feel timeless in person and stunning in photos.
           </p>
-          <div class="hero-actions">
-            <a href="#contact" class="btn btn-primary">Request a Quote</a>
-            <a href="#collection" class="btn btn-secondary">View Our Walls</a>
+
+          <div class="btn-row">
+            <a class="btn btn-primary" href="#contact">Request a Quote</a>
+            <a class="btn btn-secondary" href="#collection">View Our Walls</a>
           </div>
-          <div class="hero-points">
+
+          <div class="hero-note">
             <span>Delivery + setup available</span>
-            <span>Premium floral styling</span>
-            <span>Perfect for photos &amp; statement moments</span>
+            <span>Luxury-inspired styling</span>
+            <span>Perfect for photos & statement moments</span>
           </div>
         </div>
 
-        <div class="hero-card" aria-hidden="true">
-          <div class="mock-wall">
-            <div class="floating-note">
-              <strong>Most popular uses</strong>
-              Weddings, showers, birthdays, engagement parties, and branded events.
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="container">
-        <div class="stats">
-          <div class="stat">
-            <strong>Weddings</strong>
-            <span>Sweetheart table backdrops, ceremony styling, and photo moments.</span>
-          </div>
-          <div class="stat">
-            <strong>Showers</strong>
-            <span>Baby showers and bridal showers with a soft, elevated look.</span>
-          </div>
-          <div class="stat">
-            <strong>Birthdays</strong>
-            <span>Luxury statement walls for milestone celebrations and parties.</span>
-          </div>
-          <div class="stat">
-            <strong>Events</strong>
-            <span>Brand launches, pop-ups, church events, and community gatherings.</span>
-          </div>
+        <div class="hero-collage" aria-hidden="true">
+          <img src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=900&q=80" alt="" />
+          <img src="https://images.unsplash.com/photo-1520854221256-17451cc331bf?auto=format&fit=crop&w=900&q=80" alt="" />
+          <img src="https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=900&q=80" alt="" />
+          <img src="https://images.unsplash.com/photo-1469371670807-013ccf25f16a?auto=format&fit=crop&w=900&q=80" alt="" />
         </div>
       </div>
     </section>
 
-    <section id="collection" class="section">
+    <section class="intro-band">
       <div class="container">
-        <div class="section-head">
-          <span class="eyebrow">Our Collection</span>
-          <h2>Designed to look stunning in photos and even better in person.</h2>
-          <p>
-            Choose a wall that fits the tone of your event, from romantic and timeless to fresh,
-            modern, and understated. These can be renamed or adjusted as your inventory grows.
+        <span>Weddings</span>
+        <span>Baby Showers</span>
+        <span>Bridal Showers</span>
+        <span>Birthdays</span>
+        <span>Corporate Events</span>
+      </div>
+    </section>
+
+    <section class="section" id="collection">
+      <div class="container">
+        <span class="eyebrow">Our Collection</span>
+        <div class="split">
+          <h2>Designed to feel elevated, airy, and timeless.</h2>
+          <p class="muted">
+            Each floral wall is styled to create a polished focal point for your event — whether you want something romantic,
+            classic, soft and feminine, or clean and modern. Perfect behind sweetheart tables, welcome moments, dessert displays,
+            and photo areas.
           </p>
         </div>
 
         <div class="cards">
-          <article class="card collection-card">
-            <div class="collection-visual one"></div>
-            <div class="collection-content">
+          <article class="card">
+            <img src="https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&w=1200&q=80" alt="Elegant white floral backdrop for a wedding reception" />
+            <div class="card-body">
               <h3>The Signature Bloom</h3>
-              <p>
-                A classic white-and-ivory floral wall that feels elegant, clean, and luxurious.
-                Perfect for weddings, receptions, and sophisticated celebrations.
+              <p class="muted">
+                A classic white-and-ivory floral wall with a clean, romantic look. Perfect for weddings, receptions,
+                and elevated celebrations.
               </p>
-              <div class="pill-row">
-                <span class="pill">Weddings</span>
-                <span class="pill">Photo Booths</span>
-                <span class="pill">Timeless</span>
+              <div class="tags">
+                <span class="tag">Weddings</span>
+                <span class="tag">Photo Moments</span>
+                <span class="tag">Timeless</span>
               </div>
             </div>
           </article>
 
-          <article class="card collection-card">
-            <div class="collection-visual two"></div>
-            <div class="collection-content">
+          <article class="card">
+            <img src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=1200&q=80" alt="Soft floral backdrop for bridal shower or baby shower" />
+            <div class="card-body">
               <h3>The Garden Party</h3>
-              <p>
-                Soft florals with fresh greenery for a romantic look that works beautifully for baby showers,
-                bridal showers, brunches, and spring events.
+              <p class="muted">
+                Soft florals with fresh greenery for a light, romantic setting that works beautifully for showers,
+                brunches, and spring celebrations.
               </p>
-              <div class="pill-row">
-                <span class="pill">Baby Showers</span>
-                <span class="pill">Bridal Showers</span>
-                <span class="pill">Fresh &amp; Soft</span>
+              <div class="tags">
+                <span class="tag">Baby Showers</span>
+                <span class="tag">Bridal Showers</span>
+                <span class="tag">Soft & Fresh</span>
               </div>
             </div>
           </article>
 
-          <article class="card collection-card">
-            <div class="collection-visual three"></div>
-            <div class="collection-content">
+          <article class="card">
+            <img src="https://images.unsplash.com/photo-1517457373958-b7bdd4587205?auto=format&fit=crop&w=1200&q=80" alt="Neutral floral event backdrop with clean styling" />
+            <div class="card-body">
               <h3>The Modern Neutral</h3>
-              <p>
-                A clean floral-and-greenery blend with understated luxury for clients who want something airy,
-                polished, and versatile across many event styles.
+              <p class="muted">
+                A refined floral-and-greenery blend with understated luxury for clients who want something versatile,
+                airy, and beautifully minimal.
               </p>
-              <div class="pill-row">
-                <span class="pill">Birthdays</span>
-                <span class="pill">Corporate Events</span>
-                <span class="pill">Minimal</span>
+              <div class="tags">
+                <span class="tag">Birthdays</span>
+                <span class="tag">Corporate Events</span>
+                <span class="tag">Minimal</span>
               </div>
             </div>
           </article>
@@ -785,245 +657,229 @@
       </div>
     </section>
 
-    <section id="about" class="section">
+    <section class="section" id="about">
       <div class="container split">
         <div>
-          <div class="section-head">
-            <span class="eyebrow">About Williamson Flowerwalls</span>
-            <h2>A local floral backdrop brand created for beautiful celebrations.</h2>
-            <p>
-              Williamson Flowerwalls is built around one simple idea: every meaningful event deserves a backdrop
-              that makes the room feel special. We serve clients across Williamson County and surrounding Middle Tennessee areas
-              with flower walls that elevate photos, guest experiences, and the overall feel of the day.
-            </p>
-          </div>
-          <ul class="check-list">
-            <li><span>Luxury-inspired styling without making the process feel complicated.</span></li>
-            <li><span>Perfect for weddings, baby showers, engagement parties, birthdays, and branded events.</span></li>
-            <li><span>Designed to create a natural gathering point for photos, entrances, dessert tables, and more.</span></li>
-          </ul>
+          <span class="eyebrow">About</span>
+          <h2>A floral backdrop brand created for beautiful celebrations.</h2>
         </div>
+        <div>
+          <p class="muted">
+            Williamson Wallflowers serves Williamson County and surrounding Middle Tennessee communities with flower walls
+            designed to make events feel polished, inviting, and memorable.
+          </p>
+          <p class="muted">
+            Whether you are planning a wedding, shower, birthday, engagement party, or branded event, a floral backdrop creates
+            a natural gathering point and instantly elevates the room.
+          </p>
+        </div>
+      </div>
 
-        <div class="card testimonial">
-          <h3>Why flower walls work so well</h3>
-          <p>
-            They instantly create a “wow” moment. A floral backdrop becomes the anchor of the room,
-            gives guests a place to gather, and helps photos look polished without needing a lot of extra decor.
-          </p>
-          <p class="tiny">
-            Add your real client review here once you begin booking events. A strong testimonial section will help conversion.
-          </p>
+      <div class="container feature-grid">
+        <div class="feature">
+          <h3>Effortless elegance</h3>
+          <p class="muted">Luxury-inspired styling without making the booking process feel complicated.</p>
+        </div>
+        <div class="feature">
+          <h3>Made for photos</h3>
+          <p class="muted">A beautiful focal point for portraits, guest photos, entrances, dessert tables, and more.</p>
+        </div>
+        <div class="feature">
+          <h3>Styled for your event</h3>
+          <p class="muted">Thoughtful floral looks that fit everything from timeless weddings to modern celebrations.</p>
         </div>
       </div>
     </section>
 
-    <section id="process" class="section">
+    <section class="section" id="how-it-works">
       <div class="container">
-        <div class="section-head">
-          <span class="eyebrow">How It Works</span>
-          <h2>Simple, polished, and easy for your clients to book.</h2>
-          <p>
-            This section helps your website feel more trustworthy by showing people exactly what to expect.
+        <span class="eyebrow">How It Works</span>
+        <div class="split">
+          <h2>Simple, polished, and easy to book.</h2>
+          <p class="muted">
+            From your first inquiry to event-day setup, the process is designed to feel seamless so you can focus on celebrating.
           </p>
         </div>
 
-        <div class="process">
-          <article class="card">
+        <div class="steps">
+          <div class="step">
             <div class="step-number">1</div>
             <h3>Send an inquiry</h3>
-            <p>
-              Clients share the event date, venue, and type of celebration so you can confirm availability.
+            <p class="muted">
+              Share your event date, venue, and celebration details so availability can be confirmed.
             </p>
-          </article>
-          <article class="card">
+          </div>
+          <div class="step">
             <div class="step-number">2</div>
-            <h3>Choose the right wall</h3>
-            <p>
-              You recommend the best backdrop based on the event style, color palette, and placement.
+            <h3>Choose your wall</h3>
+            <p class="muted">
+              Select the backdrop that best fits your event style, color palette, and focal space.
             </p>
-          </article>
-          <article class="card">
+          </div>
+          <div class="step">
             <div class="step-number">3</div>
-            <h3>Delivery and setup</h3>
-            <p>
-              On event day, the wall is delivered, installed, and styled so the client can simply enjoy the moment.
+            <h3>Delivery + setup</h3>
+            <p class="muted">
+              On event day, your wall is delivered, installed, and styled so everything is ready when guests arrive.
             </p>
-          </article>
+          </div>
         </div>
       </div>
     </section>
 
-    <section class="section">
-      <div class="container split">
-        <div class="card">
-          <h3>Popular add-ons</h3>
-          <ul class="check-list">
-            <li><span>Custom neon sign or name sign</span></li>
-            <li><span>Balloon garland accent styling</span></li>
-            <li><span>Pedestals, plinths, or dessert display pairing</span></li>
-            <li><span>Custom color palette recommendations</span></li>
-          </ul>
-        </div>
-
-        <div class="card">
-          <h3>Service area</h3>
-          <p>
-            Proudly serving <strong>Williamson County</strong> and nearby Middle Tennessee communities,
-            including Franklin, Brentwood, Nolensville, Spring Hill, Thompson’s Station, and surrounding areas.
-          </p>
-          <p>
-            You can adjust your delivery radius and fee structure later based on where your bookings come from most often.
-          </p>
-        </div>
-      </div>
-    </section>
-
-    <section id="faq" class="section">
+    <section class="section" id="faq">
       <div class="container">
-        <div class="section-head">
-          <span class="eyebrow">Frequently Asked Questions</span>
-          <h2>Helpful answers before someone reaches out.</h2>
-          <p>
-            A good FAQ reduces repetitive messages and helps clients feel more ready to book.
+        <span class="eyebrow">FAQ</span>
+        <div class="split">
+          <h2>Helpful answers before you reach out.</h2>
+          <p class="muted">
+            A few common questions about timing, setup, and customization.
           </p>
         </div>
 
         <div class="faq">
-          <div class="faq-item">
-            <h4>How far in advance should I book?</h4>
-            <p>For weddings and peak spring or fall dates, booking early is best. Smaller events may have more flexibility depending on availability.</p>
-          </div>
-          <div class="faq-item">
-            <h4>Do you deliver and set up the flower wall?</h4>
-            <p>Yes. Delivery and setup can be included based on your package and location.</p>
-          </div>
-          <div class="faq-item">
-            <h4>Can the flower wall be used outdoors?</h4>
-            <p>Outdoor use may be possible depending on weather, ground conditions, and event setup. Covered spaces are usually the safest option.</p>
-          </div>
-          <div class="faq-item">
-            <h4>Do you offer custom styling?</h4>
-            <p>Yes. Add-ons like signage, balloons, and coordinating decor accents can help personalize the installation.</p>
-          </div>
+          <details open>
+            <summary>How far in advance should I book?</summary>
+            <p>
+              For weddings and peak spring or fall dates, booking early is always recommended. Smaller events may have more flexibility depending on availability.
+            </p>
+          </details>
+
+          <details>
+            <summary>Do you deliver and set up the flower wall?</summary>
+            <p>
+              Yes — delivery and setup are available based on your event package and location.
+            </p>
+          </details>
+
+          <details>
+            <summary>Can the flower wall be used outdoors?</summary>
+            <p>
+              Outdoor use may be possible depending on weather, surface conditions, and overall event setup. Covered spaces are typically the best option.
+            </p>
+          </details>
+
+          <details>
+            <summary>Do you offer custom styling?</summary>
+            <p>
+              Yes — add-ons such as signage, balloon styling, and coordinating decor accents can help personalize the final look.
+            </p>
+          </details>
         </div>
       </div>
     </section>
 
-    <section id="contact" class="section">
-      <div class="container">
-        <div class="section-head">
-          <span class="eyebrow">Contact</span>
+    <section class="section" id="contact">
+      <div class="container contact-wrap">
+        <div class="contact-card">
+          <span class="eyebrow">Book Your Date</span>
           <h2>Let’s make your event bloom.</h2>
-          <p>
-            Use the inquiry section below as your lead form. Once you choose a hosting platform,
-            this can be connected to Netlify Forms, Formspree, or your email.
+          <p class="muted">
+            Ready to book or want to check availability? Reach out with your event details and Jami will help you find the right setup.
           </p>
-        </div>
 
-        <div class="contact-wrap">
-          <div class="contact-card">
-            <h3>Get in touch</h3>
-            <p>
-              Ready to book or want to check a date? Reach out with your event details and Jami Ferguson will help you find the right setup.
-            </p>
-
-            <div class="contact-list">
-              <div>
-                <strong>Booking Contact</strong><br />
-                <span>Jami Ferguson</span>
-              </div>
-              <div>
-                <strong>Email</strong><br />
-                <a href="mailto:jamicarswell@gmail.com">jamicarswell@gmail.com</a>
-              </div>
-              <div>
-                <strong>Instagram</strong><br />
-                <span>@williamsonflowerwalls</span>
-              </div>
-              <div>
-                <strong>Service Area</strong><br />
-                <span>Williamson County &amp; Middle Tennessee</span>
-              </div>
+          <div class="contact-list">
+            <div class="contact-item">
+              <small>Booking Contact</small>
+              <strong>Jami Ferguson</strong>
+            </div>
+            <div class="contact-item">
+              <small>Email</small>
+              <a href="mailto:jamicarswell@gmail.com">jamicarswell@gmail.com</a>
+            </div>
+            <div class="contact-item">
+              <small>Instagram</small>
+              <span>@williamsonflowerwalls</span>
+            </div>
+            <div class="contact-item">
+              <small>Service Area</small>
+              <span>Williamson County & Middle Tennessee</span>
             </div>
           </div>
-
-          <div class="form-card">
-            <form name="inquiry" method="post" data-netlify="true">
-              <input type="hidden" name="form-name" value="inquiry" />
-
-              <div class="form-grid">
-                <label>
-                  Name
-                  <input type="text" name="name" placeholder="Your name" />
-                </label>
-                <label>
-                  Email
-                  <input type="email" name="email" placeholder="you@example.com" />
-                </label>
-              </div>
-
-              <div class="form-grid">
-                <label>
-                  Event Date
-                  <input type="date" name="event-date" />
-                </label>
-                <label>
-                  Event Type
-                  <select name="event-type">
-                    <option value="">Select an option</option>
-                    <option>Wedding</option>
-                    <option>Baby Shower</option>
-                    <option>Bridal Shower</option>
-                    <option>Birthday</option>
-                    <option>Corporate Event</option>
-                    <option>Other</option>
-                  </select>
-                </label>
-              </div>
-
-              <div class="form-grid">
-                <label>
-                  Venue / Location
-                  <input type="text" name="venue" placeholder="Venue or city" />
-                </label>
-                <label>
-                  Preferred Wall
-                  <input type="text" name="wall" placeholder="Optional" />
-                </label>
-              </div>
-
-              <label>
-                Tell us about your event
-                <textarea name="message" placeholder="Share your vision, colors, guest count, or where you want the wall placed."></textarea>
-              </label>
-
-              <button class="btn btn-primary" type="submit">Send Inquiry</button>
-              <p class="form-note">
-                This form is ready for Netlify deployment. Update the email, Instagram handle, and domain when you finalize branding.
-              </p>
-            </form>
-          </div>
         </div>
 
-        <div class="cta-band">
-          <div>
-            <strong>Want this to feel even more real?</strong>
-            <div class="tiny">The next best upgrade is replacing the placeholder visuals with 4–8 real event photos.</div>
-          </div>
-          <a href="#top" class="btn btn-secondary">Back to Top</a>
+        <div class="form-card">
+          <form name="inquiry" method="POST" data-netlify="true">
+            <input type="hidden" name="form-name" value="inquiry" />
+
+            <div class="form-grid">
+              <div>
+                <label for="name" class="muted">Name</label>
+                <input id="name" name="name" type="text" required />
+              </div>
+              <div>
+                <label for="email" class="muted">Email</label>
+                <input id="email" name="email" type="email" required />
+              </div>
+            </div>
+
+            <div class="form-grid">
+              <div>
+                <label for="date" class="muted">Event Date</label>
+                <input id="date" name="event-date" type="date" />
+              </div>
+              <div>
+                <label for="type" class="muted">Event Type</label>
+                <select id="type" name="event-type">
+                  <option value="">Select an option</option>
+                  <option>Wedding</option>
+                  <option>Baby Shower</option>
+                  <option>Bridal Shower</option>
+                  <option>Birthday</option>
+                  <option>Corporate Event</option>
+                  <option>Other</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-grid">
+              <div>
+                <label for="venue" class="muted">Venue / Location</label>
+                <input id="venue" name="venue" type="text" />
+              </div>
+              <div>
+                <label for="wall" class="muted">Preferred Wall</label>
+                <input id="wall" name="preferred-wall" type="text" />
+              </div>
+            </div>
+
+            <div>
+              <label for="details" class="muted">Tell us about your event</label>
+              <textarea id="details" name="details" placeholder="Event style, guest count, colors, or anything you'd like us to know"></textarea>
+            </div>
+
+            <button class="btn btn-primary" type="submit">Send Inquiry</button>
+          </form>
         </div>
       </div>
     </section>
   </main>
 
-  <footer class="site-footer">
+  <footer class="footer">
     <div class="container footer-row">
       <div>
-        <strong>Williamson Flowerwalls</strong><br />
-        <span class="tiny">Luxury flower wall rentals for Williamson County &amp; Middle Tennessee.</span>
+        <strong>Williamson Wallflowers</strong><br />
+        Luxury flower wall rentals for Williamson County & Middle Tennessee.
       </div>
-      <div class="tiny">&copy; 2026 Williamson Flowerwalls. All rights reserved.</div>
+      <div>© 2026 Williamson Wallflowers. All rights reserved.</div>
     </div>
   </footer>
+
+  <script>
+    const menuToggle = document.getElementById("menuToggle");
+    const navLinks = document.getElementById("navLinks");
+
+    menuToggle.addEventListener("click", () => {
+      const isOpen = navLinks.classList.toggle("open");
+      menuToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    });
+
+    navLinks.querySelectorAll("a").forEach(link => {
+      link.addEventListener("click", () => {
+        navLinks.classList.remove("open");
+        menuToggle.setAttribute("aria-expanded", "false");
+      });
+    });
+  </script>
 </body>
 </html>
