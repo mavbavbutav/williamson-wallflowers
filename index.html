@@ -279,49 +279,6 @@
       opacity: 0.58;
     }
 
-    .hero {
-      padding: 3.2rem 0 2.4rem;
-      scroll-margin-top: 96px;
-    }
-
-    .hero-top {
-      max-width: 760px;
-      margin-bottom: 1rem;
-    }
-
-    .hero-copy {
-      max-width: 680px;
-      padding: 0.4rem 0;
-    }
-
-    .hero-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.55rem 0.88rem;
-      margin-bottom: 1rem;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.68);
-      border: 1px solid rgba(221,212,202,0.9);
-      color: var(--text);
-      font-size: 0.82rem;
-      font-weight: 600;
-    }
-
-    .hero-badge-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--accent);
-    }
-
-    .hero-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1rem 1.4rem;
-      margin-top: 1.8rem;
-    }
-
     .section-intro {
       display: grid;
       grid-template-columns: 0.92fr 1.08fr;
@@ -791,8 +748,6 @@
       .contact-shell {
         grid-template-columns: 1fr;
       }
-
-      .hero-copy { max-width: none; }
       .card img { height: 250px; }
     }
 
@@ -815,8 +770,6 @@
       }
 
       .nav-links.open { display: flex; }
-
-      .hero { padding-top: 2.8rem; }
       .section { padding: 4.4rem 0; }
       .form-grid { grid-template-columns: 1fr; }
       .calendar-day { min-height: 48px; font-size: 0.92rem; }
@@ -842,26 +795,6 @@
   </header>
 
   <main id="main-content">
-    <section class="hero" id="top">
-      <div class="container">
-        <div class="hero-top">
-          <div class="hero-copy reveal">
-            <span class="hero-badge"><span class="hero-badge-dot"></span>Serving Williamson County celebrations</span>
-            <span class="eyebrow">Luxury floral backdrop rentals</span>
-            <h1>Timeless florals for the moments everyone remembers.</h1>
-            <p class="muted">
-              Williamson Wallflowers creates romantic, airy statement backdrops for weddings, showers, birthdays, and celebrations that deserve a beautiful focal point.
-            </p>
-
-            <div class="hero-actions">
-              <a class="link-underline" href="#booking">Check availability</a>
-              <a class="link-underline" href="#collection">Browse the collection</a>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <section class="section" id="collection">
       <div class="container">
         <div class="section-intro reveal">
@@ -927,8 +860,8 @@
           </article>
 
           <article class="card reveal">
-            <div class="card-media card-media-preview">
-              <span>Image coming soon</span>
+            <div class="card-media">
+              <img src="assets/secret-garden.jpg" alt="The Secret Garden flower wall with pink, purple, white, and greenery florals." loading="lazy" />
             </div>
             <div class="card-body">
               <span class="card-meta">Garden Romance</span>
@@ -961,7 +894,7 @@
             <span class="eyebrow">What’s included</span>
             <h3>Handled setup.</h3>
             <ul class="detail-list">
-              <li>Booking coordination with Jami</li>
+              <li>Booking coordination</li>
               <li>Delivery and on-site setup when included in your package</li>
               <li>Pickup after the event window</li>
               <li>Placement and styling guidance for your space</li>
