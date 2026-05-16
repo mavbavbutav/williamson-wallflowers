@@ -140,9 +140,23 @@ async function sendApplicantConfirmation(submission, env) {
 
 function sendEmail({ env, to, subject, text }) {
   const resendApiKey = env.resend || env.RESEND_API_KEY || env.RESEND;
+  const cc = env.CC_EMAIL
+    ? env.CC_EMAIL.split(',').map((email) => email.trim()).filter(Boolean)
+    : [];
 
   if (!resendApiKey || !env.FROM_EMAIL) {
     throw new Error('Missing resend, RESEND_API_KEY, RESEND, or FROM_EMAIL.');
+  }
+
+  const payload = {
+    from: env.FROM_EMAIL,
+    to: [to],
+    subject,
+    text
+  };
+
+  if (cc.length && to === env.TO_EMAIL) {
+    payload.cc = cc;
   }
 
   return fetch('https://api.resend.com/emails', {
@@ -151,12 +165,7 @@ function sendEmail({ env, to, subject, text }) {
       Authorization: `Bearer ${resendApiKey}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({
-      from: env.FROM_EMAIL,
-      to: [to],
-      subject,
-      text
-    })
+    body: JSON.stringify(payload)
   });
 }
 
