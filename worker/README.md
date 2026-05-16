@@ -4,7 +4,7 @@ This Cloudflare Worker receives the Williamson Wallflowers inquiry form, sends t
 
 ## Setup
 
-1. Verify `williamsonwallflowers.com` in Resend.
+1. Verify `jjentertainmentsolutions.com` in Resend.
 2. Create a Resend API key with sending permission.
 3. Install and deploy:
 
@@ -22,3 +22,9 @@ This Cloudflare Worker receives the Williamson Wallflowers inquiry form, sends t
    ```
 
 The site form currently points at that `workers.dev` endpoint. The static site can remain on GitHub Pages.
+
+The Worker sends with the display name `Williamson Wallflowers` from the verified JJE sender domain:
+
+```text
+Williamson Wallflowers <noreply@jjentertainmentsolutions.com>
+```
