@@ -121,12 +121,13 @@ function validateSubmission(submission) {
 }
 
 async function sendInternalNotification(submission, env) {
-  return sendEmail({
-    env,
-    to: env.TO_EMAIL,
-    subject: `Williamson Wallflowers Inquiry${submission['event-type'] ? ` - ${submission['event-type']}` : ''}`,
-    text: buildInternalEmail(submission)
-  });
+  const recipients = getInternalRecipients(env);
+  const subject = `Williamson Wallflowers Inquiry${submission['event-type'] ? ` - ${submission['event-type']}` : ''}`;
+  const text = buildInternalEmail(submission);
+  const results = await Promise.all(recipients.map((to) => sendEmail({ env, to, subject, text })));
+  const failedResult = results.find((result) => !result.ok);
+
+  return failedResult || new Response(null, { status: 200 });
 }
 
 async function sendApplicantConfirmation(submission, env) {
@@ -140,23 +141,9 @@ async function sendApplicantConfirmation(submission, env) {
 
 function sendEmail({ env, to, subject, text }) {
   const resendApiKey = env.resend || env.RESEND_API_KEY || env.RESEND;
-  const cc = env.CC_EMAIL
-    ? env.CC_EMAIL.split(',').map((email) => email.trim()).filter(Boolean)
-    : [];
 
   if (!resendApiKey || !env.FROM_EMAIL) {
     throw new Error('Missing resend, RESEND_API_KEY, RESEND, or FROM_EMAIL.');
-  }
-
-  const payload = {
-    from: env.FROM_EMAIL,
-    to: [to],
-    subject,
-    text
-  };
-
-  if (cc.length && to === env.TO_EMAIL) {
-    payload.cc = cc;
   }
 
   return fetch('https://api.resend.com/emails', {
@@ -165,8 +152,23 @@ function sendEmail({ env, to, subject, text }) {
       Authorization: `Bearer ${resendApiKey}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      from: env.FROM_EMAIL,
+      to: [to],
+      subject,
+      text
+    })
   });
+}
+
+function getInternalRecipients(env) {
+  const recipients = [env.TO_EMAIL, env.SUPPORT_EMAIL]
+    .filter(Boolean)
+    .flatMap((value) => value.split(','))
+    .map((email) => email.trim())
+    .filter(Boolean);
+
+  return [...new Set(recipients)];
 }
 
 function buildInternalEmail(submission) {
