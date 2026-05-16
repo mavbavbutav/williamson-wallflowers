@@ -1,0 +1,9 @@
+name = "williamson-wallflowers-inquiry"
+main = "src/index.js"
+compatibility_date = "2026-05-16"
+workers_dev = true
+
+[vars]
+TO_EMAIL = "jamicarswell@gmail.com"
+FROM_EMAIL = "Williamson Wallflowers <noreply@williamsonwallflowers.com>"
+ALLOWED_ORIGINS = "https://williamsonwallflowers.com,https://www.williamsonwallflowers.com,http://localhost:5173,http://localhost:8000"

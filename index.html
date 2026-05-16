@@ -700,6 +700,85 @@
       margin-top: 1rem;
     }
 
+    .form-status {
+      min-height: 1.35rem;
+      margin: 0;
+      color: var(--accent);
+      font-size: 0.92rem;
+      font-weight: 700;
+    }
+
+    .form-honey {
+      display: none;
+    }
+
+    body.modal-open {
+      overflow: hidden;
+    }
+
+    .confirmation-modal[hidden] {
+      display: none;
+    }
+
+    .confirmation-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: grid;
+      place-items: center;
+      padding: 1rem;
+    }
+
+    .confirmation-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(47, 43, 40, 0.42);
+      backdrop-filter: blur(7px);
+    }
+
+    .confirmation-dialog {
+      position: relative;
+      z-index: 1;
+      width: min(100%, 520px);
+      padding: clamp(1.6rem, 4vw, 2.3rem);
+      border: 1px solid rgba(221,212,202,0.95);
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, #fff 0%, var(--surface) 100%);
+      box-shadow: 0 28px 70px rgba(47, 43, 40, 0.24);
+    }
+
+    .confirmation-close {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      width: 2.3rem;
+      height: 2.3rem;
+      border: 1px solid rgba(183,163,144,0.28);
+      border-radius: 50%;
+      background: rgba(255,255,255,0.82);
+      color: var(--text);
+      font-size: 1.35rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .confirmation-dialog h2 {
+      margin-right: 1.7rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .confirmation-dialog p:not(.eyebrow) {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .confirmation-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.85rem;
+      margin-top: 1.5rem;
+    }
+
     .footer {
       padding: 2.15rem 0 3rem;
       border-top: 1px solid rgba(221,212,202,0.72);
@@ -1040,10 +1119,11 @@
             <div class="form-head">
               <span class="eyebrow">Start your inquiry</span>
               <h3>Tell us about your event.</h3>
-              <p class="muted">Share a few quick details and your email app will open with everything pre-filled for Jami.</p>
+              <p class="muted">Share a few quick details and Jami will receive your inquiry directly.</p>
             </div>
 
-            <form id="inquiryForm" name="inquiry">
+            <form id="inquiryForm" name="inquiry" action="https://williamson-wallflowers-inquiry.johnmartinferguson.workers.dev" method="POST" data-email-fallback="jamicarswell@gmail.com">
+              <input type="text" name="_honey" tabindex="-1" autocomplete="off" class="form-honey" aria-hidden="true" />
               <div class="form-grid">
                 <div>
                   <label for="name" class="muted">Name</label>
@@ -1097,11 +1177,26 @@
               </div>
 
               <button class="text-button" type="submit">Start your inquiry</button>
+              <p class="form-status" id="inquiryStatus" role="status" aria-live="polite"></p>
             </form>
           </div>
         </div>
       </div>
     </section>
+
+    <div class="confirmation-modal" id="inquiryConfirmation" role="dialog" aria-modal="true" aria-labelledby="confirmationTitle" aria-describedby="confirmationMessage" hidden>
+      <div class="confirmation-backdrop" data-confirmation-close></div>
+      <div class="confirmation-dialog">
+        <button class="confirmation-close" type="button" aria-label="Close confirmation" data-confirmation-close>&times;</button>
+        <span class="eyebrow">Inquiry Received</span>
+        <h2 id="confirmationTitle">Your event inquiry is in bloom.</h2>
+        <p id="confirmationMessage">Thanks for reaching out. Jami received your details, and you&rsquo;ll receive a confirmation email at the address you provided.</p>
+        <div class="confirmation-actions">
+          <a class="text-button" href="#gallery" data-confirmation-close>View the walls</a>
+          <button class="inline-link" type="button" data-confirmation-close>Close</button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <footer class="footer">
@@ -1130,6 +1225,10 @@
     const availabilityNote = document.getElementById("availabilityNote");
     const formDate = document.getElementById("date");
     const formWall = document.getElementById("wall");
+    const inquiryStatus = document.getElementById("inquiryStatus");
+    const inquiryConfirmation = document.getElementById("inquiryConfirmation");
+    const confirmationCloseControls = document.querySelectorAll("[data-confirmation-close]");
+    let lastFocusedElement = null;
 
     const bookedDates = [
       {
@@ -1339,10 +1438,7 @@
       document.querySelectorAll(".reveal").forEach((element) => element.classList.add("in-view"));
     }
 
-    inquiryForm.addEventListener("submit", (event) => {
-      event.preventDefault();
-
-      const formData = new FormData(inquiryForm);
+    function buildInquiryEmail(formData, fallbackEmail) {
       const name = formData.get("name") || "";
       const email = formData.get("email") || "";
       const eventDate = formData.get("event-date") || "";
@@ -1389,7 +1485,81 @@
         details
       ].join("\n");
 
-      window.location.href = `mailto:jamicarswell@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      return `mailto:${fallbackEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    }
+
+    function openConfirmationModal() {
+      if (!inquiryConfirmation) {
+        return;
+      }
+
+      lastFocusedElement = document.activeElement;
+      inquiryConfirmation.hidden = false;
+      document.body.classList.add("modal-open");
+      const closeButton = inquiryConfirmation.querySelector(".confirmation-close");
+
+      if (closeButton) {
+        closeButton.focus();
+      }
+    }
+
+    function closeConfirmationModal() {
+      if (!inquiryConfirmation || inquiryConfirmation.hidden) {
+        return;
+      }
+
+      inquiryConfirmation.hidden = true;
+      document.body.classList.remove("modal-open");
+
+      if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
+        lastFocusedElement.focus();
+      }
+    }
+
+    confirmationCloseControls.forEach((control) => {
+      control.addEventListener("click", closeConfirmationModal);
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closeMenu();
+        closeConfirmationModal();
+      }
+    });
+
+    inquiryForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const formData = new FormData(inquiryForm);
+      const fallbackEmail = inquiryForm.dataset.emailFallback || "jamicarswell@gmail.com";
+
+      if (formData.get("_honey")) {
+        return;
+      }
+
+      inquiryStatus.textContent = "Sending inquiry...";
+
+      try {
+        const response = await fetch(inquiryForm.action, {
+          method: "POST",
+          headers: { Accept: "application/json" },
+          body: formData
+        });
+
+        const result = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          inquiryStatus.textContent = result.message || "Inquiry could not be sent right now. Please email Jami directly.";
+          return;
+        }
+
+        inquiryForm.reset();
+        inquiryStatus.textContent = result.message || "Inquiry sent.";
+        openConfirmationModal();
+      } catch (error) {
+        inquiryStatus.textContent = "We could not reach the inquiry service. Opening an email draft so your inquiry can still be sent.";
+        window.location.href = buildInquiryEmail(formData, fallbackEmail);
+      }
     });
   </script>
 </body>
