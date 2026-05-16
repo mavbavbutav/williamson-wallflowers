@@ -16,11 +16,15 @@
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://www.williamsonwallflowers.com/" />
   <meta property="og:site_name" content="Williamson Wallflowers" />
-  <meta property="og:image" content="/favicon.svg" />
+  <meta property="og:image" content="https://www.williamsonwallflowers.com/assets/social-share.jpg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Williamson Wallflowers flower wall rentals featuring Timeless Bloom and Love Language." />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Williamson Wallflowers | Nashville Flower Wall Rentals" />
   <meta name="twitter:description" content="Luxury flower wall rentals for beautiful celebrations in Nashville, Williamson County, and Middle Tennessee." />
-  <meta name="twitter:image" content="/favicon.svg" />
+  <meta name="twitter:image" content="https://www.williamsonwallflowers.com/assets/social-share.jpg" />
+  <meta name="twitter:image:alt" content="Williamson Wallflowers flower wall rentals featuring Timeless Bloom and Love Language." />
 
   <script type="application/ld+json">
     {
@@ -28,7 +32,7 @@
       "@type": "LocalBusiness",
       "name": "Williamson Wallflowers",
       "url": "https://www.williamsonwallflowers.com/",
-      "image": "/favicon.svg",
+      "image": "https://www.williamsonwallflowers.com/assets/social-share.jpg",
       "description": "Luxury flower wall rentals for weddings, showers, birthdays, and special events in Nashville, Williamson County, and across Middle Tennessee.",
       "email": "jamicarswell@gmail.com",
       "areaServed": [
@@ -457,7 +461,7 @@
       gap: 1.2rem;
     }
 
-    .cards { grid-template-columns: repeat(3, 1fr); }
+    .cards { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
     .feature-grid { grid-template-columns: repeat(3, 1fr); margin-top: 2rem; }
     .steps { grid-template-columns: repeat(3, 1fr); margin-top: 2rem; }
     .info-grid { grid-template-columns: repeat(2, 1fr); margin-top: 2rem; }
@@ -494,22 +498,6 @@
     .card-media {
       position: relative;
       overflow: hidden;
-    }
-
-    .card-media-placeholder {
-      min-height: 188px;
-      display: grid;
-      place-items: center;
-      padding: 1.2rem;
-      background: linear-gradient(180deg, rgba(255,255,255,0.9) 0%, rgba(246,241,235,0.94) 100%);
-      border-bottom: 1px solid var(--line);
-      text-align: center;
-    }
-
-    .card-media-placeholder span {
-      font-size: 0.92rem;
-      letter-spacing: 0.02em;
-      color: var(--muted);
     }
 
     .card img {
@@ -916,8 +904,8 @@
 
         <div class="cards">
           <article class="card reveal">
-            <div class="card-media card-media-placeholder">
-              <span>Style previews are shared during consultation.</span>
+            <div class="card-media">
+              <img src="assets/timeless-bloom-alt.jpg" alt="The Timeless Bloom ivory and champagne flower wall styled with balloons and a Let's Party sign." loading="lazy" />
             </div>
             <div class="card-body">
               <span class="card-meta">Ivory + Champagne</span>
@@ -933,8 +921,8 @@
           </article>
 
           <article class="card reveal">
-            <div class="card-media card-media-placeholder">
-              <span>Style previews are shared during consultation.</span>
+            <div class="card-media">
+              <img src="assets/love-language.jpg" alt="The Love Language blush pink flower wall displayed outdoors." loading="lazy" />
             </div>
             <div class="card-body">
               <span class="card-meta">Blush Romance</span>
@@ -946,23 +934,6 @@
                 <span class="tag">Daytime Events</span>
               </div>
               <div class="card-footer-note">Ideal for blush palettes, daytime gatherings, and softer styling.</div>
-            </div>
-          </article>
-
-          <article class="card reveal">
-            <div class="card-media card-media-placeholder">
-              <span>Style previews are shared during consultation.</span>
-            </div>
-            <div class="card-body">
-              <span class="card-meta">Tropical Statement</span>
-              <h3>Wild Bloom</h3>
-              <p class="muted">A tropical-inspired floral wall with bolder energy for clients who want a vibrant backdrop that still feels elevated.</p>
-              <div class="tags">
-                <span class="tag">Birthdays</span>
-                <span class="tag">Corporate Events</span>
-                <span class="tag">Tropical</span>
-              </div>
-              <div class="card-footer-note">Great for bold palettes, themed events, and high-energy photo moments.</div>
             </div>
           </article>
         </div>
