@@ -124,6 +124,7 @@
     html { scroll-behavior: smooth; }
     body {
       margin: 0;
+      overflow-x: hidden;
       background:
         radial-gradient(circle at top left, rgba(183, 163, 144, 0.14), transparent 28%),
         linear-gradient(180deg, #f8f5f0 0%, var(--paper) 100%);
@@ -167,7 +168,7 @@
     .site-header {
       position: sticky;
       top: 0;
-      z-index: 20;
+      z-index: 60;
       backdrop-filter: blur(14px);
       background: rgba(244, 241, 236, 0.88);
       border-bottom: 1px solid rgba(221, 212, 202, 0.7);
@@ -188,6 +189,7 @@
       letter-spacing: 0.22em;
       text-transform: uppercase;
       white-space: nowrap;
+      min-width: 0;
     }
 
     .nav-links {
@@ -234,11 +236,13 @@
       color: var(--text);
       cursor: pointer;
       position: relative;
+      flex: 0 0 48px;
+      z-index: 72;
     }
 
     .menu-toggle::before,
     .menu-toggle::after,
-    .menu-toggle span {
+    .menu-toggle .menu-line {
       content: "";
       position: absolute;
       left: 12px;
@@ -248,8 +252,28 @@
     }
 
     .menu-toggle::before { top: 17px; }
-    .menu-toggle span { top: 23px; }
+    .menu-toggle .menu-line { top: 23px; }
     .menu-toggle::after { top: 29px; }
+
+    .menu-toggle::before,
+    .menu-toggle::after,
+    .menu-toggle .menu-line {
+      transition: transform 0.22s ease, opacity 0.22s ease, top 0.22s ease;
+    }
+
+    .menu-toggle .menu-text { display: none; }
+
+    .menu-toggle[aria-expanded="true"]::before {
+      top: 23px;
+      transform: rotate(42deg);
+    }
+
+    .menu-toggle[aria-expanded="true"] .menu-line { opacity: 0; }
+
+    .menu-toggle[aria-expanded="true"]::after {
+      top: 23px;
+      transform: rotate(-42deg);
+    }
 
     .section {
       padding: 5.8rem 0;
@@ -882,27 +906,179 @@
     }
 
     @media (max-width: 760px) {
-      .menu-toggle { display: inline-flex; }
+      .container {
+        width: min(calc(100% - 1.35rem), var(--max));
+      }
+
+      .nav {
+        position: relative;
+        min-height: 68px;
+        gap: 0.65rem;
+        padding-right: 94px;
+      }
+
+      .brand {
+        max-width: 100%;
+        font-size: clamp(1.12rem, 5.3vw, 1.48rem);
+        letter-spacing: 0.13em;
+        line-height: 1;
+        white-space: normal;
+      }
+
+      .menu-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.45rem;
+        position: fixed;
+        right: 0.675rem;
+        top: 12px;
+        width: auto;
+        min-width: 82px;
+        height: 44px;
+        padding: 0 0.85rem;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.86);
+        transform: none;
+      }
+
+      .menu-toggle::before,
+      .menu-toggle::after,
+      .menu-toggle .menu-line {
+        display: none;
+      }
+
+      .menu-toggle .menu-text {
+        display: inline;
+        font-size: 0.72rem;
+        font-weight: 800;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+      }
 
       .nav-links {
         display: none;
-        position: absolute;
-        left: 1rem;
-        right: 1rem;
-        top: 78px;
-        padding: 1rem;
+        position: fixed;
+        left: 0.675rem;
+        right: 0.675rem;
+        top: 74px;
+        z-index: 70;
+        padding: 0.55rem;
         flex-direction: column;
-        align-items: flex-start;
-        background: rgba(248,245,240,0.97);
+        align-items: stretch;
+        background: rgba(248,245,240,0.985);
         border: 1px solid rgba(221,212,202,0.88);
-        border-radius: 24px;
+        border-radius: 18px;
         box-shadow: var(--shadow);
       }
 
       .nav-links.open { display: flex; }
-      .section { padding: 4.4rem 0; }
+      .nav-links a {
+        width: 100%;
+        padding: 0.85rem 0.9rem;
+        border-radius: 12px;
+        color: var(--text);
+      }
+
+      .nav-links a::after { display: none; }
+
+      .nav-links a:hover,
+      .nav-links a:focus-visible {
+        background: rgba(255,255,255,0.78);
+      }
+
+      .nav-links .nav-cta {
+        background: var(--text);
+        color: #fff;
+        text-align: center;
+        justify-content: center;
+      }
+
+      .section {
+        padding: 3.35rem 0;
+        scroll-margin-top: 86px;
+      }
+
+      .section-intro {
+        gap: 0.85rem;
+        margin-bottom: 1.4rem;
+      }
+
+      h1 {
+        font-size: clamp(2.35rem, 14vw, 3.65rem);
+        line-height: 0.98;
+        max-width: 100%;
+        overflow-wrap: break-word;
+      }
+
+      h2 {
+        font-size: clamp(1.95rem, 9.2vw, 2.65rem);
+        max-width: 100%;
+        overflow-wrap: break-word;
+      }
+
+      h3 { font-size: 1.55rem; }
+
+      .cards {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+      }
+
+      .card,
+      .contact-panel,
+      .form-panel,
+      .booking-panel,
+      .calendar-panel {
+        border-radius: 20px;
+      }
+
+      .card-body,
+      .contact-panel,
+      .form-panel,
+      .booking-panel,
+      .calendar-panel {
+        padding: 1.1rem;
+      }
+
       .form-grid { grid-template-columns: 1fr; }
-      .calendar-day { min-height: 48px; font-size: 0.92rem; }
+
+      input,
+      select,
+      textarea {
+        font-size: 16px;
+        border-radius: 14px;
+      }
+
+      .calendar-weekdays,
+      .calendar-grid {
+        gap: 0.3rem;
+      }
+
+      .calendar-day {
+        min-height: 44px;
+        border-radius: 11px;
+        font-size: 0.88rem;
+      }
+
+      .calendar-day.is-booked::after,
+      .calendar-day.is-unavailable::after {
+        bottom: 0.18rem;
+        font-size: 0.48rem;
+      }
+
+      .contact-item {
+        grid-template-columns: 36px 1fr;
+        gap: 0.7rem;
+      }
+
+      .contact-icon {
+        width: 36px;
+        height: 36px;
+      }
+
+      .footer-row {
+        align-items: flex-start;
+      }
     }
   </style>
 </head>
@@ -913,7 +1089,10 @@
     <div class="container nav">
       <a href="#top" class="brand">Williamson Wallflowers</a>
 
-      <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="navLinks"><span></span></button>
+      <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="navLinks">
+        <span class="menu-line" aria-hidden="true"></span>
+        <span class="menu-text">Menu</span>
+      </button>
 
       <nav class="nav-links" id="navLinks" aria-label="Primary navigation">
         <a href="#collection">Collection</a>
@@ -1275,6 +1454,7 @@
   <script>
     const menuToggle = document.getElementById("menuToggle");
     const navLinks = document.getElementById("navLinks");
+    const menuText = menuToggle.querySelector(".menu-text");
     const inquiryForm = document.getElementById("inquiryForm");
     const bookingWall = document.getElementById("bookingWall");
     const bookingDate = document.getElementById("bookingDate");
@@ -1417,11 +1597,13 @@
     function closeMenu() {
       navLinks.classList.remove("open");
       menuToggle.setAttribute("aria-expanded", "false");
+      menuText.textContent = "Menu";
     }
 
     menuToggle.addEventListener("click", () => {
       const isOpen = navLinks.classList.toggle("open");
       menuToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+      menuText.textContent = isOpen ? "Close" : "Menu";
     });
 
     navLinks.querySelectorAll("a").forEach((link) => {
