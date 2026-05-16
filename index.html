@@ -150,6 +150,7 @@
     .nav-links a {
       position: relative;
       padding-bottom: 0.1rem;
+      white-space: nowrap;
     }
 
     .nav-links a::after {
@@ -165,8 +166,7 @@
       transition: transform 0.25s ease;
     }
 
-    .nav-links a:hover::after,
-    .nav-links a.nav-cta::after { transform: scaleX(1); }
+    .nav-links a:hover::after { transform: scaleX(1); }
 
     .nav-links .nav-cta {
       color: var(--text);
@@ -203,6 +203,7 @@
     .section {
       padding: 5.8rem 0;
       position: relative;
+      scroll-margin-top: 96px;
     }
 
     .section-soft {
@@ -210,28 +211,6 @@
       border-top: 1px solid rgba(221, 212, 202, 0.7);
       border-bottom: 1px solid rgba(221, 212, 202, 0.7);
     }
-
-    .section-divider {
-      display: flex;
-      justify-content: center;
-      gap: 0.5rem;
-      margin: 0 0 2rem;
-    }
-
-    .section-divider span {
-      width: 11px;
-      height: 11px;
-      border-radius: 50%;
-      background: rgba(183, 163, 144, 0.7);
-      box-shadow: 0 0 0 5px rgba(183, 163, 144, 0.12);
-    }
-
-    .section-divider span:nth-child(2) {
-      width: 15px;
-      height: 15px;
-      background: rgba(106, 97, 89, 0.8);
-    }
-
     .eyebrow {
       display: inline-block;
       margin-bottom: 0.95rem;
@@ -294,20 +273,24 @@
     .link-underline:hover,
     .text-button:hover { color: var(--accent); }
 
+    .text-button:disabled {
+      color: var(--muted);
+      cursor: not-allowed;
+      opacity: 0.58;
+    }
+
     .hero {
       padding: 3.2rem 0 2.4rem;
+      scroll-margin-top: 96px;
     }
 
     .hero-top {
-      display: grid;
-      grid-template-columns: 0.92fr 1.08fr;
-      gap: 1.8rem;
-      align-items: end;
-      margin-bottom: 2rem;
+      max-width: 760px;
+      margin-bottom: 1rem;
     }
 
     .hero-copy {
-      max-width: 530px;
+      max-width: 680px;
       padding: 0.4rem 0;
     }
 
@@ -339,111 +322,6 @@
       margin-top: 1.8rem;
     }
 
-    .hero-mosaic {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 0.85rem;
-      align-items: start;
-    }
-
-    .tile {
-      overflow: hidden;
-      min-height: 148px;
-      background: rgba(255,255,255,0.56);
-      border: 1px solid rgba(221,212,202,0.85);
-      box-shadow: var(--shadow);
-    }
-
-    .tile img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-
-    .tile-copy {
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      padding: 1rem 1rem 1.15rem;
-      background: rgba(248,245,240,0.9);
-    }
-
-    .tile-copy.small {
-      min-height: 92px;
-      text-align: center;
-      font-family: "Cormorant Garamond", serif;
-      font-size: clamp(1.25rem, 3vw, 1.65rem);
-      font-style: italic;
-    }
-
-    .tile-copy.large {
-      min-height: 240px;
-      justify-content: center;
-      text-align: left;
-      padding: 1.3rem 1.15rem;
-    }
-
-    .tile-copy.large strong {
-      display: block;
-      font-family: "Cormorant Garamond", serif;
-      font-size: clamp(2rem, 4vw, 3.9rem);
-      line-height: 0.96;
-      font-style: italic;
-      font-weight: 500;
-      margin-bottom: 0.35rem;
-    }
-
-    .tile-copy.large span {
-      font-family: "Cormorant Garamond", serif;
-      font-size: clamp(1.15rem, 2.3vw, 1.9rem);
-      font-style: italic;
-      color: var(--muted);
-    }
-
-    .tile-a { aspect-ratio: 1.35 / 1; }
-    .tile-b { aspect-ratio: 1.35 / 1; }
-    .tile-c { min-height: 84px; }
-    .tile-d { grid-row: span 2; }
-    .tile-e { aspect-ratio: 0.88 / 1.15; }
-    .tile-f { aspect-ratio: 0.88 / 1.15; }
-    .tile-g {
-      width: 72%;
-      margin: -1.6rem auto 0;
-      aspect-ratio: 1.25 / 0.78;
-      position: relative;
-      z-index: 2;
-    }
-
-    .hero-footer {
-      display: flex;
-      justify-content: center;
-      margin-top: 2rem;
-    }
-
-    .intro-band {
-      padding: 0 0 1.2rem;
-    }
-
-    .intro-band .container {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 0.8rem;
-    }
-
-    .intro-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.45rem;
-      padding: 0.58rem 0.9rem;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.68);
-      border: 1px solid rgba(221,212,202,0.82);
-      color: var(--muted);
-      font-size: 0.88rem;
-      font-weight: 600;
-    }
-
     .section-intro {
       display: grid;
       grid-template-columns: 0.92fr 1.08fr;
@@ -452,29 +330,16 @@
       margin-bottom: 2rem;
     }
 
-    .cards,
-    .feature-grid,
-    .steps,
-    .info-grid,
-    .testimonial-row {
+    .cards {
       display: grid;
       gap: 1.2rem;
     }
 
     .cards { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-    .feature-grid { grid-template-columns: repeat(3, 1fr); margin-top: 2rem; }
-    .steps { grid-template-columns: repeat(3, 1fr); margin-top: 2rem; }
-    .info-grid { grid-template-columns: repeat(2, 1fr); margin-top: 2rem; }
-    .testimonial-row { grid-template-columns: 1.1fr 0.9fr; margin-top: 1.8rem; }
 
     .card,
-    .feature,
-    .step,
-    .info-card,
-    .testimonial-card,
     .contact-panel,
-    .form-panel,
-    .faq details {
+    .form-panel {
       background: rgba(255,255,255,0.68);
       border: 1px solid rgba(221,212,202,0.9);
       border-radius: var(--radius);
@@ -483,13 +348,8 @@
     }
 
     .card:hover,
-    .feature:hover,
-    .step:hover,
-    .info-card:hover,
-    .testimonial-card:hover,
     .contact-panel:hover,
-    .form-panel:hover,
-    .faq details:hover {
+    .form-panel:hover {
       transform: translateY(-4px);
       box-shadow: 0 24px 55px rgba(47, 43, 40, 0.1);
     }
@@ -506,11 +366,25 @@
       object-fit: cover;
     }
 
+    .card-media-preview {
+      min-height: 300px;
+      display: grid;
+      place-items: center;
+      padding: 1.4rem;
+      background: linear-gradient(180deg, rgba(255,255,255,0.86) 0%, rgba(246,241,235,0.94) 100%);
+      border-bottom: 1px solid var(--line);
+      text-align: center;
+    }
+
+    .card-media-preview span {
+      max-width: 12rem;
+      color: var(--muted);
+      font-family: "Cormorant Garamond", serif;
+      font-size: 2rem;
+      line-height: 1;
+    }
+
     .card-body,
-    .feature,
-    .step,
-    .info-card,
-    .testimonial-card,
     .contact-panel,
     .form-panel {
       padding: 1.45rem;
@@ -556,67 +430,67 @@
       font-size: 0.81rem;
     }
 
-    .quote-mark {
-      font-family: "Cormorant Garamond", serif;
-      font-size: 3rem;
-      line-height: 1;
-      color: rgba(183, 163, 144, 0.7);
-      margin-bottom: 0.25rem;
-    }
-
-    .testimonial-credit {
-      color: var(--muted);
-      font-size: 0.92rem;
-      font-weight: 600;
-    }
-
-    .step-number {
-      width: 42px;
-      height: 42px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 1rem;
-      border-radius: 50%;
-      background: var(--accent-soft);
-      border: 1px solid rgba(221,212,202,0.88);
-      font-weight: 700;
-    }
-
-    .info-list {
-      margin: 0;
-      padding-left: 1.1rem;
-      color: var(--muted);
-    }
-
-    .info-list li + li { margin-top: 0.45rem; }
-
-    .faq { display: grid; gap: 1rem; }
-
-    .faq details {
-      padding: 1rem 1.2rem;
-    }
-
-    .faq summary {
-      cursor: pointer;
-      list-style: none;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+    .details-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
       gap: 1rem;
+    }
+
+    .detail-card {
+      padding: 1.35rem;
+      background: rgba(255,255,255,0.62);
+      border: 1px solid rgba(221,212,202,0.88);
+      border-radius: var(--radius);
+      box-shadow: 0 16px 42px rgba(47, 43, 40, 0.06);
+    }
+
+    .detail-card h3 {
+      font-size: 1.55rem;
+      margin-bottom: 0.6rem;
+    }
+
+    .detail-list {
+      display: grid;
+      gap: 0.55rem;
+      margin: 0;
+      padding: 0;
+      color: var(--muted);
+      list-style: none;
+    }
+
+    .detail-list li {
+      padding-top: 0.55rem;
+      border-top: 1px solid rgba(221,212,202,0.68);
+    }
+
+    .detail-list li:first-child {
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .compact-faq {
+      display: grid;
+      gap: 0.7rem;
+    }
+
+    .compact-faq details {
+      padding-top: 0.7rem;
+      border-top: 1px solid rgba(221,212,202,0.68);
+    }
+
+    .compact-faq details:first-child {
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .compact-faq summary {
+      cursor: pointer;
       font-weight: 700;
+      list-style: none;
     }
 
-    .faq summary::after {
-      content: "+";
-      font-size: 1.35rem;
-      line-height: 1;
-      color: var(--accent);
-    }
-
-    .faq details[open] summary::after { content: "−"; }
-    .faq summary::-webkit-details-marker { display: none; }
-    .faq details p { margin-top: 0.8rem; color: var(--muted); }
+    .compact-faq summary::-webkit-details-marker { display: none; }
+    .compact-faq p { margin-top: 0.45rem; color: var(--muted); }
 
     .contact-shell {
       display: grid;
@@ -724,6 +598,151 @@
       resize: vertical;
     }
 
+    .booking-shell {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 1rem;
+      align-items: start;
+    }
+
+    .booking-panel,
+    .calendar-panel {
+      padding: 1.45rem;
+      background: rgba(255,255,255,0.68);
+      border: 1px solid rgba(221,212,202,0.9);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .booking-controls {
+      display: grid;
+      gap: 1rem;
+      margin-top: 1.25rem;
+    }
+
+    .calendar-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .calendar-nav {
+      display: flex;
+      gap: 0.45rem;
+    }
+
+    .calendar-button {
+      width: 42px;
+      height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      border: 1px solid rgba(221,212,202,0.95);
+      background: rgba(255,255,255,0.86);
+      color: var(--text);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .calendar-button:hover,
+    .calendar-day:not([disabled]):hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .calendar-weekdays,
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 0.45rem;
+    }
+
+    .calendar-weekdays {
+      margin-bottom: 0.45rem;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .calendar-day {
+      min-height: 58px;
+      border-radius: 14px;
+      border: 1px solid rgba(221,212,202,0.85);
+      background: rgba(255,255,255,0.74);
+      color: var(--text);
+      font: inherit;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      position: relative;
+    }
+
+    .calendar-day.is-selected {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      box-shadow: inset 0 0 0 2px rgba(183,163,144,0.32);
+    }
+
+    .calendar-day.is-booked {
+      background: rgba(234,226,218,0.86);
+      color: var(--muted);
+      cursor: not-allowed;
+      text-decoration: line-through;
+    }
+
+    .calendar-day.is-unavailable {
+      background: rgba(248,245,240,0.72);
+      color: var(--muted);
+      cursor: not-allowed;
+    }
+
+    .calendar-day.is-booked::after,
+    .calendar-day.is-unavailable::after {
+      content: "Booked";
+      position: absolute;
+      bottom: 0.3rem;
+      left: 0;
+      right: 0;
+      font-size: 0.58rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      text-decoration: none;
+    }
+
+    .calendar-day.is-unavailable::after { content: "Closed"; }
+
+    .calendar-day.is-muted {
+      opacity: 0.35;
+      pointer-events: none;
+    }
+
+    .availability-note {
+      margin-top: 1rem;
+      padding: 0.9rem 1rem;
+      border-radius: 16px;
+      border: 1px solid rgba(221,212,202,0.86);
+      background: rgba(255,255,255,0.7);
+      color: var(--muted);
+    }
+
+    .availability-note strong {
+      display: block;
+      color: var(--text);
+      margin-bottom: 0.25rem;
+    }
+
+    .availability-note.is-booked strong { color: #7c514d; }
+
+    .booking-action {
+      margin-top: 1rem;
+    }
+
     .footer {
       padding: 2.15rem 0 3rem;
       border-top: 1px solid rgba(221,212,202,0.72);
@@ -760,29 +779,20 @@
       .reveal,
       .reveal.in-view,
       .card,
-      .feature,
-      .step,
-      .info-card,
-      .testimonial-card,
       .contact-panel,
-      .form-panel,
-      .faq details { transition: none; transform: none; opacity: 1; }
+      .form-panel { transition: none; transform: none; opacity: 1; }
     }
 
     @media (max-width: 980px) {
-      .hero-top,
       .section-intro,
       .cards,
-      .feature-grid,
-      .steps,
-      .info-grid,
-      .testimonial-row,
+      .details-grid,
+      .booking-shell,
       .contact-shell {
         grid-template-columns: 1fr;
       }
 
       .hero-copy { max-width: none; }
-      .hero-mosaic { max-width: 700px; }
       .card img { height: 250px; }
     }
 
@@ -808,19 +818,8 @@
 
       .hero { padding-top: 2.8rem; }
       .section { padding: 4.4rem 0; }
-
-      .hero-mosaic {
-        gap: 0.8rem;
-      }
-
-      .tile { min-height: 126px; }
-      .tile-copy.large { min-height: 200px; }
-      .tile-g {
-        width: 74%;
-        margin-top: -1.2rem;
-      }
-
       .form-grid { grid-template-columns: 1fr; }
+      .calendar-day { min-height: 48px; font-size: 0.92rem; }
     }
   </style>
 </head>
@@ -835,11 +834,9 @@
 
       <nav class="nav-links" id="navLinks" aria-label="Primary navigation">
         <a href="#collection">Collection</a>
-        <a href="#about">About</a>
-        <a href="#included">What’s Included</a>
-        <a href="#how-it-works">How It Works</a>
-        <a href="#faq">FAQ</a>
-        <a href="#contact" class="nav-cta">Inquire</a>
+        <a href="#details">Details</a>
+        <a href="#booking">Book</a>
+        <a href="#contact" class="nav-cta">Contact</a>
       </nav>
     </div>
   </header>
@@ -857,41 +854,16 @@
             </p>
 
             <div class="hero-actions">
-              <a class="link-underline" href="#contact">Request availability</a>
+              <a class="link-underline" href="#booking">Check availability</a>
               <a class="link-underline" href="#collection">Browse the collection</a>
             </div>
           </div>
-
-          <div class="hero-mosaic reveal" aria-hidden="true">
-            <div class="tile tile-a tile-copy small">Luxury Setup</div>
-            <div class="tile tile-b tile-copy small">Curated Styling</div>
-            <div class="tile tile-c tile-copy small">Elegant + Airy</div>
-            <div class="tile tile-d tile-copy large"><strong>Timeless Beauty</strong><span>+ for weddings, showers, &amp; celebrations</span></div>
-            <div class="tile tile-e tile-copy small">Private Inventory</div>
-            <div class="tile tile-f tile-copy small">Delivery Included</div>
-            <div class="tile tile-g tile-copy small">Book Your Date</div>
-          </div>
         </div>
-
-        <div class="hero-footer reveal">
-          <a class="link-underline" href="#contact">Schedule a booking inquiry</a>
-        </div>
-      </div>
-    </section>
-
-    <section class="intro-band">
-      <div class="container reveal">
-        <span class="intro-pill">✿ Weddings</span>
-        <span class="intro-pill">✿ Baby Showers</span>
-        <span class="intro-pill">✿ Bridal Showers</span>
-        <span class="intro-pill">✿ Birthdays</span>
-        <span class="intro-pill">✿ Brand Events</span>
       </div>
     </section>
 
     <section class="section" id="collection">
       <div class="container">
-        <div class="section-divider" aria-hidden="true"><span></span><span></span><span></span></div>
         <div class="section-intro reveal">
           <div>
             <span class="eyebrow">Our collection</span>
@@ -936,164 +908,164 @@
               <div class="card-footer-note">Ideal for blush palettes, daytime gatherings, and softer styling.</div>
             </div>
           </article>
+
+          <article class="card reveal">
+            <div class="card-media card-media-preview">
+              <span>Image coming soon</span>
+            </div>
+            <div class="card-body">
+              <span class="card-meta">Tropical Statement</span>
+              <h3>Wild Bloom</h3>
+              <p class="muted">A tropical-inspired floral wall with bolder energy for clients who want a vibrant backdrop that still feels elevated.</p>
+              <div class="tags">
+                <span class="tag">Birthdays</span>
+                <span class="tag">Corporate Events</span>
+                <span class="tag">Tropical</span>
+              </div>
+              <div class="card-footer-note">Great for bold palettes, themed events, and high-energy photo moments.</div>
+            </div>
+          </article>
+
+          <article class="card reveal">
+            <div class="card-media card-media-preview">
+              <span>Image coming soon</span>
+            </div>
+            <div class="card-body">
+              <span class="card-meta">Garden Romance</span>
+              <h3>The Secret Garden</h3>
+              <p class="muted">A romantic garden-inspired flower wall with soft color and whimsical styling for showers, birthdays, and photo-forward events.</p>
+              <div class="tags">
+                <span class="tag">Showers</span>
+                <span class="tag">Birthdays</span>
+                <span class="tag">Garden Style</span>
+              </div>
+              <div class="card-footer-note">Best for sweet celebrations, feminine palettes, and lush garden-inspired styling.</div>
+            </div>
+          </article>
         </div>
       </div>
     </section>
 
-    <section class="section section-soft" id="about">
+    <section class="section" id="details">
       <div class="container">
-        <div class="section-divider" aria-hidden="true"><span></span><span></span><span></span></div>
         <div class="section-intro reveal">
           <div>
-            <span class="eyebrow">About</span>
-            <h2>Made for beautiful celebrations and polished photo moments.</h2>
+            <span class="eyebrow">Details</span>
+            <h2>Simple expectations, quickly answered.</h2>
           </div>
-          <p class="muted">
-            Williamson Wallflowers serves Williamson County and surrounding Middle Tennessee communities with floral backdrops designed to make a room feel instantly more special, more romantic, and more memorable.
-          </p>
+          <p class="muted">A compact look at what is included, how booking works, and the questions clients usually ask first.</p>
         </div>
 
-        <div class="feature-grid">
-          <div class="feature reveal">
-            <h3>Effortless elegance</h3>
-            <p class="muted">Luxury-inspired styling that still feels approachable and easy to book.</p>
-          </div>
-          <div class="feature reveal">
-            <h3>Made for photos</h3>
-            <p class="muted">A statement backdrop for portraits, entrances, dessert tables, and guest moments.</p>
-          </div>
-          <div class="feature reveal">
-            <h3>Styled with intention</h3>
-            <p class="muted">Soft neutrals, romantic florals, and a clean aesthetic that feels timeless instead of trendy.</p>
-          </div>
-        </div>
-
-        <div class="testimonial-row">
-          <div class="testimonial-card reveal">
-            <div class="quote-mark">“</div>
-            <h3>Beautiful installations, memorable moments.</h3>
-            <p class="muted">A floral wall gives guests a place to gather and creates the kind of focal point people naturally photograph, remember, and share.</p>
-            <div class="testimonial-credit">A featured client quote can live here once Jami has her first testimonial ready.</div>
-          </div>
-          <div class="testimonial-card reveal">
-            <span class="eyebrow">The overall feel</span>
-            <h3 class="italic">Refined, airy, and romantic.</h3>
-            <p class="muted">The design direction is intentionally clean and editorial, inspired by luxury wedding imagery and timeless styling.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" id="included">
-      <div class="container">
-        <div class="section-divider" aria-hidden="true"><span></span><span></span><span></span></div>
-        <div class="section-intro reveal">
-          <div>
+        <div class="details-grid reveal">
+          <article class="detail-card">
             <span class="eyebrow">What’s included</span>
-            <h2>Simple expectations, beautifully handled.</h2>
-          </div>
-          <p class="muted">This section answers the practical questions clients often have before they inquire.</p>
-        </div>
-
-        <div class="info-grid">
-          <div class="info-card reveal">
-            <h3>Included with your rental</h3>
-            <ul class="info-list">
-              <li>Booking coordination with Jami Ferguson</li>
+            <h3>Handled setup.</h3>
+            <ul class="detail-list">
+              <li>Booking coordination with Jami</li>
               <li>Delivery and on-site setup when included in your package</li>
               <li>Pickup after the event window</li>
-              <li>Guidance on the best placement and styling for your space</li>
+              <li>Placement and styling guidance for your space</li>
             </ul>
-          </div>
-          <div class="info-card reveal">
-            <h3>Service area</h3>
-            <p class="muted">Proudly serving Nashville, Williamson County, and nearby Middle Tennessee communities, including Franklin, Brentwood, Nolensville, Spring Hill, Thompson’s Station, and surrounding areas.</p>
-            <p class="muted">For venues outside the standard service area, custom quotes can be provided based on location and logistics.</p>
-          </div>
-        </div>
-      </div>
-    </section>
+          </article>
 
-    <section class="section section-soft" id="how-it-works">
-      <div class="container">
-        <div class="section-divider" aria-hidden="true"><span></span><span></span><span></span></div>
-        <div class="section-intro reveal">
-          <div>
+          <article class="detail-card">
             <span class="eyebrow">How it works</span>
-            <h2>Simple, polished, and easy to book.</h2>
-          </div>
-          <p class="muted">From your first message to event-day setup, the experience is designed to feel seamless.</p>
-        </div>
+            <h3>Choose, request, confirm.</h3>
+            <ul class="detail-list">
+              <li>Select your flower wall and available date</li>
+              <li>Send the pre-filled booking request</li>
+              <li>Confirm package details, delivery, and setup timing</li>
+            </ul>
+          </article>
 
-        <div class="steps">
-          <div class="step reveal">
-            <div class="step-number">1</div>
-            <h3>Send an inquiry</h3>
-            <p class="muted">Share your event date, venue, and celebration details so availability can be confirmed.</p>
-          </div>
-          <div class="step reveal">
-            <div class="step-number">2</div>
-            <h3>Choose your wall</h3>
-            <p class="muted">Select the backdrop that best fits your event style, color palette, and focal space.</p>
-          </div>
-          <div class="step reveal">
-            <div class="step-number">3</div>
-            <h3>Delivery + setup</h3>
-            <p class="muted">On event day, your wall is delivered, installed, and styled so everything is ready when guests arrive.</p>
-          </div>
+          <article class="detail-card">
+            <span class="eyebrow">FAQ</span>
+            <h3>Good to know.</h3>
+            <div class="compact-faq">
+              <details open>
+                <summary>When should I book?</summary>
+                <p>Earlier is best for weddings and peak spring or fall weekends.</p>
+              </details>
+              <details>
+                <summary>Do you set up?</summary>
+                <p>Yes, delivery and setup are available based on package and location.</p>
+              </details>
+              <details>
+                <summary>Can walls be outdoors?</summary>
+                <p>Often, depending on weather, surface, and event setup. Covered spaces are best.</p>
+              </details>
+            </div>
+          </article>
         </div>
       </div>
     </section>
 
-    <section class="section" id="faq">
+    <section class="section section-soft" id="booking">
       <div class="container">
-        <div class="section-divider" aria-hidden="true"><span></span><span></span><span></span></div>
         <div class="section-intro reveal">
           <div>
-            <span class="eyebrow">FAQ</span>
-            <h2>Helpful answers before you reach out.</h2>
+            <span class="eyebrow">Availability</span>
+            <h2>Choose your wall and request your date.</h2>
           </div>
-          <p class="muted">A few common questions about timing, setup, and customization.</p>
+          <p class="muted">Pick a flower wall to see the calendar for that backdrop. Friday through Sunday dates can be sent straight into your booking request.</p>
         </div>
 
-        <div class="faq reveal">
-          <details open>
-            <summary>How far in advance should I book?</summary>
-            <p>For weddings and peak spring or fall dates, booking early is always recommended. Smaller events may have more flexibility depending on availability.</p>
-          </details>
+        <div class="booking-shell reveal">
+          <div class="booking-panel">
+            <span class="eyebrow">Book online</span>
+            <h3>Start with the wall you love.</h3>
+            <p class="muted">Availability is checked by wall. Booking requests are available Friday through Sunday.</p>
 
-          <details>
-            <summary>Do you deliver and set up the flower wall?</summary>
-            <p>Yes — delivery and setup are available based on your event package and location.</p>
-          </details>
+            <div class="booking-controls">
+              <div>
+                <label for="bookingWall" class="muted">Flower Wall</label>
+                <select id="bookingWall">
+                  <option value="The Timeless Bloom">The Timeless Bloom</option>
+                  <option value="The Love Language">The Love Language</option>
+                  <option value="Wild Bloom">Wild Bloom</option>
+                  <option value="The Secret Garden">The Secret Garden</option>
+                </select>
+              </div>
+              <div>
+                <label for="bookingDate" class="muted">Selected Date</label>
+                <input id="bookingDate" type="date" />
+              </div>
+            </div>
 
-          <details>
-            <summary>Can the flower wall be used outdoors?</summary>
-            <p>Outdoor use may be possible depending on weather, surface conditions, and overall event setup. Covered spaces are typically the best option.</p>
-          </details>
+            <div class="availability-note" id="availabilityNote" aria-live="polite">
+              <strong>Select a date.</strong>
+              Choose a date on the calendar to start your booking request.
+            </div>
 
-          <details>
-            <summary>Do you offer custom styling?</summary>
-            <p>Yes — add-ons such as signage, balloon styling, and coordinating decor accents can help personalize the final look.</p>
-          </details>
+            <div class="booking-action">
+              <button class="text-button" id="bookingContinue" type="button">Continue booking request</button>
+            </div>
+          </div>
+
+          <div class="calendar-panel" aria-label="Flower wall availability calendar">
+            <div class="calendar-head">
+              <h3 id="calendarMonth">Availability</h3>
+              <div class="calendar-nav">
+                <button class="calendar-button" type="button" id="prevMonth" aria-label="Previous month">‹</button>
+                <button class="calendar-button" type="button" id="nextMonth" aria-label="Next month">›</button>
+              </div>
+            </div>
+            <div class="calendar-weekdays" aria-hidden="true">
+              <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+            </div>
+            <div class="calendar-grid" id="calendarGrid"></div>
+          </div>
         </div>
       </div>
     </section>
 
     <section class="section section-soft" id="contact">
       <div class="container">
-        <div class="section-divider" aria-hidden="true"><span></span><span></span><span></span></div>
         <div class="contact-shell reveal">
           <div class="contact-panel">
             <span class="eyebrow">Book your date</span>
             <h2>Let’s make your event bloom.</h2>
-            <p class="muted">Ready to book or want to check availability? Reach out with your event details and Jami will help you find the right setup.</p>
-
-            <div class="trust-row">
-              <span class="trust-pill">✿ Delivery + setup</span>
-              <span class="trust-pill">✿ Williamson County service</span>
-              <span class="trust-pill">✿ Custom event styling</span>
-            </div>
+            <p class="muted">Questions before booking? Send the details or reach Jami directly.</p>
 
             <div class="contact-list">
               <div class="contact-item">
@@ -1176,7 +1148,13 @@
                 </div>
                 <div>
                   <label for="wall" class="muted">Preferred Wall</label>
-                  <input id="wall" name="preferred-wall" type="text" />
+                  <select id="wall" name="preferred-wall">
+                    <option value="">Select an option</option>
+                    <option value="The Timeless Bloom">The Timeless Bloom</option>
+                    <option value="The Love Language">The Love Language</option>
+                    <option value="Wild Bloom">Wild Bloom</option>
+                    <option value="The Secret Garden">The Secret Garden</option>
+                  </select>
                 </div>
               </div>
 
@@ -1209,6 +1187,139 @@
     const menuToggle = document.getElementById("menuToggle");
     const navLinks = document.getElementById("navLinks");
     const inquiryForm = document.getElementById("inquiryForm");
+    const bookingWall = document.getElementById("bookingWall");
+    const bookingDate = document.getElementById("bookingDate");
+    const calendarGrid = document.getElementById("calendarGrid");
+    const calendarMonth = document.getElementById("calendarMonth");
+    const prevMonth = document.getElementById("prevMonth");
+    const nextMonth = document.getElementById("nextMonth");
+    const bookingContinue = document.getElementById("bookingContinue");
+    const availabilityNote = document.getElementById("availabilityNote");
+    const formDate = document.getElementById("date");
+    const formWall = document.getElementById("wall");
+
+    const bookedDates = [
+      {
+        date: "2026-05-23",
+        wall: "The Secret Garden",
+        label: "The Secret Garden"
+      }
+    ];
+
+    const monthNames = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
+    let visibleMonth = new Date();
+    let selectedDate = "";
+
+    function padDatePart(value) {
+      return String(value).padStart(2, "0");
+    }
+
+    function dateKey(year, month, day) {
+      return `${year}-${padDatePart(month + 1)}-${padDatePart(day)}`;
+    }
+
+    function parseDateKey(value) {
+      const [year, month, day] = value.split("-").map(Number);
+      return new Date(year, month - 1, day);
+    }
+
+    function isBooked(wall, date) {
+      return bookedDates.some((booking) => booking.wall === wall && booking.date === date);
+    }
+
+    function isBookingDay(date) {
+      const day = parseDateKey(date).getDay();
+      return day === 0 || day === 5 || day === 6;
+    }
+
+    function formatDate(value) {
+      if (!value) return "";
+      return parseDateKey(value).toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric"
+      });
+    }
+
+    function updateAvailabilityNote() {
+      const wall = bookingWall.value;
+      const booked = selectedDate && isBooked(wall, selectedDate);
+      availabilityNote.classList.toggle("is-booked", Boolean(booked));
+
+      if (!selectedDate) {
+        availabilityNote.innerHTML = "<strong>Select a date.</strong> Choose a Friday, Saturday, or Sunday to start your booking request.";
+        bookingContinue.disabled = true;
+        return;
+      }
+
+      if (!isBookingDay(selectedDate)) {
+        availabilityNote.innerHTML = `<strong>Weekend dates only.</strong> ${formatDate(selectedDate)} is not available for online booking. Please choose a Friday, Saturday, or Sunday.`;
+        bookingContinue.disabled = true;
+        return;
+      }
+
+      if (booked) {
+        availabilityNote.innerHTML = `<strong>${wall} is already booked.</strong> ${formatDate(selectedDate)} is unavailable for this wall. Please choose another date or backdrop.`;
+        bookingContinue.disabled = true;
+        return;
+      }
+
+      availabilityNote.innerHTML = `<strong>${wall} appears available.</strong> Continue to send a booking request for ${formatDate(selectedDate)}.`;
+      bookingContinue.disabled = false;
+    }
+
+    function renderCalendar() {
+      const year = visibleMonth.getFullYear();
+      const month = visibleMonth.getMonth();
+      const firstDay = new Date(year, month, 1).getDay();
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const wall = bookingWall.value;
+
+      calendarMonth.textContent = `${monthNames[month]} ${year}`;
+      calendarGrid.innerHTML = "";
+
+      for (let index = 0; index < firstDay; index += 1) {
+        const spacer = document.createElement("span");
+        spacer.className = "calendar-day is-muted";
+        calendarGrid.appendChild(spacer);
+      }
+
+      for (let day = 1; day <= daysInMonth; day += 1) {
+        const key = dateKey(year, month, day);
+        const button = document.createElement("button");
+        const booked = isBooked(wall, key);
+        const unavailable = !isBookingDay(key);
+
+        button.type = "button";
+        button.className = "calendar-day";
+        button.textContent = day;
+        button.setAttribute("aria-label", `${formatDate(key)}${booked ? " booked" : unavailable ? " closed" : " available"}`);
+
+        if (selectedDate === key) button.classList.add("is-selected");
+        if (booked) {
+          button.classList.add("is-booked");
+          button.disabled = true;
+        } else if (unavailable) {
+          button.classList.add("is-unavailable");
+          button.disabled = true;
+        } else {
+          button.addEventListener("click", () => {
+            selectedDate = key;
+            bookingDate.value = key;
+            renderCalendar();
+            updateAvailabilityNote();
+          });
+        }
+
+        calendarGrid.appendChild(button);
+      }
+
+      updateAvailabilityNote();
+    }
 
     function closeMenu() {
       navLinks.classList.remove("open");
@@ -1232,6 +1343,52 @@
       if (navLinks.classList.contains("open") && !navLinks.contains(event.target) && !menuToggle.contains(event.target)) {
         closeMenu();
       }
+    });
+
+    bookingWall.value = "The Secret Garden";
+    formWall.value = bookingWall.value;
+    visibleMonth = new Date(2026, 4, 1);
+    renderCalendar();
+
+    bookingWall.addEventListener("change", () => {
+      formWall.value = bookingWall.value;
+      renderCalendar();
+    });
+
+    bookingDate.addEventListener("change", () => {
+      selectedDate = bookingDate.value;
+      if (selectedDate) visibleMonth = parseDateKey(selectedDate);
+      renderCalendar();
+    });
+
+    prevMonth.addEventListener("click", () => {
+      visibleMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() - 1, 1);
+      renderCalendar();
+    });
+
+    nextMonth.addEventListener("click", () => {
+      visibleMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1);
+      renderCalendar();
+    });
+
+    bookingContinue.addEventListener("click", () => {
+      if (!selectedDate || !isBookingDay(selectedDate) || isBooked(bookingWall.value, selectedDate)) return;
+      formDate.value = selectedDate;
+      formWall.value = bookingWall.value;
+      document.getElementById("contact").scrollIntoView({ behavior: "smooth" });
+      formDate.focus({ preventScroll: true });
+    });
+
+    formDate.addEventListener("change", () => {
+      selectedDate = formDate.value;
+      bookingDate.value = formDate.value;
+      if (selectedDate) visibleMonth = parseDateKey(selectedDate);
+      renderCalendar();
+    });
+
+    formWall.addEventListener("change", () => {
+      if (formWall.value) bookingWall.value = formWall.value;
+      renderCalendar();
     });
 
     if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -1260,6 +1417,27 @@
       const venue = formData.get("venue") || "";
       const preferredWall = formData.get("preferred-wall") || "";
       const details = formData.get("details") || "";
+
+      if (eventDate && !isBookingDay(eventDate)) {
+        alert(`${formatDate(eventDate)} is not available for online booking. Please choose a Friday, Saturday, or Sunday.`);
+        bookingDate.value = eventDate;
+        selectedDate = eventDate;
+        visibleMonth = parseDateKey(eventDate);
+        renderCalendar();
+        document.getElementById("booking").scrollIntoView({ behavior: "smooth" });
+        return;
+      }
+
+      if (eventDate && preferredWall && isBooked(preferredWall, eventDate)) {
+        alert(`${preferredWall} is already booked on ${formatDate(eventDate)}. Please choose another date or flower wall.`);
+        bookingWall.value = preferredWall;
+        bookingDate.value = eventDate;
+        selectedDate = eventDate;
+        visibleMonth = parseDateKey(eventDate);
+        renderCalendar();
+        document.getElementById("booking").scrollIntoView({ behavior: "smooth" });
+        return;
+      }
 
       const subject = `Williamson Wallflowers Inquiry${eventType ? ` - ${eventType}` : ""}`;
       const body = [
