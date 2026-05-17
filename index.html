@@ -183,13 +183,28 @@
     }
 
     .brand {
-      display: inline-block;
-      font-family: "Cormorant Garamond", serif;
-      font-size: clamp(1.7rem, 3vw, 2.35rem);
-      letter-spacing: 0.22em;
+      display: inline-flex;
+      flex-direction: column;
+      gap: 0.12rem;
+      font-family: "Manrope", system-ui, sans-serif;
       text-transform: uppercase;
+      line-height: 1.05;
       white-space: nowrap;
       min-width: 0;
+    }
+
+    .brand-affiliation {
+      color: var(--text);
+      font-size: clamp(0.72rem, 1.1vw, 0.88rem);
+      font-weight: 800;
+      letter-spacing: 0.16em;
+    }
+
+    .brand-affiliation-sub {
+      color: var(--muted);
+      font-size: 0.58rem;
+      font-weight: 700;
+      letter-spacing: 0.34em;
     }
 
     .nav-links {
@@ -938,10 +953,18 @@
 
       .brand {
         max-width: 100%;
-        font-size: clamp(1.12rem, 5.3vw, 1.48rem);
-        letter-spacing: 0.13em;
-        line-height: 1;
         white-space: normal;
+      }
+
+      .brand-affiliation {
+        max-width: 220px;
+        font-size: 0.64rem;
+        letter-spacing: 0.11em;
+      }
+
+      .brand-affiliation-sub {
+        font-size: 0.5rem;
+        letter-spacing: 0.24em;
       }
 
       .menu-toggle {
@@ -1111,7 +1134,10 @@
 
   <header class="site-header">
     <div class="container nav">
-      <a href="#top" class="brand">Williamson Wallflowers</a>
+      <a href="#top" class="brand" aria-label="JJ Entertainment Solutions Subsidiary home">
+        <span class="brand-affiliation">JJ Entertainment Solutions</span>
+        <span class="brand-affiliation-sub">Subsidiary</span>
+      </a>
 
       <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu" aria-expanded="false" aria-controls="navLinks">
         <span class="menu-line" aria-hidden="true"></span>
