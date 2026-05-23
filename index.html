@@ -1517,6 +1517,11 @@
         label: "The Secret Garden"
       }
     ];
+    const fullyBookedWalls = new Set([
+      "The Timeless Bloom",
+      "The Love Language",
+      "Wild Bloom"
+    ]);
 
     const monthNames = [
       "January", "February", "March", "April", "May", "June",
@@ -1539,6 +1544,7 @@
     }
 
     function isBooked(wall, date) {
+      if (fullyBookedWalls.has(wall) && isBookingDay(date)) return true;
       return bookedDates.some((booking) => booking.wall === wall && booking.date === date);
     }
 
