@@ -9,7 +9,7 @@ import {
   requestJson,
   setAdminToken,
   setNotice
-} from "../shared.js";
+} from "../shared.js?v=20260525-1";
 
 let adminToken = getAdminToken();
 let events = [];

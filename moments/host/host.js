@@ -1,4 +1,4 @@
-import { formatBytes, formatDate, formatDateTime, getParam, qs, qsa, requestJson, setNotice } from "../shared.js";
+import { formatBytes, formatDate, formatDateTime, getParam, qs, qsa, requestJson, setNotice } from "../shared.js?v=20260525-1";
 
 const eventId = getParam("event");
 const token = getParam("token");

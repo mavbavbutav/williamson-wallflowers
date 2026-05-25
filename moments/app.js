@@ -1,4 +1,4 @@
-import { apiBase, formatDate, getParam, qs, qsa, requestJson, setNotice } from "./shared.js";
+import { apiBase, formatDate, getParam, qs, qsa, requestJson, setNotice } from "./shared.js?v=20260525-1";
 
 const MAX_VIDEO_SECONDS = 30;
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
