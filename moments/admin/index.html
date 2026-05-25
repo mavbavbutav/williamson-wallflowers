@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Admin | Wallflower Moments</title>
+  <link rel="icon" type="image/svg+xml" href="../../favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <section class="admin-auth panel" id="authPanel">
+      <h1 class="section-title">Wallflower Moments</h1>
+      <p class="muted">Enter the private admin token to create events and manage reusable NTAGs.</p>
+      <form id="authForm" class="field">
+        <label for="adminToken">Admin token</label>
+        <input id="adminToken" name="adminToken" type="password" autocomplete="off" required />
+        <button class="button button-primary" type="submit">Open admin</button>
+      </form>
+      <div id="authNotice" class="notice" hidden></div>
+    </section>
+
+    <section class="dashboard" id="adminApp" hidden>
+      <header class="site-topbar">
+        <a class="brand-lockup" href="../" aria-label="Wallflower Moments home">
+          <img src="../../assets/williamson-wallflowers-logo.png" alt="" />
+          <span class="brand-copy">
+            <strong>Wallflower Moments</strong>
+            <span>Staff setup</span>
+          </span>
+        </a>
+        <div class="topbar-actions">
+          <button class="button button-secondary" type="button" id="refreshButton">Refresh</button>
+          <button class="button button-secondary" type="button" id="signOutButton">Sign out</button>
+        </div>
+      </header>
+
+      <div class="dashboard-header">
+        <div>
+          <h1 class="section-title">Event setup</h1>
+          <p class="muted">Create host galleries, assign tags, and copy private links.</p>
+        </div>
+      </div>
+
+      <div class="stats-grid" id="statsGrid"></div>
+      <div id="adminNotice" class="notice" hidden></div>
+
+      <div class="admin-grid">
+        <form class="panel" id="eventForm">
+          <h2>Create event</h2>
+          <div class="field">
+            <label for="eventName">Event name</label>
+            <input id="eventNameInput" name="name" required placeholder="The Smith Wedding" />
+          </div>
+          <div class="form-grid">
+            <div class="field">
+              <label for="eventDate">Event date</label>
+              <input id="eventDate" name="eventDate" type="date" />
+            </div>
+            <div class="field">
+              <label for="hostName">Host name</label>
+              <input id="hostName" name="hostName" placeholder="Host name" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="hostEmail">Host email</label>
+            <input id="hostEmail" name="hostEmail" type="email" placeholder="host@example.com" />
+          </div>
+          <button class="button button-primary" type="submit">Create event</button>
+        </form>
+
+        <form class="panel" id="tagForm">
+          <h2>Register NTAG</h2>
+          <div class="form-grid">
+            <div class="field">
+              <label for="tagCode">Public tag code</label>
+              <input id="tagCode" name="publicCode" required placeholder="ww-tag-001" />
+            </div>
+            <div class="field">
+              <label for="tagLabel">Tag label</label>
+              <input id="tagLabel" name="label" required placeholder="Gold frame tag" />
+            </div>
+          </div>
+          <button class="button button-primary" type="submit">Register tag</button>
+        </form>
+      </div>
+
+      <section class="panel">
+        <h2>Reusable tags</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tag</th>
+                <th>Status</th>
+                <th>Assigned event</th>
+                <th>Guest link</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="tagsTable"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Events</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Event</th>
+                <th>Host link</th>
+                <th>Counts</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="eventsTable"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script type="module" src="admin.js"></script>
+</body>
+</html>

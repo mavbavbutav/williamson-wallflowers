@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Host Gallery | Wallflower Moments</title>
+  <link rel="icon" type="image/svg+xml" href="../../favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <header class="site-topbar">
+      <a class="brand-lockup" href="../" aria-label="Wallflower Moments home">
+        <img src="../../assets/williamson-wallflowers-logo.png" alt="" />
+        <span class="brand-copy">
+          <strong>Wallflower Moments</strong>
+          <span>Private host gallery</span>
+        </span>
+      </a>
+      <div class="topbar-actions">
+        <button class="button button-secondary" type="button" id="refreshButton">Refresh</button>
+      </div>
+    </header>
+
+    <section class="dashboard">
+      <div class="dashboard-header">
+        <div>
+          <h1 class="section-title" id="eventName">Host gallery</h1>
+          <p class="muted" id="eventMeta">Review and download guest moments.</p>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="tabs" aria-label="Submission status">
+          <button class="tab-button is-active" type="button" data-status="pending">Pending</button>
+          <button class="tab-button" type="button" data-status="approved">Approved</button>
+          <button class="tab-button" type="button" data-status="rejected">Rejected</button>
+        </div>
+        <span class="muted" id="countLabel">0 submissions</span>
+      </div>
+
+      <div id="hostNotice" class="notice" hidden></div>
+      <div class="media-grid" id="mediaGrid"></div>
+      <div class="empty-state" id="emptyState" hidden>No submissions in this view yet.</div>
+    </section>
+  </main>
+
+  <script type="module" src="host.js"></script>
+</body>
+</html>
