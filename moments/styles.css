@@ -94,6 +94,11 @@ a {
   backdrop-filter: blur(14px);
 }
 
+.host-page .site-topbar,
+.admin-page .site-topbar {
+  padding-bottom: 0.7rem;
+}
+
 .brand-lockup {
   display: inline-flex;
   align-items: center;
@@ -535,6 +540,22 @@ textarea:focus-visible {
   margin-top: 1rem;
 }
 
+.host-page .dashboard-header,
+.admin-page .dashboard-header {
+  margin-top: 0.25rem;
+  align-items: center;
+}
+
+.host-page .section-title,
+.admin-page .section-title {
+  font-size: clamp(2.6rem, 5vw, 4.8rem);
+}
+
+.host-page #eventMeta,
+.admin-page .dashboard-header .muted {
+  max-width: 760px;
+}
+
 .guest-page #captureView .dashboard-header,
 .guest-page #reviewView .dashboard-header {
   margin-top: 0.25rem;
@@ -941,6 +962,16 @@ tr:last-child td {
   background: rgba(63, 109, 88, 0.1);
 }
 
+.small-button.is-primary {
+  color: #fffaf5;
+  border-color: var(--ink);
+  background: var(--ink);
+}
+
+.small-button.is-primary:hover {
+  background: #1f1b18;
+}
+
 .media-modal {
   position: fixed;
   z-index: 1000;
@@ -1041,6 +1072,35 @@ tr:last-child td {
   .site-topbar {
     display: grid;
     position: relative;
+  }
+
+  .guest-page .site-topbar {
+    display: flex;
+    align-items: center;
+    padding-bottom: 0.7rem;
+  }
+
+  .guest-page .brand-lockup {
+    min-width: 0;
+  }
+
+  .guest-page .brand-copy strong {
+    font-size: 0.68rem;
+  }
+
+  .guest-page .brand-copy span {
+    font-size: 0.68rem;
+  }
+
+  .guest-page .topbar-actions {
+    flex: 0 0 auto;
+  }
+
+  .guest-page .topbar-actions .button {
+    flex: 0 0 auto;
+    min-height: 38px;
+    padding: 0.5rem 0.78rem;
+    font-size: 0.78rem;
   }
 
   .topbar-actions {
@@ -1146,6 +1206,19 @@ tr:last-child td {
 
   .admin-page .section-title {
     font-size: clamp(2.75rem, 12vw, 4rem);
+  }
+
+  .host-page .section-title {
+    font-size: clamp(2.35rem, 11vw, 3.6rem);
+  }
+
+  .host-page .toolbar {
+    padding: 0.65rem;
+  }
+
+  .host-page .tab-button {
+    flex: 1 1 auto;
+    justify-content: center;
   }
 
   .admin-page .stats-grid {

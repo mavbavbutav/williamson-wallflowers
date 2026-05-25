@@ -102,7 +102,7 @@ function renderCard(submission) {
 
   const actions = document.createElement("div");
   actions.className = "row-actions";
-  actions.append(actionButton("View", "", () => openMediaModal(submission, mediaUrl)));
+  actions.append(actionButton("View", "is-primary", () => openMediaModal(submission, mediaUrl)));
 
   if (submission.status !== "approved") {
     actions.append(actionButton("Approve", "is-success", () => updateSubmission(submission.id, "approved")));
