@@ -62,38 +62,73 @@ async function loadAdmin() {
 
 async function createEvent(event) {
   event.preventDefault();
-  const formData = new FormData(event.currentTarget);
+  const form = event.currentTarget;
+  const submitButton = form.querySelector("button[type='submit']");
+  const formData = new FormData(form);
   const body = Object.fromEntries(formData.entries());
+  const eventName = body.name || "Event";
 
   try {
-    await adminRequest("/admin/events", {
+    setButtonBusy(submitButton, true, "Creating event...");
+    const result = await adminRequest("/admin/events", {
       method: "POST",
       body: JSON.stringify(body)
     });
-    event.currentTarget.reset();
+    form.reset();
     await loadAdmin();
-    setNotice(qs("#adminNotice"), "Event created.", "success");
+    showAdminNotice(`Event "${result.event?.name || eventName}" was created. Next: assign an NTAG to this event, then copy that tag's guest link into NFC Tools.`, "success");
   } catch (error) {
-    setNotice(qs("#adminNotice"), error.message || "Could not create event.", "error");
+    showAdminNotice(error.message || "Could not create event.", "error");
+  } finally {
+    setButtonBusy(submitButton, false);
   }
 }
 
 async function createTag(event) {
   event.preventDefault();
-  const formData = new FormData(event.currentTarget);
+  const form = event.currentTarget;
+  const submitButton = form.querySelector("button[type='submit']");
+  const formData = new FormData(form);
   const body = Object.fromEntries(formData.entries());
+  const tagLabel = body.label || "NTAG";
 
   try {
-    await adminRequest("/admin/tags", {
+    setButtonBusy(submitButton, true, "Registering tag...");
+    const result = await adminRequest("/admin/tags", {
       method: "POST",
       body: JSON.stringify(body)
     });
-    event.currentTarget.reset();
+    form.reset();
     await loadAdmin();
-    setNotice(qs("#adminNotice"), "Tag registered.", "success");
+    showAdminNotice(`Tag "${result.tag?.label || tagLabel}" was registered. Next: assign it to an event, click Save, then copy its guest link into NFC Tools.`, "success");
   } catch (error) {
-    setNotice(qs("#adminNotice"), error.message || "Could not register tag.", "error");
+    showAdminNotice(error.message || "Could not register tag.", "error");
+  } finally {
+    setButtonBusy(submitButton, false);
   }
+}
+
+function showAdminNotice(message, type = "") {
+  const notice = qs("#adminNotice");
+  setNotice(notice, message, type);
+  if (!notice.hidden) {
+    notice.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+}
+
+function setButtonBusy(button, isBusy, label = "Working...") {
+  if (!button) return;
+
+  if (isBusy) {
+    button.dataset.originalLabel = button.textContent;
+    button.textContent = label;
+    button.disabled = true;
+    return;
+  }
+
+  button.textContent = button.dataset.originalLabel || button.textContent;
+  button.disabled = false;
+  delete button.dataset.originalLabel;
 }
 
 function renderStats(stats) {
