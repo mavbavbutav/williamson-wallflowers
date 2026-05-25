@@ -1,18 +1,29 @@
 const API_OVERRIDE_KEY = "wallflowerMomentsApi";
+const ADMIN_TOKEN_KEY = "wallflowerMomentsAdminToken";
+const HOST_TOKEN_KEY_PREFIX = "wallflowerMomentsHostToken:";
+
+function isLocalHost() {
+  return ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
+}
 
 export function getApiBase() {
   const params = new URLSearchParams(window.location.search);
   const explicit = params.get("api");
 
-  if (explicit) {
-    window.localStorage.setItem(API_OVERRIDE_KEY, explicit.replace(/\/$/, ""));
+  if (explicit && isLocalHost()) {
+    window.sessionStorage.setItem(API_OVERRIDE_KEY, explicit.replace(/\/$/, ""));
     return explicit.replace(/\/$/, "");
   }
 
-  const saved = window.localStorage.getItem(API_OVERRIDE_KEY);
+  if (!isLocalHost()) {
+    window.localStorage.removeItem(API_OVERRIDE_KEY);
+    window.sessionStorage.removeItem(API_OVERRIDE_KEY);
+  }
+
+  const saved = isLocalHost() ? window.sessionStorage.getItem(API_OVERRIDE_KEY) : "";
   if (saved) return saved;
 
-  if (["localhost", "127.0.0.1", ""].includes(window.location.hostname)) {
+  if (isLocalHost()) {
     return "http://localhost:8787/moments-api";
   }
 
@@ -31,6 +42,11 @@ export function qsa(selector, root = document) {
 
 export function getParam(name) {
   return new URLSearchParams(window.location.search).get(name) || "";
+}
+
+export function getHostToken(eventId) {
+  const key = `${HOST_TOKEN_KEY_PREFIX}${eventId || "unknown"}`;
+  return readUrlSecret("token", key);
 }
 
 export function formatDate(value) {
@@ -119,18 +135,23 @@ export function copyText(value, button) {
 }
 
 export function getAdminToken() {
-  const params = new URLSearchParams(window.location.search);
-  const token = params.get("adminToken") || window.localStorage.getItem("wallflowerMomentsAdminToken") || "";
-  if (token) window.localStorage.setItem("wallflowerMomentsAdminToken", token);
-  return token;
+  const legacyToken = window.localStorage.getItem(ADMIN_TOKEN_KEY);
+  if (legacyToken) {
+    window.sessionStorage.setItem(ADMIN_TOKEN_KEY, legacyToken);
+    window.localStorage.removeItem(ADMIN_TOKEN_KEY);
+  }
+
+  return readUrlSecret("adminToken", ADMIN_TOKEN_KEY);
 }
 
 export function setAdminToken(token) {
-  window.localStorage.setItem("wallflowerMomentsAdminToken", token);
+  window.sessionStorage.setItem(ADMIN_TOKEN_KEY, token);
+  window.localStorage.removeItem(ADMIN_TOKEN_KEY);
 }
 
 export function clearAdminToken() {
-  window.localStorage.removeItem("wallflowerMomentsAdminToken");
+  window.sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+  window.localStorage.removeItem(ADMIN_TOKEN_KEY);
 }
 
 export function buildGuestUrl(tagCode) {
@@ -138,5 +159,28 @@ export function buildGuestUrl(tagCode) {
 }
 
 export function buildHostUrl(eventId, token) {
-  return `${window.location.origin}/moments/host/?event=${encodeURIComponent(eventId)}&token=${encodeURIComponent(token)}`;
+  return `${window.location.origin}/moments/host/?event=${encodeURIComponent(eventId)}#token=${encodeURIComponent(token)}`;
+}
+
+function readUrlSecret(name, storageKey) {
+  const query = new URLSearchParams(window.location.search);
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const fromHash = hash.get(name) || "";
+  const fromQuery = query.get(name) || "";
+  const saved = window.sessionStorage.getItem(storageKey) || "";
+  const value = fromHash || fromQuery || saved;
+
+  if (value) window.sessionStorage.setItem(storageKey, value);
+
+  if (fromHash || fromQuery) {
+    query.delete(name);
+    hash.delete(name);
+
+    const nextUrl = new URL(window.location.href);
+    nextUrl.search = query.toString();
+    nextUrl.hash = hash.toString();
+    window.history.replaceState(null, "", nextUrl.toString());
+  }
+
+  return value;
 }

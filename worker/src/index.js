@@ -12,6 +12,15 @@ const REQUIRED_FIELDS = ['name', 'email'];
 const PHOTO_MAX_BYTES = 8 * 1024 * 1024;
 const VIDEO_MAX_BYTES = 50 * 1024 * 1024;
 const VIDEO_MAX_SECONDS = 30;
+const UPLOAD_TOKEN_TTL_SECONDS = 12 * 60 * 60;
+const MEDIA_TOKEN_TTL_SECONDS = 6 * 60 * 60;
+const UPLOAD_RATE_LIMIT = 12;
+const UPLOAD_RATE_WINDOW_SECONDS = 60 * 60;
+const TAG_RATE_LIMIT = 120;
+const TAG_RATE_WINDOW_SECONDS = 60 * 60;
+const DEFAULT_EVENT_MAX_SUBMISSIONS = 500;
+const DEFAULT_EVENT_MAX_BYTES = 10 * 1024 * 1024 * 1024;
+const RETENTION_CLEANUP_LIMIT = 100;
 const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 const VIDEO_TYPES = new Set([
   'video/mp4',
@@ -46,6 +55,11 @@ export default {
     }
 
     return handleInquiry(request, env, corsHeaders);
+  },
+
+  async scheduled(event, env, ctx) {
+    if (!env.MOMENTS_DB || !env.MOMENTS_BUCKET) return;
+    ctx.waitUntil(cleanExpiredMedia(env, RETENTION_CLEANUP_LIMIT));
   }
 };
 
@@ -98,7 +112,7 @@ async function handleMomentsApi(request, env, url, corsHeaders) {
 
   try {
     if (request.method === 'GET' && parts[0] === 'tags' && parts[1]) {
-      return getTagEvent(parts[1], env, corsHeaders);
+      return getTagEvent(request, parts[1], env, corsHeaders);
     }
 
     if (request.method === 'POST' && parts[0] === 'events' && parts[1] && parts[2] === 'submissions') {
@@ -115,7 +129,7 @@ async function handleMomentsApi(request, env, url, corsHeaders) {
       }
 
       if (request.method === 'DELETE') {
-        return deleteHostSubmission(env, url, corsHeaders, parts[2]);
+        return deleteHostSubmission(request, env, url, corsHeaders, parts[2]);
       }
     }
 
@@ -134,7 +148,18 @@ async function handleMomentsApi(request, env, url, corsHeaders) {
   }
 }
 
-async function getTagEvent(tagCode, env, corsHeaders) {
+async function getTagEvent(request, tagCode, env, corsHeaders) {
+  const tagRate = await consumeRateLimit(
+    env,
+    await getClientRateLimitKey(request, `tag:${normalizeTagCode(tagCode)}`),
+    TAG_RATE_LIMIT,
+    TAG_RATE_WINDOW_SECONDS
+  );
+
+  if (!tagRate.ok) {
+    return json({ ok: false, message: 'Too many tag lookups. Please wait a bit and try again.' }, 429, corsHeaders);
+  }
+
   const row = await env.MOMENTS_DB.prepare(`
     SELECT
       t.id AS tagId,
@@ -160,6 +185,8 @@ async function getTagEvent(tagCode, env, corsHeaders) {
     return json({ ok: false, message: 'This event is no longer accepting moments.' }, 410, corsHeaders);
   }
 
+  const uploadToken = await createSignedToken(env, 'upload', row.eventId, UPLOAD_TOKEN_TTL_SECONDS);
+
   return json({
     ok: true,
     tag: {
@@ -172,7 +199,8 @@ async function getTagEvent(tagCode, env, corsHeaders) {
       name: row.eventName,
       eventDate: row.eventDate,
       hostName: row.hostName
-    }
+    },
+    uploadToken
   }, 200, corsHeaders);
 }
 
@@ -183,6 +211,22 @@ async function createSubmission(request, env, corsHeaders, eventId) {
     return json({ ok: false, message: 'This event is no longer accepting moments.' }, 410, corsHeaders);
   }
 
+  const uploadRate = await consumeRateLimit(
+    env,
+    await getClientRateLimitKey(request, `upload:${eventId}`),
+    UPLOAD_RATE_LIMIT,
+    UPLOAD_RATE_WINDOW_SECONDS
+  );
+
+  if (!uploadRate.ok) {
+    return json({ ok: false, message: 'Too many uploads from this device. Please wait a bit before trying again.' }, 429, corsHeaders);
+  }
+
+  const contentLength = Number(request.headers.get('Content-Length') || 0);
+  if (contentLength > VIDEO_MAX_BYTES + 1024 * 1024) {
+    return json({ ok: false, message: 'Upload is too large.' }, 413, corsHeaders);
+  }
+
   const contentType = request.headers.get('Content-Type') || '';
   if (!contentType.includes('multipart/form-data')) {
     return json({ ok: false, message: 'Upload must use multipart form data.' }, 415, corsHeaders);
@@ -191,6 +235,7 @@ async function createSubmission(request, env, corsHeaders, eventId) {
   const formData = await request.formData();
   const media = formData.get('media');
   const consent = String(formData.get('consent') || '').toLowerCase() === 'true';
+  const uploadToken = String(formData.get('uploadToken') || '');
 
   if (!consent) {
     return json({ ok: false, message: 'Consent is required before uploading.' }, 400, corsHeaders);
@@ -200,12 +245,21 @@ async function createSubmission(request, env, corsHeaders, eventId) {
     return json({ ok: false, message: 'Please upload a photo or video.' }, 400, corsHeaders);
   }
 
+  if (!await verifySignedToken(env, uploadToken, 'upload', eventId)) {
+    return json({ ok: false, message: 'This upload session expired. Please scan the tag again.' }, 403, corsHeaders);
+  }
+
   const mediaType = normalizeMediaType(formData.get('mediaType'), media.type, media.name);
   const durationSeconds = Number(formData.get('durationSeconds') || 0);
   const validationError = validateMedia(media, mediaType, durationSeconds);
 
   if (validationError) {
     return json({ ok: false, message: validationError }, 400, corsHeaders);
+  }
+
+  const quotaError = await validateEventQuota(env, eventId, media.size);
+  if (quotaError) {
+    return json({ ok: false, message: quotaError }, 429, corsHeaders);
   }
 
   const now = new Date().toISOString();
@@ -258,7 +312,7 @@ async function createSubmission(request, env, corsHeaders, eventId) {
 }
 
 async function listHostSubmissions(request, env, url, corsHeaders, eventId) {
-  const token = url.searchParams.get('token') || '';
+  const token = getAccessToken(request, url);
   const event = await getHostEvent(env, eventId, token);
 
   if (!event) {
@@ -275,12 +329,12 @@ async function listHostSubmissions(request, env, url, corsHeaders, eventId) {
   return json({
     ok: true,
     event: toEventClient(event),
-    submissions: (result.results || []).map((row) => toSubmissionClient(row, request, env, token))
+    submissions: await Promise.all((result.results || []).map((row) => toSubmissionClient(row, request, env)))
   }, 200, corsHeaders);
 }
 
 async function updateHostSubmission(request, env, url, corsHeaders, submissionId) {
-  const token = url.searchParams.get('token') || '';
+  const token = getAccessToken(request, url);
   const submission = await getSubmissionWithEvent(env, submissionId);
 
   if (!submission || !isAuthorizedForSubmission(submission, token, env)) {
@@ -304,8 +358,8 @@ async function updateHostSubmission(request, env, url, corsHeaders, submissionId
   return json({ ok: true, status }, 200, corsHeaders);
 }
 
-async function deleteHostSubmission(env, url, corsHeaders, submissionId) {
-  const token = url.searchParams.get('token') || '';
+async function deleteHostSubmission(request, env, url, corsHeaders, submissionId) {
+  const token = getAccessToken(request, url);
   const submission = await getSubmissionWithEvent(env, submissionId);
 
   if (!submission || !isAuthorizedForSubmission(submission, token, env)) {
@@ -319,18 +373,29 @@ async function deleteHostSubmission(env, url, corsHeaders, submissionId) {
     WHERE id = ?
   `).bind(now, now, submissionId).run();
 
+  try {
+    await env.MOMENTS_BUCKET.delete(submission.objectKey);
+  } catch (error) {
+    console.error('R2 delete failed for host-deleted submission', submissionId, error);
+  }
+
   return json({ ok: true, status: 'deleted' }, 200, corsHeaders);
 }
 
 async function streamMedia(request, env, url, corsHeaders, submissionId) {
-  const token = url.searchParams.get('token') || '';
+  const token = getAccessToken(request, url);
+  const mediaToken = url.searchParams.get('mediaToken') || '';
   const submission = await getSubmissionWithEvent(env, submissionId);
 
   if (!submission || submission.deletedAt || submission.status === 'deleted') {
     return json({ ok: false, message: 'Media not found.' }, 404, corsHeaders);
   }
 
-  if (!isAuthorizedForSubmission(submission, token, env)) {
+  const isAuthorized = mediaToken
+    ? await verifySignedToken(env, mediaToken, 'media', submissionId)
+    : isAuthorizedForSubmission(submission, token, env);
+
+  if (!isAuthorized) {
     return json({ ok: false, message: 'This media link is not valid.' }, 403, corsHeaders);
   }
 
@@ -379,6 +444,10 @@ async function handleAdminApi(request, env, url, corsHeaders, parts) {
 
   if (request.method === 'GET' && parts[0] === 'retention-candidates') {
     return getRetentionCandidates(env, corsHeaders);
+  }
+
+  if (request.method === 'POST' && parts[0] === 'retention-cleanup') {
+    return runRetentionCleanup(request, env, corsHeaders);
   }
 
   if (request.method === 'POST' && parts[0] === 'events') {
@@ -454,6 +523,52 @@ async function getRetentionCandidates(env, corsHeaders) {
   return json({ ok: true, candidates: result.results || [] }, 200, corsHeaders);
 }
 
+async function runRetentionCleanup(request, env, corsHeaders) {
+  let limit = RETENTION_CLEANUP_LIMIT;
+
+  try {
+    const body = await request.json();
+    limit = Math.max(1, Math.min(Number(body.limit || limit), RETENTION_CLEANUP_LIMIT));
+  } catch {
+    // An empty body is fine; use the default cleanup limit.
+  }
+
+  const result = await cleanExpiredMedia(env, limit);
+  return json({ ok: true, ...result }, 200, corsHeaders);
+}
+
+async function cleanExpiredMedia(env, limit = RETENTION_CLEANUP_LIMIT) {
+  const now = new Date().toISOString();
+  const result = await env.MOMENTS_DB.prepare(`
+    SELECT s.id, s.object_key AS objectKey
+    FROM submissions s
+    INNER JOIN events e ON e.id = s.event_id
+    WHERE e.retention_expires_at <= ? AND s.deleted_at IS NULL
+    ORDER BY e.retention_expires_at ASC
+    LIMIT ?
+  `).bind(now, limit).all();
+
+  const candidates = result.results || [];
+  let purged = 0;
+  const errors = [];
+
+  for (const candidate of candidates) {
+    try {
+      await env.MOMENTS_BUCKET.delete(candidate.objectKey);
+      await env.MOMENTS_DB.prepare(`
+        UPDATE submissions
+        SET status = 'deleted', deleted_at = ?, updated_at = ?
+        WHERE id = ?
+      `).bind(now, now, candidate.id).run();
+      purged += 1;
+    } catch (error) {
+      errors.push({ id: candidate.id, message: String(error.message || error) });
+    }
+  }
+
+  return { checked: candidates.length, purged, errors };
+}
+
 async function createAdminEvent(request, env, corsHeaders) {
   const body = await request.json();
   const name = cleanText(body.name, 120);
@@ -497,7 +612,7 @@ async function createAdminEvent(request, env, corsHeaders) {
       hostToken,
       adminToken,
       retentionExpiresAt,
-      hostUrl: `${getSiteUrl(env)}/moments/host/?event=${encodeURIComponent(id)}&token=${encodeURIComponent(hostToken)}`
+      hostUrl: `${getSiteUrl(env)}/moments/host/?event=${encodeURIComponent(id)}#token=${encodeURIComponent(hostToken)}`
     }
   }, 201, corsHeaders);
 }
@@ -514,6 +629,7 @@ async function updateAdminEvent(request, env, corsHeaders, eventId) {
     hostName: body.hostName === undefined ? current.hostName : cleanText(body.hostName, 90),
     hostEmail: body.hostEmail === undefined ? current.hostEmail : cleanText(body.hostEmail, 140),
     status: body.status === undefined ? current.status : normalizeStatus(body.status, ['active', 'inactive', 'archived']),
+    hostToken: body.rotateHostToken ? randomToken() : current.hostToken,
     retentionExpiresAt: body.retentionExpiresAt || (body.eventDate === undefined ? current.retentionExpiresAt : getRetentionExpiresAt(nextEventDate))
   };
 
@@ -523,7 +639,7 @@ async function updateAdminEvent(request, env, corsHeaders, eventId) {
 
   await env.MOMENTS_DB.prepare(`
     UPDATE events
-    SET name = ?, event_date = ?, host_name = ?, host_email = ?, status = ?, retention_expires_at = ?, updated_at = ?
+    SET name = ?, event_date = ?, host_name = ?, host_email = ?, status = ?, host_token = ?, retention_expires_at = ?, updated_at = ?
     WHERE id = ?
   `).bind(
     next.name,
@@ -531,6 +647,7 @@ async function updateAdminEvent(request, env, corsHeaders, eventId) {
     next.hostName,
     next.hostEmail,
     next.status,
+    next.hostToken,
     next.retentionExpiresAt,
     new Date().toISOString(),
     eventId
@@ -541,11 +658,11 @@ async function updateAdminEvent(request, env, corsHeaders, eventId) {
 
 async function createAdminTag(request, env, corsHeaders) {
   const body = await request.json();
-  const publicCode = normalizeTagCode(body.publicCode);
+  const publicCode = normalizeTagCode(body.publicCode) || `ww-${randomToken(9).toLowerCase()}`;
   const label = cleanText(body.label, 100);
 
-  if (!publicCode || !label) {
-    return json({ ok: false, message: 'Public tag code and label are required.' }, 400, corsHeaders);
+  if (!label) {
+    return json({ ok: false, message: 'Tag label is required.' }, 400, corsHeaders);
   }
 
   const now = new Date().toISOString();
@@ -616,8 +733,69 @@ function getCorsHeaders(origin, env) {
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Accept, Range, X-Admin-Token, Authorization',
     'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges, ETag, Content-Disposition',
+    'Referrer-Policy': 'no-referrer',
+    'X-Content-Type-Options': 'nosniff',
     'Vary': 'Origin'
   };
+}
+
+async function consumeRateLimit(env, key, limit, windowSeconds) {
+  if (!env.MOMENTS_DB) return { ok: true, remaining: limit };
+
+  const nowMs = Date.now();
+  const windowMs = windowSeconds * 1000;
+  const windowStart = Math.floor(nowMs / windowMs) * windowMs;
+  const now = new Date(nowMs).toISOString();
+  const current = await env.MOMENTS_DB.prepare('SELECT window_start AS windowStart, count FROM rate_limits WHERE key = ?')
+    .bind(key)
+    .first();
+
+  if (!current || Number(current.windowStart) !== windowStart) {
+    await env.MOMENTS_DB.prepare(`
+      INSERT INTO rate_limits (key, window_start, count, updated_at)
+      VALUES (?, ?, 1, ?)
+      ON CONFLICT(key) DO UPDATE SET window_start = excluded.window_start, count = 1, updated_at = excluded.updated_at
+    `).bind(key, windowStart, now).run();
+    return { ok: true, remaining: Math.max(limit - 1, 0) };
+  }
+
+  if (Number(current.count) >= limit) {
+    return { ok: false, remaining: 0 };
+  }
+
+  await env.MOMENTS_DB.prepare('UPDATE rate_limits SET count = count + 1, updated_at = ? WHERE key = ?')
+    .bind(now, key)
+    .run();
+
+  return { ok: true, remaining: Math.max(limit - Number(current.count) - 1, 0) };
+}
+
+async function getClientRateLimitKey(request, scope) {
+  const ip = request.headers.get('CF-Connecting-IP') || request.headers.get('X-Forwarded-For')?.split(',')[0] || 'unknown';
+  const userAgent = request.headers.get('User-Agent') || 'unknown';
+  const digest = await sha256Hex(`${ip}|${userAgent}`);
+  return `${scope}:${digest.slice(0, 32)}`;
+}
+
+async function validateEventQuota(env, eventId, incomingBytes) {
+  const usage = await env.MOMENTS_DB.prepare(`
+    SELECT COUNT(*) AS count, COALESCE(SUM(size), 0) AS bytes
+    FROM submissions
+    WHERE event_id = ? AND deleted_at IS NULL AND status != 'deleted'
+  `).bind(eventId).first();
+
+  const maxSubmissions = Number(env.MOMENTS_EVENT_MAX_SUBMISSIONS || DEFAULT_EVENT_MAX_SUBMISSIONS);
+  const maxBytes = Number(env.MOMENTS_EVENT_MAX_BYTES || DEFAULT_EVENT_MAX_BYTES);
+
+  if (Number(usage?.count || 0) >= maxSubmissions) {
+    return 'This event has reached its submission limit.';
+  }
+
+  if (Number(usage?.bytes || 0) + Number(incomingBytes || 0) > maxBytes) {
+    return 'This event has reached its storage limit.';
+  }
+
+  return '';
 }
 
 async function readSubmission(request) {
@@ -843,6 +1021,13 @@ function isAuthorizedForSubmission(submission, token, env) {
   return token === submission.hostToken || token === submission.eventAdminToken || token === env.MOMENTS_ADMIN_TOKEN;
 }
 
+function getAccessToken(request, url) {
+  const headerToken = request.headers.get('X-Host-Token') || '';
+  const auth = request.headers.get('Authorization') || '';
+  const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7) : '';
+  return headerToken || bearer || url.searchParams.get('token') || '';
+}
+
 function isAdminRequest(request, url, env) {
   const headerToken = request.headers.get('X-Admin-Token') || '';
   const auth = request.headers.get('Authorization') || '';
@@ -977,6 +1162,65 @@ function getStoredMimeType(mimeType, filename, mediaType) {
   return byExtension[extension] || (mediaType === 'video' ? 'video/mp4' : 'application/octet-stream');
 }
 
+async function createSignedToken(env, scope, subject, ttlSeconds) {
+  const expiresAt = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const payload = `${scope}.${subject}.${expiresAt}`;
+  const signature = await signTokenPayload(env, payload);
+  return `${expiresAt}.${signature}`;
+}
+
+async function verifySignedToken(env, token, scope, subject) {
+  const [expiresAt, signature] = String(token || '').split('.');
+  const expiresAtNumber = Number(expiresAt);
+
+  if (!expiresAt || !signature || !Number.isFinite(expiresAtNumber)) return false;
+  if (expiresAtNumber < Math.floor(Date.now() / 1000)) return false;
+
+  const payload = `${scope}.${subject}.${expiresAt}`;
+  const expectedSignature = await signTokenPayload(env, payload);
+  return constantTimeEqual(signature, expectedSignature);
+}
+
+async function signTokenPayload(env, payload) {
+  const secret = env.MOMENTS_TOKEN_SECRET || env.MOMENTS_ADMIN_TOKEN;
+  if (!secret) throw new Error('Missing MOMENTS_TOKEN_SECRET or MOMENTS_ADMIN_TOKEN.');
+
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(payload));
+  return base64UrlEncode(new Uint8Array(signature));
+}
+
+async function sha256Hex(value) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function base64UrlEncode(bytes) {
+  let binary = '';
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function constantTimeEqual(a, b) {
+  if (a.length !== b.length) return false;
+
+  let difference = 0;
+  for (let index = 0; index < a.length; index += 1) {
+    difference |= a.charCodeAt(index) ^ b.charCodeAt(index);
+  }
+
+  return difference === 0;
+}
+
 function randomToken(length = 32) {
   const bytes = new Uint8Array(length);
   crypto.getRandomValues(bytes);
@@ -1016,7 +1260,7 @@ function toAdminEventClient(row, env) {
     pendingCount: row.pending_count,
     approvedCount: row.approved_count,
     rejectedCount: row.rejected_count,
-    hostUrl: `${getSiteUrl(env)}/moments/host/?event=${encodeURIComponent(row.id)}&token=${encodeURIComponent(row.host_token)}`
+    hostUrl: `${getSiteUrl(env)}/moments/host/?event=${encodeURIComponent(row.id)}#token=${encodeURIComponent(row.host_token)}`
   };
 }
 
@@ -1032,8 +1276,9 @@ function toAdminTagClient(row) {
   };
 }
 
-function toSubmissionClient(row, request, env, token) {
-  const mediaUrl = `${getApiOrigin(request, env)}/moments-api/media/${encodeURIComponent(row.id)}?token=${encodeURIComponent(token)}`;
+async function toSubmissionClient(row, request, env) {
+  const mediaToken = await createSignedToken(env, 'media', row.id, MEDIA_TOKEN_TTL_SECONDS);
+  const mediaUrl = `${getApiOrigin(request, env)}/moments-api/media/${encodeURIComponent(row.id)}?mediaToken=${encodeURIComponent(mediaToken)}`;
 
   return {
     id: row.id,

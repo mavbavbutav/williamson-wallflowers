@@ -1,7 +1,7 @@
-import { formatBytes, formatDate, formatDateTime, getParam, qs, qsa, requestJson, setNotice } from "../shared.js?v=20260525-2";
+import { formatBytes, formatDate, formatDateTime, getHostToken, getParam, qs, qsa, requestJson, setNotice } from "../shared.js?v=20260525-3";
 
 const eventId = getParam("event");
-const token = getParam("token");
+const token = getHostToken(eventId);
 let currentStatus = "pending";
 let submissions = [];
 let eventRecord = null;
@@ -37,7 +37,7 @@ function init() {
 async function loadGallery() {
   try {
     setNotice(qs("#hostNotice"), "");
-    const payload = await requestJson(`/host/events/${encodeURIComponent(eventId)}/submissions?token=${encodeURIComponent(token)}`);
+    const payload = await hostRequest(`/host/events/${encodeURIComponent(eventId)}/submissions`);
     eventRecord = payload.event;
     submissions = payload.submissions || [];
     qs("#eventName").textContent = eventRecord.name;
@@ -176,7 +176,7 @@ function actionButton(label, className, onClick) {
 
 async function updateSubmission(submissionId, status) {
   try {
-    await requestJson(`/host/submissions/${encodeURIComponent(submissionId)}?token=${encodeURIComponent(token)}`, {
+    await hostRequest(`/host/submissions/${encodeURIComponent(submissionId)}`, {
       method: "PATCH",
       body: JSON.stringify({ status })
     });
@@ -190,13 +190,23 @@ async function deleteSubmission(submissionId) {
   if (!window.confirm("Delete this submission from the host gallery?")) return;
 
   try {
-    await requestJson(`/host/submissions/${encodeURIComponent(submissionId)}?token=${encodeURIComponent(token)}`, {
+    await hostRequest(`/host/submissions/${encodeURIComponent(submissionId)}`, {
       method: "DELETE"
     });
     await loadGallery();
   } catch (error) {
     setNotice(qs("#hostNotice"), error.message || "Could not delete submission.", "error");
   }
+}
+
+function hostRequest(path, options = {}) {
+  return requestJson(path, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${token}`
+    }
+  });
 }
 
 function escapeHtml(value) {

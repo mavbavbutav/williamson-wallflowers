@@ -9,7 +9,7 @@ import {
   requestJson,
   setAdminToken,
   setNotice
-} from "../shared.js?v=20260525-1";
+} from "../shared.js?v=20260525-3";
 
 let adminToken = getAdminToken();
 let events = [];
@@ -26,9 +26,11 @@ function init() {
   });
 
   qs("#refreshButton").addEventListener("click", loadAdmin);
+  qs("#cleanupButton").addEventListener("click", runCleanup);
   qs("#signOutButton").addEventListener("click", signOut);
   qs("#eventForm").addEventListener("submit", createEvent);
   qs("#tagForm").addEventListener("submit", createTag);
+  qs("#generateTagCodeButton").addEventListener("click", generateTagCode);
 
   if (adminToken) {
     qs("#adminToken").value = adminToken;
@@ -166,6 +168,7 @@ function renderEvents() {
         <td>
           <div class="row-actions">
             <button class="small-button" type="button" data-event-status="${nextStatus}">${statusButton}</button>
+            <button class="small-button is-danger" type="button" data-rotate-host>Rotate host link</button>
             <button class="small-button" type="button" data-copy="${encodeURIComponent(hostUrl)}">Copy host link</button>
           </div>
         </td>
@@ -206,6 +209,14 @@ function bindEventActions() {
   qs("#eventsTable").querySelectorAll("[data-copy]").forEach((button) => {
     button.addEventListener("click", () => copyText(decodeURIComponent(button.dataset.copy), button));
   });
+
+  qs("#eventsTable").querySelectorAll("[data-rotate-host]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!window.confirm("Rotate this host link? The previous host link will stop working.")) return;
+      const row = button.closest("tr");
+      await updateEvent(row.dataset.eventId, { rotateHostToken: true });
+    });
+  });
 }
 
 async function updateTag(tagId, body) {
@@ -234,6 +245,19 @@ async function updateEvent(eventId, body) {
   }
 }
 
+async function runCleanup() {
+  try {
+    const result = await adminRequest("/admin/retention-cleanup", {
+      method: "POST",
+      body: JSON.stringify({ limit: 100 })
+    });
+    await loadAdmin();
+    setNotice(qs("#adminNotice"), `Cleanup checked ${result.checked || 0} expired items and purged ${result.purged || 0}.`, "success");
+  } catch (error) {
+    setNotice(qs("#adminNotice"), error.message || "Could not run cleanup.", "error");
+  }
+}
+
 function adminRequest(path, options = {}) {
   return requestJson(path, {
     ...options,
@@ -242,6 +266,13 @@ function adminRequest(path, options = {}) {
       "X-Admin-Token": adminToken
     }
   });
+}
+
+function generateTagCode() {
+  const bytes = new Uint8Array(6);
+  crypto.getRandomValues(bytes);
+  const code = Array.from(bytes).map((byte) => byte.toString(36).padStart(2, "0")).join("").slice(0, 10);
+  qs("#tagCode").value = `ww-${code}`;
 }
 
 function signOut() {

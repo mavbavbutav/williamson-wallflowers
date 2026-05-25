@@ -1,4 +1,4 @@
-import { apiBase, formatDate, getParam, qs, qsa, requestJson, setNotice } from "./shared.js?v=20260525-1";
+import { apiBase, formatDate, getParam, qs, qsa, requestJson, setNotice } from "./shared.js?v=20260525-3";
 
 const MAX_VIDEO_SECONDS = 30;
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
@@ -7,6 +7,7 @@ const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const state = {
   tagCode: getParam("t"),
   event: null,
+  uploadToken: "",
   mode: "",
   stream: null,
   recorder: null,
@@ -48,6 +49,7 @@ async function init() {
   try {
     const payload = await requestJson(`/tags/${encodeURIComponent(state.tagCode)}`);
     state.event = payload.event;
+    state.uploadToken = payload.uploadToken || "";
     qs("#eventTitle").textContent = `${state.event.name}`;
     qs("#eventDetails").textContent = `${formatDate(state.event.eventDate)}. Add a photo or a short video message for the host.`;
     showView("welcome");
@@ -324,6 +326,7 @@ async function submitMoment(event) {
   formData.append("guestNote", qs("#guestNote").value.trim());
   formData.append("consent", "true");
   formData.append("durationSeconds", String(state.durationSeconds || 0));
+  formData.append("uploadToken", state.uploadToken);
 
   qs("#submitButton").disabled = true;
   progressTrack.hidden = false;

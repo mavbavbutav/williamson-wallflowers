@@ -29,8 +29,8 @@ The public flower wall site stays static on GitHub Pages. The Moments frontend i
    ```bash
    npm install
    npm run migrate:remote
-   npx wrangler deploy
-   ```
+npx wrangler deploy
+```
 
 7. Optional later: configure a branded Worker custom domain after `williamsonwallflowers.com` is added as a Cloudflare zone:
 
@@ -63,7 +63,7 @@ https://williamsonwallflowers.com/moments/?t=<tagCode>
 Host gallery URL:
 
 ```text
-https://williamsonwallflowers.com/moments/host/?event=<eventId>&token=<hostToken>
+https://williamsonwallflowers.com/moments/host/?event=<eventId>#token=<hostToken>
 ```
 
 Admin URL:
@@ -78,19 +78,22 @@ Admin access uses the `MOMENTS_ADMIN_TOKEN` secret. Hosts use event-specific mag
 
 - `GET /moments-api/tags/:tagCode`
 - `POST /moments-api/events/:eventId/submissions`
-- `GET /moments-api/host/events/:eventId/submissions?token=...`
-- `PATCH /moments-api/host/submissions/:submissionId?token=...`
-- `DELETE /moments-api/host/submissions/:submissionId?token=...`
-- `GET /moments-api/media/:submissionId?token=...`
+- `GET /moments-api/host/events/:eventId/submissions` with host token in `Authorization: Bearer ...`
+- `PATCH /moments-api/host/submissions/:submissionId` with host token in `Authorization: Bearer ...`
+- `DELETE /moments-api/host/submissions/:submissionId` with host token in `Authorization: Bearer ...`
+- `GET /moments-api/media/:submissionId?mediaToken=...`
 - `GET /moments-api/admin/overview`
 - `POST /moments-api/admin/events`
 - `PATCH /moments-api/admin/events/:eventId`
 - `POST /moments-api/admin/tags`
 - `PATCH /moments-api/admin/tags/:tagId`
 - `GET /moments-api/admin/retention-candidates`
+- `POST /moments-api/admin/retention-cleanup`
 
-Photo uploads are capped at 8 MB. Video uploads are capped at 50 MB and 30 seconds. The browser checks video duration before upload; the Worker also rejects submissions whose provided duration is over the limit.
+Photo uploads are capped at 8 MB. Video uploads are capped at 50 MB and 30 seconds. The browser checks video duration before upload; the Worker also rejects submissions whose provided duration is over the limit. Guests must first resolve an active tag and submit the short-lived upload token returned by `GET /moments-api/tags/:tagCode`.
+
+Host media URLs use short-lived media tokens so the long-lived host gallery token is not embedded in every video/photo request.
 
 ## Retention
 
-Events default to 90 days of retention from the event date. `GET /moments-api/admin/retention-candidates` lists media records whose event retention has expired so a cleanup job can be added later without risking unexpired records.
+Events default to 90 days of retention from the event date. `GET /moments-api/admin/retention-candidates` lists media records whose event retention has expired. `POST /moments-api/admin/retention-cleanup` deletes expired R2 objects and marks those submissions deleted. The Worker also has a daily scheduled cleanup trigger.
