@@ -121,7 +121,7 @@ function renderCard(submission) {
   actions.append(actionButton("Delete", "is-danger", () => deleteSubmission(submission.id)));
   body.append(actions);
 
-  card.append(body, thumb);
+  card.append(thumb, body);
   return card;
 }
 
@@ -129,10 +129,13 @@ function openMediaModal(submission, mediaUrl) {
   const modal = qs("#mediaModal");
   const stage = qs("#modalStage");
   const title = qs("#modalTitle");
+  const download = qs("#modalDownload");
 
   lastFocusedElement = document.activeElement;
   stage.innerHTML = "";
   title.textContent = `${submission.mediaType === "video" ? "Video" : "Photo"} from ${submission.guestName || "anonymous guest"}`;
+  download.href = `${submission.downloadUrl}&disposition=attachment`;
+  download.download = "";
 
   if (submission.mediaType === "photo") {
     const image = document.createElement("img");

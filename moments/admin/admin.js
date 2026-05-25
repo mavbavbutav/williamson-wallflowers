@@ -98,14 +98,14 @@ async function createTag(event) {
 
 function renderStats(stats) {
   const values = [
-    ["Events", stats.events || 0],
-    ["Tags", stats.tags || 0],
-    ["Pending", stats.pending || 0],
-    ["Approved", stats.approved || 0]
+    ["Events", stats.events || 0, "events"],
+    ["Tags", stats.tags || 0, "tags"],
+    ["Pending", stats.pending || 0, "pending"],
+    ["Approved", stats.approved || 0, "approved"]
   ];
 
-  qs("#statsGrid").innerHTML = values.map(([label, value]) => `
-    <div class="stat">
+  qs("#statsGrid").innerHTML = values.map(([label, value, key]) => `
+    <div class="stat is-${key}">
       <strong>${value}</strong>
       <span>${label}</span>
     </div>
@@ -113,6 +113,8 @@ function renderStats(stats) {
 }
 
 function renderTags() {
+  qs("#tagsCountLabel").textContent = `${tags.length} ${tags.length === 1 ? "tag" : "tags"}`;
+
   const rows = tags.map((tag) => {
     const assignedOptions = buildEventOptions(tag.activeEventId);
     const guestUrl = buildGuestUrl(tag.publicCode);
@@ -131,7 +133,7 @@ function renderTags() {
         </td>
         <td><select data-tag-event>${assignedOptions}</select></td>
         <td>
-          <span class="muted">${guestUrl}</span>
+          <span class="muted link-preview">${escapeHtml(guestUrl)}</span>
         </td>
         <td>
           <div class="row-actions">
@@ -151,6 +153,8 @@ function renderTags() {
 }
 
 function renderEvents() {
+  qs("#eventsCountLabel").textContent = `${events.length} ${events.length === 1 ? "event" : "events"}`;
+
   const rows = events.map((event) => {
     const hostUrl = buildHostUrl(event.id, event.hostToken);
     const statusButton = event.status === "active" ? "Deactivate" : "Activate";
@@ -162,7 +166,7 @@ function renderEvents() {
           <strong>${escapeHtml(event.name)}</strong><br />
           <span class="muted">${formatDate(event.eventDate)} | expires ${formatDate(event.retentionExpiresAt?.slice(0, 10))}</span>
         </td>
-        <td><span class="muted">${hostUrl}</span></td>
+        <td><span class="muted link-preview">${escapeHtml(hostUrl)}</span></td>
         <td>
           <span class="status-pill is-pending">${event.pendingCount || 0} pending</span>
           <span class="status-pill is-approved">${event.approvedCount || 0} approved</span>

@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20260525-9" />
+  <link rel="stylesheet" href="styles.css?v=20260525-10" />
 </head>
 <body class="guest-page">
   <main class="app-shell">
@@ -89,10 +89,7 @@
           <h1 class="section-title" id="captureTitle" tabindex="-1">Capture your moment.</h1>
           <p class="muted" id="captureHelp">Use your camera or upload a file from your phone.</p>
         </div>
-        <div class="button-row">
-          <button class="button button-secondary" type="button" id="fileFallbackButton">Upload from phone</button>
-          <input class="visually-hidden" id="fileInput" type="file" />
-        </div>
+        <input class="visually-hidden" id="fileInput" type="file" />
       </div>
 
       <div class="capture-card">
@@ -104,6 +101,7 @@
           <div class="button-row" id="cameraActions">
             <button class="button button-primary" type="button" id="photoCaptureButton" hidden>Capture photo</button>
             <button class="button button-primary" type="button" id="videoRecordButton" hidden>Start recording</button>
+            <button class="button button-secondary" type="button" id="fileFallbackButton">Upload from phone</button>
             <button class="button button-danger" type="button" id="videoStopButton" hidden>Stop</button>
             <span class="record-timer" id="recordTimer" hidden>00:00</span>
           </div>
