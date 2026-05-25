@@ -18,7 +18,7 @@ ALLOWED_ORIGINS = "https://williamsonwallflowers.com,https://www.williamsonwallf
 [[d1_databases]]
 binding = "MOMENTS_DB"
 database_name = "williamson-wallflowers-moments"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "ba1ef866-17cc-489e-a8e4-4020f90d6eda"
 
 [[r2_buckets]]
 binding = "MOMENTS_BUCKET"
