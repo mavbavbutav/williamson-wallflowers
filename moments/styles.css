@@ -591,6 +591,11 @@ a {
   aspect-ratio: auto;
 }
 
+.host-page .media-thumb.is-video {
+  height: auto;
+  aspect-ratio: var(--media-aspect-ratio, 9 / 16);
+}
+
 .host-page .media-thumb img,
 .host-page .media-thumb video {
   object-fit: contain;

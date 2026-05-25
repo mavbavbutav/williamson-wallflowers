@@ -60,7 +60,7 @@ function renderCard(submission) {
   const mediaUrl = `${submission.mediaUrl}&disposition=inline`;
   const downloadUrl = `${submission.downloadUrl}&disposition=attachment`;
   const thumb = document.createElement("div");
-  thumb.className = "media-thumb";
+  thumb.className = `media-thumb is-${submission.mediaType}`;
 
   if (submission.mediaType === "photo") {
     const image = document.createElement("img");
@@ -73,6 +73,11 @@ function renderCard(submission) {
     video.controls = true;
     video.playsInline = true;
     video.preload = "metadata";
+    video.addEventListener("loadedmetadata", () => {
+      if (video.videoWidth && video.videoHeight) {
+        thumb.style.setProperty("--media-aspect-ratio", `${video.videoWidth} / ${video.videoHeight}`);
+      }
+    });
     thumb.append(video);
   }
 
