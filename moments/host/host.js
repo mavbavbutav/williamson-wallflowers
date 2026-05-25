@@ -99,7 +99,7 @@ function renderCard(submission) {
   }
 
   if (submission.status !== "rejected") {
-    actions.append(actionButton("Reject", "is-danger", () => updateSubmission(submission.id, "rejected")));
+    actions.append(actionButton("Deny", "is-danger", () => updateSubmission(submission.id, "rejected")));
   }
 
   const download = document.createElement("a");
@@ -111,7 +111,7 @@ function renderCard(submission) {
   actions.append(actionButton("Delete", "is-danger", () => deleteSubmission(submission.id)));
   body.append(actions);
 
-  card.append(thumb, body);
+  card.append(body, thumb);
   return card;
 }
 

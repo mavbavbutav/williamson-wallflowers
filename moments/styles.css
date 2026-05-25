@@ -539,12 +539,16 @@ a {
 .media-card {
   overflow: hidden;
   display: grid;
+  min-width: 0;
   border-radius: 22px;
 }
 
 .media-thumb {
+  overflow: hidden;
   display: grid;
   place-items: center;
+  width: 100%;
+  min-width: 0;
   aspect-ratio: 4 / 3;
   background: #2f2b28;
 }
@@ -563,7 +567,43 @@ a {
 .media-body {
   display: grid;
   gap: 0.7rem;
+  min-width: 0;
   padding: 1rem;
+}
+
+.media-body strong,
+.media-body p {
+  overflow-wrap: anywhere;
+}
+
+.host-page .media-grid {
+  align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.host-page .media-card > * {
+  width: 100%;
+  min-width: 0;
+}
+
+.host-page .media-thumb {
+  height: clamp(220px, 28vw, 340px);
+  aspect-ratio: auto;
+}
+
+.host-page .media-thumb img,
+.host-page .media-thumb video {
+  object-fit: contain;
+  background: #2f2b28;
+}
+
+.host-page .row-actions {
+  gap: 0.5rem;
+}
+
+.host-page .row-actions .small-button {
+  flex: 1 1 92px;
+  text-align: center;
 }
 
 .media-meta {
