@@ -13,7 +13,18 @@ const PHOTO_MAX_BYTES = 8 * 1024 * 1024;
 const VIDEO_MAX_BYTES = 50 * 1024 * 1024;
 const VIDEO_MAX_SECONDS = 30;
 const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
-const VIDEO_TYPES = new Set(['video/mp4', 'video/quicktime', 'video/webm']);
+const VIDEO_TYPES = new Set([
+  'video/mp4',
+  'video/quicktime',
+  'video/webm',
+  'video/x-m4v',
+  'video/m4v',
+  'video/3gpp',
+  'video/3gpp2',
+  'video/hevc',
+  'video/h264'
+]);
+const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'webm', '3gp', '3gpp', '3g2']);
 const PUBLIC_SITE_URL = 'https://williamsonwallflowers.com';
 
 export default {
@@ -189,7 +200,7 @@ async function createSubmission(request, env, corsHeaders, eventId) {
     return json({ ok: false, message: 'Please upload a photo or video.' }, 400, corsHeaders);
   }
 
-  const mediaType = normalizeMediaType(formData.get('mediaType'), media.type);
+  const mediaType = normalizeMediaType(formData.get('mediaType'), media.type, media.name);
   const durationSeconds = Number(formData.get('durationSeconds') || 0);
   const validationError = validateMedia(media, mediaType, durationSeconds);
 
@@ -200,11 +211,12 @@ async function createSubmission(request, env, corsHeaders, eventId) {
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   const originalFilename = sanitizeFilename(media.name || `${mediaType}-${id}`);
-  const objectKey = `moments/${eventId}/${id}.${extensionFor(media.type, originalFilename)}`;
+  const storedMimeType = getStoredMimeType(media.type, originalFilename, mediaType);
+  const objectKey = `moments/${eventId}/${id}.${extensionFor(storedMimeType, originalFilename)}`;
 
   await env.MOMENTS_BUCKET.put(objectKey, media.stream(), {
     httpMetadata: {
-      contentType: media.type,
+      contentType: storedMimeType,
       contentDisposition: `inline; filename="${originalFilename}"`
     },
     customMetadata: {
@@ -226,7 +238,7 @@ async function createSubmission(request, env, corsHeaders, eventId) {
     mediaType,
     objectKey,
     originalFilename,
-    media.type,
+    storedMimeType,
     media.size,
     Number.isFinite(durationSeconds) ? durationSeconds : 0,
     cleanText(formData.get('guestName'), 90),
@@ -836,29 +848,42 @@ function isAdminRequest(request, url, env) {
   return Boolean(env.MOMENTS_ADMIN_TOKEN && token && token === env.MOMENTS_ADMIN_TOKEN);
 }
 
-function normalizeMediaType(mediaType, mimeType) {
+function normalizeMediaType(mediaType, mimeType, filename = '') {
   const requested = String(mediaType || '').toLowerCase();
   if (requested === 'photo' || requested === 'video') return requested;
-  if (String(mimeType || '').startsWith('image/')) return 'photo';
-  if (String(mimeType || '').startsWith('video/')) return 'video';
+  const baseMimeType = getBaseMimeType(mimeType);
+  if (baseMimeType.startsWith('image/')) return 'photo';
+  if (baseMimeType.startsWith('video/')) return 'video';
+  if (VIDEO_EXTENSIONS.has(getFileExtension(filename))) return 'video';
   return '';
 }
 
 function validateMedia(media, mediaType, durationSeconds) {
   if (mediaType === 'photo') {
-    if (!PHOTO_TYPES.has(media.type)) return 'Photos must be JPEG, PNG, WEBP, HEIC, or HEIF.';
+    if (!PHOTO_TYPES.has(getBaseMimeType(media.type))) return 'Photos must be JPEG, PNG, WEBP, HEIC, or HEIF.';
     if (media.size > PHOTO_MAX_BYTES) return 'Photos must be 8 MB or smaller.';
     return '';
   }
 
   if (mediaType === 'video') {
-    if (!VIDEO_TYPES.has(media.type)) return 'Videos must be MP4, MOV, or WEBM.';
+    if (!isAllowedMobileVideo(media)) return 'Videos must be MP4, MOV, M4V, WEBM, or a standard Android camera video.';
     if (media.size > VIDEO_MAX_BYTES) return 'Videos must be 50 MB or smaller.';
     if (Number(durationSeconds || 0) > VIDEO_MAX_SECONDS + 1) return 'Videos must be 30 seconds or shorter.';
     return '';
   }
 
   return 'Please upload a photo or video.';
+}
+
+function isAllowedMobileVideo(media) {
+  const baseMimeType = getBaseMimeType(media.type);
+  const extension = getFileExtension(media.name);
+
+  if (VIDEO_TYPES.has(baseMimeType)) return true;
+  if (baseMimeType.startsWith('video/') && VIDEO_EXTENSIONS.has(extension)) return true;
+  if ((!baseMimeType || baseMimeType === 'application/octet-stream') && VIDEO_EXTENSIONS.has(extension)) return true;
+
+  return false;
 }
 
 function cleanText(value, maxLength) {
@@ -901,10 +926,50 @@ function extensionFor(mimeType, filename) {
     'image/heif': 'heif',
     'video/mp4': 'mp4',
     'video/quicktime': 'mov',
-    'video/webm': 'webm'
+    'video/webm': 'webm',
+    'video/x-m4v': 'm4v',
+    'video/m4v': 'm4v',
+    'video/3gpp': '3gp',
+    'video/3gpp2': '3g2',
+    'video/hevc': 'mov',
+    'video/h264': 'mp4'
   };
 
-  return map[mimeType] || 'bin';
+  return map[getBaseMimeType(mimeType)] || 'bin';
+}
+
+function getBaseMimeType(mimeType) {
+  return String(mimeType || '').split(';')[0].trim().toLowerCase();
+}
+
+function getFileExtension(filename) {
+  const clean = String(filename || '').split('?')[0].split('#')[0];
+  const index = clean.lastIndexOf('.');
+  return index >= 0 ? clean.slice(index + 1).toLowerCase() : '';
+}
+
+function getStoredMimeType(mimeType, filename, mediaType) {
+  const baseMimeType = getBaseMimeType(mimeType);
+  if (baseMimeType && baseMimeType !== 'application/octet-stream') return baseMimeType;
+
+  const extension = getFileExtension(filename);
+  const byExtension = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    heic: 'image/heic',
+    heif: 'image/heif',
+    mp4: 'video/mp4',
+    mov: 'video/quicktime',
+    m4v: 'video/x-m4v',
+    webm: 'video/webm',
+    '3gp': 'video/3gpp',
+    '3gpp': 'video/3gpp',
+    '3g2': 'video/3gpp2'
+  };
+
+  return byExtension[extension] || (mediaType === 'video' ? 'video/mp4' : 'application/octet-stream');
 }
 
 function randomToken(length = 32) {

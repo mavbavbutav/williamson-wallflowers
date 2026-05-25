@@ -95,7 +95,7 @@ async function chooseMode(mode) {
   qs("#captureHelp").textContent = mode === "photo"
     ? "Use the camera button or upload a photo from your phone."
     : "Record up to 30 seconds or upload a short video from your phone.";
-  fileInput.accept = mode === "photo" ? "image/*" : "video/*";
+  fileInput.accept = mode === "photo" ? "image/*" : "video/*,.mp4,.mov,.m4v,.webm,.3gp,.3gpp,.3g2";
   fileInput.capture = mode === "photo" ? "environment" : "user";
   qs("#photoCaptureButton").hidden = mode !== "photo";
   qs("#videoRecordButton").hidden = mode !== "video";
@@ -212,21 +212,25 @@ function stopTimer() {
 
 function getSupportedVideoMimeType() {
   const candidates = [
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4;codecs=h264,aac",
+    "video/mp4",
     "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
-    "video/webm",
-    "video/mp4"
+    "video/webm"
   ];
 
   return candidates.find((type) => window.MediaRecorder && MediaRecorder.isTypeSupported(type)) || "";
 }
 
 async function acceptFile(file) {
-  const isPhoto = file.type.startsWith("image/");
-  const isVideo = file.type.startsWith("video/");
+  const baseMimeType = getBaseMimeType(file.type);
+  const extension = getFileExtension(file.name);
+  const isPhoto = baseMimeType.startsWith("image/");
+  const isVideo = baseMimeType.startsWith("video/") || ["mp4", "mov", "m4v", "webm", "3gp", "3gpp", "3g2"].includes(extension);
 
   if (!isPhoto && !isVideo) {
-    setNotice(permissionNotice, "Please choose a photo or video file.", "error");
+    setNotice(permissionNotice, "Please choose a photo or standard phone video file.", "error");
     return;
   }
 
@@ -254,6 +258,16 @@ async function acceptFile(file) {
   state.mediaType = isPhoto ? "photo" : "video";
   stopStream();
   renderPreview();
+}
+
+function getBaseMimeType(mimeType) {
+  return String(mimeType || "").split(";")[0].trim().toLowerCase();
+}
+
+function getFileExtension(filename) {
+  const clean = String(filename || "").split("?")[0].split("#")[0];
+  const index = clean.lastIndexOf(".");
+  return index >= 0 ? clean.slice(index + 1).toLowerCase() : "";
 }
 
 function readVideoDuration(file) {
