@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260525-4" />
+  <link rel="stylesheet" href="../styles.css?v=20260525-5" />
 </head>
 <body class="host-page">
   <main class="app-shell">
@@ -49,6 +49,14 @@
     </section>
   </main>
 
-  <script type="module" src="host.js?v=20260525-4"></script>
+  <div class="media-modal" id="mediaModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" hidden>
+    <div class="media-modal-bar">
+      <strong id="modalTitle">Guest moment</strong>
+      <button class="button button-secondary" type="button" id="modalClose">Close</button>
+    </div>
+    <div class="media-modal-stage" id="modalStage"></div>
+  </div>
+
+  <script type="module" src="host.js?v=20260525-5"></script>
 </body>
 </html>

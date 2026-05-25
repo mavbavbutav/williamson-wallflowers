@@ -18,6 +18,13 @@ function init() {
   });
 
   qs("#refreshButton").addEventListener("click", loadGallery);
+  qs("#modalClose").addEventListener("click", closeMediaModal);
+  qs("#mediaModal").addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) closeMediaModal();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !qs("#mediaModal").hidden) closeMediaModal();
+  });
 
   if (!eventId || !token) {
     setNotice(qs("#hostNotice"), "This host link is missing its event or access token.", "error");
@@ -98,6 +105,7 @@ function renderCard(submission) {
 
   const actions = document.createElement("div");
   actions.className = "row-actions";
+  actions.append(actionButton("View", "", () => openMediaModal(submission, mediaUrl)));
 
   if (submission.status !== "approved") {
     actions.append(actionButton("Approve", "is-success", () => updateSubmission(submission.id, "approved")));
@@ -118,6 +126,43 @@ function renderCard(submission) {
 
   card.append(body, thumb);
   return card;
+}
+
+function openMediaModal(submission, mediaUrl) {
+  const modal = qs("#mediaModal");
+  const stage = qs("#modalStage");
+  const title = qs("#modalTitle");
+
+  stage.innerHTML = "";
+  title.textContent = `${submission.mediaType === "video" ? "Video" : "Photo"} from ${submission.guestName || "anonymous guest"}`;
+
+  if (submission.mediaType === "photo") {
+    const image = document.createElement("img");
+    image.src = mediaUrl;
+    image.alt = submission.guestName ? `Photo from ${submission.guestName}` : "Guest photo";
+    stage.append(image);
+  } else {
+    const video = document.createElement("video");
+    video.src = mediaUrl;
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    stage.append(video);
+  }
+
+  document.body.classList.add("modal-open");
+  modal.hidden = false;
+  qs("#modalClose").focus();
+}
+
+function closeMediaModal() {
+  const modal = qs("#mediaModal");
+  const stage = qs("#modalStage");
+
+  qsa("video", stage).forEach((video) => video.pause());
+  stage.innerHTML = "";
+  modal.hidden = true;
+  document.body.classList.remove("modal-open");
 }
 
 function actionButton(label, className, onClick) {
