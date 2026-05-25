@@ -41,6 +41,10 @@ body.modal-open {
   overflow: hidden;
 }
 
+h1:focus {
+  outline: none;
+}
+
 button,
 input,
 textarea,
@@ -216,6 +220,22 @@ a {
 .capture-card {
   display: grid;
   gap: 1rem;
+}
+
+.guest-page .hero {
+  min-height: min(720px, calc(100vh - 7rem));
+}
+
+.guest-page #welcomeView {
+  align-items: center;
+}
+
+.guest-page #welcomeView .hero-main {
+  min-height: min(560px, calc(100vh - 9rem));
+}
+
+.guest-page #welcomeView .moment-card {
+  min-height: 310px;
 }
 
 .step-row {
@@ -486,6 +506,9 @@ a {
 }
 
 .tab-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   min-height: 40px;
   border: 1px solid rgba(222, 211, 200, 0.95);
   border-radius: 999px;
@@ -499,6 +522,21 @@ a {
   color: #fffaf5;
   background: var(--ink);
   border-color: var(--ink);
+}
+
+.tab-count {
+  min-width: 1.55rem;
+  padding: 0.1rem 0.42rem;
+  border-radius: 999px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.78);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.tab-button.is-active .tab-count {
+  color: var(--ink);
+  background: #fffaf5;
 }
 
 .media-grid,
@@ -582,7 +620,7 @@ a {
 
 .host-page .media-grid {
   align-items: start;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
 }
 
 .host-page .media-card > * {
@@ -591,13 +629,13 @@ a {
 }
 
 .host-page .media-thumb {
-  height: clamp(220px, 28vw, 340px);
+  height: clamp(220px, 24vw, 300px);
   aspect-ratio: auto;
 }
 
 .host-page .media-thumb.is-video {
-  height: auto;
-  aspect-ratio: var(--media-aspect-ratio, 9 / 16);
+  height: clamp(220px, 24vw, 300px);
+  aspect-ratio: auto;
 }
 
 .host-page .media-thumb img,
@@ -621,6 +659,101 @@ a {
   gap: 0.4rem;
   color: var(--muted);
   font-size: 0.82rem;
+}
+
+.setup-guide {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.guide-step {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  border: 1px solid rgba(222, 211, 200, 0.9);
+  border-radius: 18px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.guide-step span {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  color: #fffaf5;
+  background: var(--soft);
+  font-weight: 900;
+}
+
+.guide-step strong,
+.guide-step small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.guide-step small {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.guide-step.is-done {
+  border-color: rgba(63, 109, 88, 0.28);
+  background: rgba(63, 109, 88, 0.08);
+}
+
+.guide-step.is-done span {
+  background: var(--success);
+}
+
+.guide-step.is-current {
+  border-color: rgba(119, 86, 71, 0.34);
+  background: rgba(169, 135, 118, 0.16);
+}
+
+.mobile-card-list {
+  display: none;
+}
+
+.admin-mobile-card {
+  display: grid;
+  gap: 0.9rem;
+  min-width: 0;
+  border: 1px solid rgba(222, 211, 200, 0.9);
+  border-radius: 18px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.mobile-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.mobile-card-heading > div {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.mobile-card-heading strong,
+.mobile-card-heading span,
+.link-preview {
+  overflow-wrap: anywhere;
+}
+
+.mobile-card-heading > div > span,
+.link-preview {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.link-preview {
+  margin: 0;
 }
 
 .table-wrap {
@@ -756,6 +889,10 @@ tr:last-child td {
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .setup-guide {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 680px) {
@@ -792,6 +929,32 @@ tr:last-child td {
     padding: 1.35rem;
   }
 
+  .guest-page .hero {
+    gap: 0.75rem;
+    min-height: auto;
+  }
+
+  .guest-page #welcomeView .hero-main {
+    min-height: auto;
+    padding: 1.05rem;
+  }
+
+  .guest-page #welcomeView .hero-side {
+    display: none;
+  }
+
+  .guest-page .hero-main h1 {
+    font-size: clamp(2.55rem, 13vw, 4.2rem);
+  }
+
+  .guest-page .hero-main p {
+    margin-top: 0.85rem;
+  }
+
+  .step-row {
+    margin: 0.9rem 0;
+  }
+
   .moment-card {
     min-height: 260px;
   }
@@ -814,6 +977,38 @@ tr:last-child td {
 
   .section-title {
     font-size: clamp(2.55rem, 14vw, 4rem);
+  }
+
+  .host-page .media-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .host-page .media-thumb,
+  .host-page .media-thumb.is-video {
+    height: min(64vh, 360px);
+  }
+}
+
+@media (max-width: 760px) {
+  .setup-guide {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-page .table-wrap {
+    display: none;
+  }
+
+  .admin-page .mobile-card-list {
+    display: grid;
+    gap: 0.85rem;
+  }
+
+  .mobile-card-heading {
+    display: grid;
+  }
+
+  .admin-mobile-card .row-actions .small-button {
+    flex: 1 1 130px;
   }
 }
 

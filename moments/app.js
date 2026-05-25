@@ -15,6 +15,7 @@ const state = {
   mediaBlob: null,
   mediaFile: null,
   mediaType: "",
+  previewUrl: "",
   durationSeconds: 0,
   recordStartedAt: 0,
   timerId: 0
@@ -79,6 +80,7 @@ function bindEvents() {
     const file = fileInput.files && fileInput.files[0];
     if (!file) return;
     await acceptFile(file);
+    fileInput.value = "";
   });
 }
 
@@ -92,6 +94,7 @@ async function chooseMode(mode) {
   setNotice(uploadNotice, "");
   progressTrack.hidden = true;
   progressBar.style.width = "0%";
+  progressTrack.setAttribute("aria-valuenow", "0");
   qs("#resetFlowButton").hidden = false;
   qs("#captureTitle").textContent = mode === "photo" ? "Take a photo." : "Record a message.";
   qs("#captureHelp").textContent = mode === "photo"
@@ -104,6 +107,12 @@ async function chooseMode(mode) {
   qs("#videoStopButton").hidden = true;
   qs("#recordTimer").hidden = true;
   showView("capture");
+  setNotice(
+    permissionNotice,
+    mode === "photo"
+      ? "Opening your camera. You can still upload from your phone if the prompt does not appear."
+      : "Opening your camera and microphone. You can still upload a short phone video instead."
+  );
   await startCamera(mode);
 }
 
@@ -122,8 +131,9 @@ async function startCamera(mode) {
 
     state.stream = await navigator.mediaDevices.getUserMedia(constraints);
     cameraPreview.srcObject = state.stream;
+    setNotice(permissionNotice, mode === "photo" ? "Camera ready." : "Camera ready. Videos stop automatically at 30 seconds.", "success");
   } catch (error) {
-    setNotice(permissionNotice, "Camera permission was not available. You can still upload a file from your phone.", "error");
+    setNotice(permissionNotice, "Camera permission was not available. Tap Upload from phone to choose an existing file or use your phone camera.", "error");
   }
 }
 
@@ -157,6 +167,7 @@ function capturePhoto() {
 
 function startRecording() {
   if (!state.stream || !window.MediaRecorder) {
+    setNotice(permissionNotice, "Video recording is not available in this browser. Upload a short phone video instead.", "error");
     fileInput.click();
     return;
   }
@@ -183,6 +194,7 @@ function startRecording() {
   });
 
   state.recorder.start();
+  setNotice(permissionNotice, "Recording. Keep it under 30 seconds, then tap Stop when you are done.");
   qs("#videoRecordButton").hidden = true;
   qs("#videoStopButton").hidden = false;
   qs("#recordTimer").hidden = false;
@@ -232,7 +244,7 @@ async function acceptFile(file) {
   const isVideo = baseMimeType.startsWith("video/") || ["mp4", "mov", "m4v", "webm", "3gp", "3gpp", "3g2"].includes(extension);
 
   if (!isPhoto && !isVideo) {
-    setNotice(permissionNotice, "Please choose a photo or standard phone video file.", "error");
+    setNotice(permissionNotice, "Please choose a photo or a standard phone video file.", "error");
     return;
   }
 
@@ -249,7 +261,7 @@ async function acceptFile(file) {
   if (isVideo) {
     const duration = await readVideoDuration(file);
     if (duration > MAX_VIDEO_SECONDS + 0.5) {
-      setNotice(permissionNotice, "Videos must be 30 seconds or shorter.", "error");
+      setNotice(permissionNotice, "That video is longer than 30 seconds. Please trim it or record a shorter message.", "error");
       return;
     }
     state.durationSeconds = Math.round(duration);
@@ -280,14 +292,19 @@ function readVideoDuration(file) {
       URL.revokeObjectURL(video.src);
       resolve(video.duration || 0);
     };
-    video.onerror = () => resolve(0);
+    video.onerror = () => {
+      URL.revokeObjectURL(video.src);
+      resolve(0);
+    };
     video.src = URL.createObjectURL(file);
   });
 }
 
 function renderPreview() {
   const frame = qs("#previewFrame");
+  revokePreviewUrl();
   const url = URL.createObjectURL(state.mediaBlob);
+  state.previewUrl = url;
   frame.innerHTML = "";
 
   if (state.mediaType === "photo") {
@@ -330,7 +347,9 @@ async function submitMoment(event) {
 
   qs("#submitButton").disabled = true;
   progressTrack.hidden = false;
-  setNotice(uploadNotice, "Sending your moment...", "");
+  progressBar.style.width = "0%";
+  progressTrack.setAttribute("aria-valuenow", "0");
+  setNotice(uploadNotice, "Sending your moment. Please keep this page open.", "");
 
   try {
     await uploadWithProgress(`/events/${encodeURIComponent(state.event.id)}/submissions`, formData);
@@ -348,16 +367,22 @@ function uploadWithProgress(path, formData) {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${apiBase}${path}`);
     xhr.setRequestHeader("Accept", "application/json");
+    xhr.timeout = 120000;
 
     xhr.upload.addEventListener("progress", (event) => {
       if (!event.lengthComputable) return;
-      progressBar.style.width = `${Math.round((event.loaded / event.total) * 100)}%`;
+      const percent = Math.round((event.loaded / event.total) * 100);
+      progressBar.style.width = `${percent}%`;
+      progressTrack.setAttribute("aria-valuenow", String(percent));
+      setNotice(uploadNotice, `Uploading ${percent}%. Please keep this page open.`);
     });
 
     xhr.addEventListener("load", () => {
       const payload = parseJson(xhr.responseText);
       if (xhr.status >= 200 && xhr.status < 300) {
         progressBar.style.width = "100%";
+        progressTrack.setAttribute("aria-valuenow", "100");
+        setNotice(uploadNotice, "Upload complete.", "success");
         resolve(payload);
       } else {
         reject(new Error(payload.message || "Upload failed."));
@@ -365,6 +390,7 @@ function uploadWithProgress(path, formData) {
     });
 
     xhr.addEventListener("error", () => reject(new Error("Network error while uploading.")));
+    xhr.addEventListener("timeout", () => reject(new Error("Upload timed out. Try again on a stronger connection.")));
     xhr.send(formData);
   });
 }
@@ -385,6 +411,7 @@ function resetFlow() {
   state.mediaFile = null;
   state.mediaType = "";
   state.durationSeconds = 0;
+  revokePreviewUrl();
   qs("#submissionForm").reset();
   qs("#resetFlowButton").hidden = true;
   showView("welcome");
@@ -402,9 +429,25 @@ function showView(name) {
   Object.entries(views).forEach(([key, element]) => {
     element.hidden = key !== name;
   });
+  window.requestAnimationFrame(() => {
+    const activeView = views[name];
+    const heading = activeView && activeView.querySelector("h1");
+    if (!heading) return;
+    try {
+      heading.focus({ preventScroll: true });
+    } catch {
+      heading.focus();
+    }
+  });
 }
 
 function showError(message) {
   qs("#errorMessage").textContent = message;
   showView("error");
+}
+
+function revokePreviewUrl() {
+  if (!state.previewUrl) return;
+  URL.revokeObjectURL(state.previewUrl);
+  state.previewUrl = "";
 }

@@ -10,19 +10,19 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260525-6" />
+  <link rel="stylesheet" href="../styles.css?v=20260525-7" />
 </head>
-<body>
+<body class="admin-page">
   <main class="app-shell">
     <section class="admin-auth panel" id="authPanel">
-      <h1 class="section-title">Wallflower Moments</h1>
+      <h1 class="section-title" tabindex="-1">Wallflower Moments</h1>
       <p class="muted">Enter the private admin token to create events and manage reusable NTAGs.</p>
       <form id="authForm" class="field">
         <label for="adminToken">Admin token</label>
         <input id="adminToken" name="adminToken" type="password" autocomplete="off" required />
         <button class="button button-primary" type="submit">Open admin</button>
       </form>
-      <div id="authNotice" class="notice" hidden></div>
+      <div id="authNotice" class="notice" role="status" aria-live="polite" hidden></div>
     </section>
 
     <section class="dashboard" id="adminApp" hidden>
@@ -43,19 +43,42 @@
 
       <div class="dashboard-header">
         <div>
-          <h1 class="section-title">Event setup</h1>
+          <h1 class="section-title" id="adminTitle" tabindex="-1">Event setup</h1>
           <p class="muted">Create host galleries, assign tags, and copy private links.</p>
         </div>
       </div>
 
       <div class="stats-grid" id="statsGrid"></div>
-      <div id="adminNotice" class="notice" hidden></div>
+      <div id="adminNotice" class="notice" role="status" aria-live="polite" hidden></div>
+
+      <section class="setup-guide" aria-label="Setup guide">
+        <div class="guide-step" data-guide-step="event">
+          <span>1</span>
+          <strong>Create an event</strong>
+          <small>Name the host gallery and set the date.</small>
+        </div>
+        <div class="guide-step" data-guide-step="tag">
+          <span>2</span>
+          <strong>Register a tag</strong>
+          <small>Generate or enter the reusable NTAG code.</small>
+        </div>
+        <div class="guide-step" data-guide-step="assign">
+          <span>3</span>
+          <strong>Assign the tag</strong>
+          <small>Connect the physical tag to the active event.</small>
+        </div>
+        <div class="guide-step" data-guide-step="share">
+          <span>4</span>
+          <strong>Share private links</strong>
+          <small>Test guest scan, then give the host gallery link.</small>
+        </div>
+      </section>
 
       <div class="admin-grid">
         <form class="panel" id="eventForm">
           <h2>Create event</h2>
           <div class="field">
-            <label for="eventName">Event name</label>
+            <label for="eventNameInput">Event name</label>
             <input id="eventNameInput" name="name" required placeholder="The Smith Wedding" />
           </div>
           <div class="form-grid">
@@ -110,6 +133,7 @@
             <tbody id="tagsTable"></tbody>
           </table>
         </div>
+        <div class="mobile-card-list" id="tagsCards"></div>
       </section>
 
       <section class="panel">
@@ -128,10 +152,11 @@
             <tbody id="eventsTable"></tbody>
           </table>
         </div>
+        <div class="mobile-card-list" id="eventsCards"></div>
       </section>
     </section>
   </main>
 
-  <script type="module" src="admin.js?v=20260525-2"></script>
+  <script type="module" src="admin.js?v=20260525-3"></script>
 </body>
 </html>

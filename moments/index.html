@@ -10,9 +10,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20260525-6" />
+  <link rel="stylesheet" href="styles.css?v=20260525-7" />
 </head>
-<body>
+<body class="guest-page">
   <main class="app-shell">
     <header class="site-topbar">
       <a class="brand-lockup" href="./" aria-label="Wallflower Moments home">
@@ -29,7 +29,7 @@
 
     <section class="hero" id="loadingView">
       <div class="hero-main">
-        <h1>Opening your event moment.</h1>
+        <h1 tabindex="-1">Opening your event moment.</h1>
         <p>Hold tight while we connect this tag to the right celebration.</p>
       </div>
       <aside class="hero-side">
@@ -44,7 +44,7 @@
 
     <section class="hero" id="errorView" hidden>
       <div class="hero-main">
-        <h1>This moment link is not active.</h1>
+        <h1 tabindex="-1">This moment link is not active.</h1>
         <p id="errorMessage">The tag may not be assigned to an event yet. Please check with the host or Williamson Wallflowers.</p>
       </div>
       <aside class="hero-side">
@@ -57,7 +57,7 @@
 
     <section class="hero" id="welcomeView" hidden>
       <div class="hero-main">
-        <h1 id="eventTitle">Leave a little love.</h1>
+        <h1 id="eventTitle" tabindex="-1">Leave a little love.</h1>
         <p id="eventDetails">Send the host a photo or a short video message from tonight's celebration.</p>
         <div class="step-row" aria-label="Guest upload steps">
           <span class="step-pill is-active">1. Choose</span>
@@ -86,7 +86,7 @@
     <section class="dashboard" id="captureView" hidden>
       <div class="dashboard-header">
         <div>
-          <h1 class="section-title" id="captureTitle">Capture your moment.</h1>
+          <h1 class="section-title" id="captureTitle" tabindex="-1">Capture your moment.</h1>
           <p class="muted" id="captureHelp">Use your camera or upload a file from your phone.</p>
         </div>
         <div class="button-row">
@@ -108,14 +108,14 @@
           </div>
         </div>
 
-        <div id="permissionNotice" class="notice" hidden></div>
+        <div id="permissionNotice" class="notice" role="status" aria-live="polite" hidden></div>
       </div>
     </section>
 
     <section class="dashboard" id="reviewView" hidden>
       <div class="dashboard-header">
         <div>
-          <h1 class="section-title">Ready to send?</h1>
+          <h1 class="section-title" tabindex="-1">Ready to send?</h1>
           <p class="muted">Preview your moment, add your name if you want, and send it to the host.</p>
         </div>
       </div>
@@ -139,11 +139,11 @@
             <span>I agree that this photo or video can be shared privately with the event host and retained for up to 90 days.</span>
           </label>
 
-          <div class="progress-track" id="progressTrack" hidden>
+          <div class="progress-track" id="progressTrack" role="progressbar" aria-label="Upload progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
             <div class="progress-bar" id="progressBar"></div>
           </div>
 
-          <div id="uploadNotice" class="notice" hidden></div>
+          <div id="uploadNotice" class="notice" role="status" aria-live="polite" hidden></div>
 
           <div class="button-row">
             <button class="button button-primary" type="submit" id="submitButton">Send to host</button>
@@ -155,7 +155,7 @@
 
     <section class="hero" id="successView" hidden>
       <div class="hero-main">
-        <h1>Your moment is in bloom.</h1>
+        <h1 tabindex="-1">Your moment is in bloom.</h1>
         <p>Thanks for adding to the host's private keepsake gallery.</p>
         <div class="button-row">
           <button class="button button-primary" type="button" id="addAnotherButton">Add another</button>
@@ -172,6 +172,6 @@
     </section>
   </main>
 
-  <script type="module" src="app.js?v=20260525-3"></script>
+  <script type="module" src="app.js?v=20260525-4"></script>
 </body>
 </html>

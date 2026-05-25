@@ -5,6 +5,7 @@ const token = getHostToken(eventId);
 let currentStatus = "pending";
 let submissions = [];
 let eventRecord = null;
+let lastFocusedElement = null;
 
 init();
 
@@ -12,7 +13,6 @@ function init() {
   qsa("[data-status]").forEach((button) => {
     button.addEventListener("click", () => {
       currentStatus = button.dataset.status;
-      qsa("[data-status]").forEach((tab) => tab.classList.toggle("is-active", tab === button));
       render();
     });
   });
@@ -52,7 +52,9 @@ function render() {
   const grid = qs("#mediaGrid");
   const visible = submissions.filter((item) => item.status === currentStatus);
   grid.innerHTML = "";
+  updateTabs();
   qs("#countLabel").textContent = `${visible.length} ${visible.length === 1 ? "submission" : "submissions"}`;
+  qs("#emptyState").textContent = getEmptyMessage(currentStatus);
   qs("#emptyState").hidden = visible.length > 0;
 
   visible.forEach((submission) => {
@@ -80,11 +82,6 @@ function renderCard(submission) {
     video.controls = true;
     video.playsInline = true;
     video.preload = "metadata";
-    video.addEventListener("loadedmetadata", () => {
-      if (video.videoWidth && video.videoHeight) {
-        thumb.style.setProperty("--media-aspect-ratio", `${video.videoWidth} / ${video.videoHeight}`);
-      }
-    });
     thumb.append(video);
   }
 
@@ -133,6 +130,7 @@ function openMediaModal(submission, mediaUrl) {
   const stage = qs("#modalStage");
   const title = qs("#modalTitle");
 
+  lastFocusedElement = document.activeElement;
   stage.innerHTML = "";
   title.textContent = `${submission.mediaType === "video" ? "Video" : "Photo"} from ${submission.guestName || "anonymous guest"}`;
 
@@ -163,6 +161,10 @@ function closeMediaModal() {
   stage.innerHTML = "";
   modal.hidden = true;
   document.body.classList.remove("modal-open");
+  if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
+    lastFocusedElement.focus();
+  }
+  lastFocusedElement = null;
 }
 
 function actionButton(label, className, onClick) {
@@ -207,6 +209,32 @@ function hostRequest(path, options = {}) {
       Authorization: `Bearer ${token}`
     }
   });
+}
+
+function updateTabs() {
+  const counts = submissions.reduce((acc, item) => {
+    acc[item.status] = (acc[item.status] || 0) + 1;
+    return acc;
+  }, { pending: 0, approved: 0, rejected: 0 });
+
+  qsa("[data-status]").forEach((tab) => {
+    const isActive = tab.dataset.status === currentStatus;
+    tab.classList.toggle("is-active", isActive);
+    tab.setAttribute("aria-pressed", String(isActive));
+  });
+
+  qsa("[data-count]").forEach((count) => {
+    count.textContent = counts[count.dataset.count] || 0;
+  });
+}
+
+function getEmptyMessage(status) {
+  const messages = {
+    pending: "No pending submissions. New guest moments will appear here first.",
+    approved: "No approved submissions yet. Approve pending moments to build the host gallery.",
+    rejected: "No rejected submissions. Anything denied will stay here unless it is deleted."
+  };
+  return messages[status] || "No submissions in this view yet.";
 }
 
 function escapeHtml(value) {

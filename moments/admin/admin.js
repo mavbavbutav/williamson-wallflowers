@@ -45,11 +45,14 @@ async function loadAdmin() {
     const payload = await adminRequest("/admin/overview");
     events = payload.events || [];
     tags = payload.tags || [];
+    const shouldFocusTitle = qs("#adminApp").hidden;
     qs("#authPanel").hidden = true;
     qs("#adminApp").hidden = false;
     renderStats(payload.stats || {});
+    renderGuide();
     renderTags();
     renderEvents();
+    if (shouldFocusTitle) focusElement(qs("#adminTitle"));
   } catch (error) {
     qs("#authPanel").hidden = false;
     qs("#adminApp").hidden = true;
@@ -111,10 +114,7 @@ function renderStats(stats) {
 
 function renderTags() {
   const rows = tags.map((tag) => {
-    const assignedOptions = [
-      `<option value="">Unassigned</option>`,
-      ...events.map((event) => `<option value="${event.id}"${event.id === tag.activeEventId ? " selected" : ""}>${escapeHtml(event.name)}</option>`)
-    ].join("");
+    const assignedOptions = buildEventOptions(tag.activeEventId);
     const guestUrl = buildGuestUrl(tag.publicCode);
 
     return `
@@ -143,7 +143,10 @@ function renderTags() {
     `;
   }).join("");
 
+  const cards = tags.map((tag) => renderTagCard(tag)).join("");
+
   qs("#tagsTable").innerHTML = rows || `<tr><td colspan="5">No tags registered yet.</td></tr>`;
+  qs("#tagsCards").innerHTML = cards || `<div class="empty-state">No tags registered yet.</div>`;
   bindTagActions();
 }
 
@@ -176,14 +179,17 @@ function renderEvents() {
     `;
   }).join("");
 
+  const cards = events.map((event) => renderEventCard(event)).join("");
+
   qs("#eventsTable").innerHTML = rows || `<tr><td colspan="5">No events created yet.</td></tr>`;
+  qs("#eventsCards").innerHTML = cards || `<div class="empty-state">No events created yet.</div>`;
   bindEventActions();
 }
 
 function bindTagActions() {
-  qs("#tagsTable").querySelectorAll("[data-save-tag]").forEach((button) => {
+  qsaWithin("#tagsTable, #tagsCards", "[data-save-tag]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const row = button.closest("tr");
+      const row = button.closest("[data-tag-id]");
       const tagId = row.dataset.tagId;
       const body = {
         status: row.querySelector("[data-tag-status]").value,
@@ -193,27 +199,27 @@ function bindTagActions() {
     });
   });
 
-  qs("#tagsTable").querySelectorAll("[data-copy]").forEach((button) => {
+  qsaWithin("#tagsTable, #tagsCards", "[data-copy]").forEach((button) => {
     button.addEventListener("click", () => copyText(decodeURIComponent(button.dataset.copy), button));
   });
 }
 
 function bindEventActions() {
-  qs("#eventsTable").querySelectorAll("[data-event-status]").forEach((button) => {
+  qsaWithin("#eventsTable, #eventsCards", "[data-event-status]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const row = button.closest("tr");
+      const row = button.closest("[data-event-id]");
       await updateEvent(row.dataset.eventId, { status: button.dataset.eventStatus });
     });
   });
 
-  qs("#eventsTable").querySelectorAll("[data-copy]").forEach((button) => {
+  qsaWithin("#eventsTable, #eventsCards", "[data-copy]").forEach((button) => {
     button.addEventListener("click", () => copyText(decodeURIComponent(button.dataset.copy), button));
   });
 
-  qs("#eventsTable").querySelectorAll("[data-rotate-host]").forEach((button) => {
+  qsaWithin("#eventsTable, #eventsCards", "[data-rotate-host]").forEach((button) => {
     button.addEventListener("click", async () => {
       if (!window.confirm("Rotate this host link? The previous host link will stop working.")) return;
-      const row = button.closest("tr");
+      const row = button.closest("[data-event-id]");
       await updateEvent(row.dataset.eventId, { rotateHostToken: true });
     });
   });
@@ -281,6 +287,106 @@ function signOut() {
   qs("#adminToken").value = "";
   qs("#authPanel").hidden = false;
   qs("#adminApp").hidden = true;
+}
+
+function renderGuide() {
+  const hasEvent = events.length > 0;
+  const hasTag = tags.length > 0;
+  const hasAssignedTag = tags.some((tag) => tag.activeEventId && tag.status === "active");
+  const steps = {
+    event: hasEvent,
+    tag: hasTag,
+    assign: hasAssignedTag,
+    share: hasEvent && hasAssignedTag
+  };
+  const firstOpen = Object.keys(steps).find((key) => !steps[key]);
+
+  Object.entries(steps).forEach(([key, isDone]) => {
+    const element = qs(`[data-guide-step="${key}"]`);
+    if (!element) return;
+    element.classList.toggle("is-done", isDone);
+    element.classList.toggle("is-current", key === firstOpen);
+  });
+}
+
+function renderTagCard(tag) {
+  const guestUrl = buildGuestUrl(tag.publicCode);
+
+  return `
+    <article class="admin-mobile-card" data-tag-id="${tag.id}">
+      <div class="mobile-card-heading">
+        <div>
+          <strong>${escapeHtml(tag.label)}</strong>
+          <span>${escapeHtml(tag.publicCode)}</span>
+        </div>
+        <span class="status-pill">${escapeHtml(tag.status)}</span>
+      </div>
+      <div class="field">
+        <label>Status</label>
+        <select data-tag-status>
+          <option value="active"${tag.status === "active" ? " selected" : ""}>Active</option>
+          <option value="inactive"${tag.status === "inactive" ? " selected" : ""}>Inactive</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Assigned event</label>
+        <select data-tag-event>${buildEventOptions(tag.activeEventId)}</select>
+      </div>
+      <p class="link-preview">${escapeHtml(guestUrl)}</p>
+      <div class="row-actions">
+        <button class="small-button" type="button" data-save-tag>Save</button>
+        <button class="small-button" type="button" data-copy="${encodeURIComponent(guestUrl)}">Copy guest link</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderEventCard(event) {
+  const hostUrl = buildHostUrl(event.id, event.hostToken);
+  const statusButton = event.status === "active" ? "Deactivate" : "Activate";
+  const nextStatus = event.status === "active" ? "inactive" : "active";
+
+  return `
+    <article class="admin-mobile-card" data-event-id="${event.id}">
+      <div class="mobile-card-heading">
+        <div>
+          <strong>${escapeHtml(event.name)}</strong>
+          <span>${formatDate(event.eventDate)} | expires ${formatDate(event.retentionExpiresAt?.slice(0, 10))}</span>
+        </div>
+        <span class="status-pill">${escapeHtml(event.status)}</span>
+      </div>
+      <div class="button-row">
+        <span class="status-pill is-pending">${event.pendingCount || 0} pending</span>
+        <span class="status-pill is-approved">${event.approvedCount || 0} approved</span>
+      </div>
+      <p class="link-preview">${escapeHtml(hostUrl)}</p>
+      <div class="row-actions">
+        <button class="small-button" type="button" data-event-status="${nextStatus}">${statusButton}</button>
+        <button class="small-button is-danger" type="button" data-rotate-host>Rotate host link</button>
+        <button class="small-button" type="button" data-copy="${encodeURIComponent(hostUrl)}">Copy host link</button>
+      </div>
+    </article>
+  `;
+}
+
+function buildEventOptions(activeEventId) {
+  return [
+    `<option value="">Unassigned</option>`,
+    ...events.map((event) => `<option value="${event.id}"${event.id === activeEventId ? " selected" : ""}>${escapeHtml(event.name)}</option>`)
+  ].join("");
+}
+
+function qsaWithin(containerSelector, targetSelector) {
+  return Array.from(document.querySelectorAll(containerSelector)).flatMap((container) => Array.from(container.querySelectorAll(targetSelector)));
+}
+
+function focusElement(element) {
+  if (!element) return;
+  try {
+    element.focus({ preventScroll: true });
+  } catch {
+    element.focus();
+  }
 }
 
 function escapeHtml(value) {
