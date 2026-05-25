@@ -361,6 +361,7 @@ a {
 
 .camera-frame,
 .preview-frame {
+  position: relative;
   overflow: hidden;
   display: grid;
   place-items: center;
@@ -378,6 +379,18 @@ a {
   max-height: 62vh;
   object-fit: contain;
   background: #2f2b28;
+}
+
+.camera-switch-button {
+  position: absolute;
+  z-index: 2;
+  top: 0.75rem;
+  right: 0.75rem;
+  border-color: rgba(255, 250, 245, 0.52);
+  color: #fffaf5;
+  background: rgba(47, 43, 40, 0.74);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(10px);
 }
 
 .record-timer {

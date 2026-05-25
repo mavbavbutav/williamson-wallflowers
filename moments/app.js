@@ -12,6 +12,7 @@ const state = {
   stream: null,
   recorder: null,
   chunks: [],
+  facingMode: "environment",
   mediaBlob: null,
   mediaFile: null,
   mediaType: "",
@@ -36,6 +37,7 @@ const fileInput = qs("#fileInput");
 const progressTrack = qs("#progressTrack");
 const progressBar = qs("#progressBar");
 const uploadNotice = qs("#uploadNotice");
+const switchCameraButton = qs("#switchCameraButton");
 
 init();
 
@@ -72,6 +74,7 @@ function bindEvents() {
   qs("#photoCaptureButton").addEventListener("click", capturePhoto);
   qs("#videoRecordButton").addEventListener("click", startRecording);
   qs("#videoStopButton").addEventListener("click", stopRecording);
+  switchCameraButton.addEventListener("click", switchCamera);
   qs("#retakeButton").addEventListener("click", () => chooseMode(state.mode));
   qs("#addAnotherButton").addEventListener("click", resetFlow);
   qs("#submissionForm").addEventListener("submit", submitMoment);
@@ -90,6 +93,8 @@ async function chooseMode(mode) {
   state.mediaBlob = null;
   state.mediaFile = null;
   state.durationSeconds = 0;
+  state.facingMode = mode === "photo" ? "environment" : "user";
+  updateSwitchCameraButton();
   setNotice(permissionNotice, "");
   setNotice(uploadNotice, "");
   progressTrack.hidden = true;
@@ -101,7 +106,7 @@ async function chooseMode(mode) {
     ? "Use the camera button or upload a photo from your phone."
     : "Record up to 30 seconds or upload a short video from your phone.";
   fileInput.accept = mode === "photo" ? "image/*" : "video/*,.mp4,.mov,.m4v,.webm,.3gp,.3gpp,.3g2";
-  fileInput.capture = mode === "photo" ? "environment" : "user";
+  fileInput.capture = state.facingMode;
   qs("#photoCaptureButton").hidden = mode !== "photo";
   qs("#videoRecordButton").hidden = mode !== "video";
   qs("#videoStopButton").hidden = true;
@@ -116,25 +121,56 @@ async function chooseMode(mode) {
   await startCamera(mode);
 }
 
-async function startCamera(mode) {
+async function startCamera(mode, options = {}) {
   stopStream();
+  updateSwitchCameraButton(true);
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     setNotice(permissionNotice, "Camera capture is not available in this browser. Use upload from phone instead.", "error");
-    return;
+    return false;
   }
 
   try {
-    const constraints = mode === "photo"
-      ? { video: { facingMode: { ideal: "environment" } }, audio: false }
-      : { video: { facingMode: { ideal: "user" } }, audio: true };
+    const constraints = buildCameraConstraints(mode, state.facingMode, options.exactFacingMode);
 
     state.stream = await navigator.mediaDevices.getUserMedia(constraints);
     cameraPreview.srcObject = state.stream;
-    setNotice(permissionNotice, mode === "photo" ? "Camera ready." : "Camera ready. Videos stop automatically at 30 seconds.", "success");
+    fileInput.capture = state.facingMode;
+    updateSwitchCameraButton();
+    setNotice(permissionNotice, mode === "photo" ? "Camera ready. Tap Switch camera to flip views." : "Camera ready. Tap Switch camera before recording if you want the other camera.", "success");
+    return true;
   } catch (error) {
+    updateSwitchCameraButton(true);
     setNotice(permissionNotice, "Camera permission was not available. Tap Upload from phone to choose an existing file or use your phone camera.", "error");
+    return false;
   }
+}
+
+async function switchCamera() {
+  if (!state.mode || switchCameraButton.disabled) return;
+
+  const nextFacingMode = state.facingMode === "user" ? "environment" : "user";
+  const previousFacingMode = state.facingMode;
+
+  state.facingMode = nextFacingMode;
+  fileInput.capture = state.facingMode;
+  updateSwitchCameraButton(true);
+  setNotice(permissionNotice, `Switching to ${cameraLabel(state.facingMode)} camera...`);
+
+  const switched = await startCamera(state.mode, { exactFacingMode: true });
+  if (!switched) {
+    state.facingMode = previousFacingMode;
+    fileInput.capture = state.facingMode;
+    await startCamera(state.mode);
+    setNotice(permissionNotice, "That camera was not available on this device. Keeping the current camera.", "error");
+  }
+}
+
+function buildCameraConstraints(mode, facingMode, exactFacingMode = false) {
+  return {
+    video: { facingMode: exactFacingMode ? { exact: facingMode } : { ideal: facingMode } },
+    audio: mode === "video"
+  };
 }
 
 function capturePhoto() {
@@ -198,6 +234,7 @@ function startRecording() {
   qs("#videoRecordButton").hidden = true;
   qs("#videoStopButton").hidden = false;
   qs("#recordTimer").hidden = false;
+  updateSwitchCameraButton(true);
   startTimer();
   window.setTimeout(() => {
     if (state.recorder && state.recorder.state === "recording") stopRecording();
@@ -407,6 +444,7 @@ function resetFlow() {
   stopStream();
   stopTimer();
   state.mode = "";
+  state.facingMode = "environment";
   state.mediaBlob = null;
   state.mediaFile = null;
   state.mediaType = "";
@@ -423,6 +461,7 @@ function stopStream() {
   }
   state.stream = null;
   cameraPreview.srcObject = null;
+  updateSwitchCameraButton(true);
 }
 
 function showView(name) {
@@ -450,4 +489,17 @@ function revokePreviewUrl() {
   if (!state.previewUrl) return;
   URL.revokeObjectURL(state.previewUrl);
   state.previewUrl = "";
+}
+
+function updateSwitchCameraButton(disabled = false) {
+  if (!switchCameraButton) return;
+  const isRecording = state.recorder && state.recorder.state === "recording";
+  switchCameraButton.hidden = !state.mode || qs("#captureView").hidden || !state.stream || isRecording;
+  switchCameraButton.disabled = disabled || isRecording;
+  switchCameraButton.textContent = `Use ${state.facingMode === "user" ? "back" : "front"} camera`;
+  switchCameraButton.setAttribute("aria-label", `Switch to ${state.facingMode === "user" ? "back" : "front"} camera`);
+}
+
+function cameraLabel(facingMode) {
+  return facingMode === "user" ? "front" : "back";
 }

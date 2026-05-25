@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20260525-7" />
+  <link rel="stylesheet" href="styles.css?v=20260525-9" />
 </head>
 <body class="guest-page">
   <main class="app-shell">
@@ -99,6 +99,7 @@
         <div class="capture-stage" id="cameraStage">
           <div class="camera-frame">
             <video id="cameraPreview" autoplay playsinline muted></video>
+            <button class="small-button camera-switch-button" type="button" id="switchCameraButton" hidden>Switch camera</button>
           </div>
           <div class="button-row" id="cameraActions">
             <button class="button button-primary" type="button" id="photoCaptureButton" hidden>Capture photo</button>
@@ -172,6 +173,6 @@
     </section>
   </main>
 
-  <script type="module" src="app.js?v=20260525-4"></script>
+  <script type="module" src="app.js?v=20260525-5"></script>
 </body>
 </html>
