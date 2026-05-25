@@ -16,7 +16,7 @@ export function getApiBase() {
     return "http://localhost:8787/moments-api";
   }
 
-  return "https://api.williamsonwallflowers.com/moments-api";
+  return "https://williamson-wallflowers-inquiry.johnmartinferguson.workers.dev/moments-api";
 }
 
 export const apiBase = getApiBase();

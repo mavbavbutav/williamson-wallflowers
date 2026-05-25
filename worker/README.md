@@ -32,13 +32,19 @@ The public flower wall site stays static on GitHub Pages. The Moments frontend i
    npx wrangler deploy
    ```
 
-7. Configure the Worker custom domain:
+7. Optional later: configure a branded Worker custom domain after `williamsonwallflowers.com` is added as a Cloudflare zone:
 
    ```text
    api.williamsonwallflowers.com
    ```
 
 The existing inquiry form can keep posting to the current `workers.dev` URL or move to `https://api.williamsonwallflowers.com/`. The Moments app expects the branded API domain by default.
+
+For the current live test setup, Moments uses:
+
+```text
+https://williamson-wallflowers-inquiry.johnmartinferguson.workers.dev/moments-api
+```
 
 The Worker sends with the display name `Williamson Wallflowers` from the verified JJE sender domain:
 

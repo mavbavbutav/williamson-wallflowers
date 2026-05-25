@@ -3,17 +3,13 @@ main = "src/index.js"
 compatibility_date = "2026-05-16"
 workers_dev = true
 
-[[routes]]
-pattern = "api.williamsonwallflowers.com"
-custom_domain = true
-
 [vars]
 TO_EMAIL = "jamicarswell@gmail.com"
 SUPPORT_EMAIL = "contact@jjentertainmentsolutions.com"
 FROM_EMAIL = "Williamson Wallflowers <noreply@jjentertainmentsolutions.com>"
 PUBLIC_SITE_URL = "https://williamsonwallflowers.com"
-MOMENTS_API_URL = "https://api.williamsonwallflowers.com"
-ALLOWED_ORIGINS = "https://williamsonwallflowers.com,https://www.williamsonwallflowers.com,https://api.williamsonwallflowers.com,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000,http://localhost:8787,http://127.0.0.1:8787"
+MOMENTS_API_URL = "https://williamson-wallflowers-inquiry.johnmartinferguson.workers.dev"
+ALLOWED_ORIGINS = "https://williamsonwallflowers.com,https://www.williamsonwallflowers.com,https://williamson-wallflowers-inquiry.johnmartinferguson.workers.dev,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000,http://localhost:8787,http://127.0.0.1:8787"
 
 [[d1_databases]]
 binding = "MOMENTS_DB"
