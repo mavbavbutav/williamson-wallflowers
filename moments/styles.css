@@ -556,6 +556,10 @@ a {
   object-fit: cover;
 }
 
+.media-thumb video {
+  object-fit: contain;
+}
+
 .media-body {
   display: grid;
   gap: 0.7rem;

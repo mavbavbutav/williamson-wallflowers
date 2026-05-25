@@ -1,4 +1,4 @@
-import { formatBytes, formatDate, formatDateTime, getParam, qs, qsa, requestJson, setNotice } from "../shared.js?v=20260525-1";
+import { formatBytes, formatDate, formatDateTime, getParam, qs, qsa, requestJson, setNotice } from "../shared.js?v=20260525-2";
 
 const eventId = getParam("event");
 const token = getParam("token");
@@ -72,6 +72,7 @@ function renderCard(submission) {
     video.src = mediaUrl;
     video.controls = true;
     video.playsInline = true;
+    video.preload = "metadata";
     thumb.append(video);
   }
 

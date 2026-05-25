@@ -119,7 +119,7 @@ async function handleMomentsApi(request, env, url, corsHeaders) {
       }
     }
 
-    if (request.method === 'GET' && parts[0] === 'media' && parts[1]) {
+    if ((request.method === 'GET' || request.method === 'HEAD') && parts[0] === 'media' && parts[1]) {
       return streamMedia(request, env, url, corsHeaders, parts[1]);
     }
 
@@ -336,17 +336,22 @@ async function streamMedia(request, env, url, corsHeaders, submissionId) {
 
   const totalSize = Number(submission.size || 0);
   const parsedRange = parseRange(request.headers.get('Range'), totalSize);
-  const object = await env.MOMENTS_BUCKET.get(
-    submission.objectKey,
-    parsedRange ? { range: { offset: parsedRange.start, length: parsedRange.length } } : undefined
-  );
+  const isHeadRequest = request.method === 'HEAD';
+  const object = isHeadRequest
+    ? await env.MOMENTS_BUCKET.head(submission.objectKey)
+    : await env.MOMENTS_BUCKET.get(
+      submission.objectKey,
+      parsedRange ? { range: { offset: parsedRange.start, length: parsedRange.length } } : undefined
+    );
 
   if (!object) {
     return json({ ok: false, message: 'Media file is missing from storage.' }, 404, corsHeaders);
   }
 
   const headers = new Headers(corsHeaders);
-  object.writeHttpMetadata(headers);
+  if (typeof object.writeHttpMetadata === 'function') {
+    object.writeHttpMetadata(headers);
+  }
   headers.set('Content-Type', submission.mimeType);
   headers.set('Accept-Ranges', 'bytes');
   headers.set('Cache-Control', 'private, max-age=60');
@@ -356,11 +361,11 @@ async function streamMedia(request, env, url, corsHeaders, submissionId) {
   if (parsedRange) {
     headers.set('Content-Range', `bytes ${parsedRange.start}-${parsedRange.end}/${totalSize}`);
     headers.set('Content-Length', String(parsedRange.length));
-    return new Response(object.body, { status: 206, headers });
+    return new Response(isHeadRequest ? null : object.body, { status: 206, headers });
   }
 
   headers.set('Content-Length', String(totalSize || object.size || 0));
-  return new Response(object.body, { status: 200, headers });
+  return new Response(isHeadRequest ? null : object.body, { status: 200, headers });
 }
 
 async function handleAdminApi(request, env, url, corsHeaders, parts) {
