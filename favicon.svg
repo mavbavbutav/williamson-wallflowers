@@ -1,8 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Williamson Wallflowers favicon">
-  <rect width="64" height="64" rx="16" fill="#fbf8f4"/>
-  <circle cx="32" cy="18.5" r="10" fill="#e8dfd5"/>
-  <circle cx="18.5" cy="32" r="10" fill="#ddd0c4"/>
-  <circle cx="45.5" cy="32" r="10" fill="#ddd0c4"/>
-  <circle cx="32" cy="45.5" r="10" fill="#e8dfd5"/>
-  <circle cx="32" cy="32" r="6.5" fill="#b29f8b"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Williamson Wallflowers logo mark">
+  <rect width="64" height="64" rx="14" fill="#fffaf8"/>
+  <path d="M32 9c7 10 6 17 0 22-6-5-7-12 0-22Z" fill="#f6d9df"/>
+  <path d="M32 55c-7-10-6-17 0-22 6 5 7 12 0 22Z" fill="#f3cbd6"/>
+  <path d="M9 32c10-7 17-6 22 0-5 6-12 7-22 0Z" fill="#f0c4d0"/>
+  <path d="M55 32c-10 7-17 6-22 0 5-6 12-7 22 0Z" fill="#f0c4d0"/>
+  <circle cx="32" cy="32" r="9" fill="#f1d46f"/>
+  <text x="32" y="40" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="20" font-weight="700" fill="#44413f">W</text>
 </svg>
