@@ -76,7 +76,7 @@ function bindEvents() {
   });
 
   qs("#resetFlowButton").addEventListener("click", resetFlow);
-  qs("#fileFallbackButton").addEventListener("click", () => fileInput.click());
+  qs("#fileFallbackButton").addEventListener("click", openPhoneLibrary);
   qs("#photoCaptureButton").addEventListener("click", capturePhoto);
   qs("#videoRecordButton").addEventListener("click", startRecording);
   qs("#videoStopButton").addEventListener("click", stopRecording);
@@ -91,6 +91,11 @@ function bindEvents() {
     await acceptFile(file);
     fileInput.value = "";
   });
+}
+
+function openPhoneLibrary() {
+  fileInput.removeAttribute("capture");
+  fileInput.click();
 }
 
 async function chooseMode(mode) {
@@ -114,11 +119,7 @@ async function chooseMode(mode) {
   qs("#captureHelp").textContent = getCaptureHelp(mode);
   qs("#guestEncouragement").textContent = getCaptureTip(mode);
   fileInput.accept = getAcceptTypes(mode);
-  if (mode === "audio") {
-    fileInput.removeAttribute("capture");
-  } else {
-    fileInput.capture = state.facingMode;
-  }
+  fileInput.removeAttribute("capture");
   qs("#photoCaptureButton").hidden = mode !== "photo";
   qs("#videoRecordButton").hidden = mode === "photo";
   qs("#videoRecordButton").textContent = mode === "audio" ? "Start voice memo" : "Start recording";
@@ -148,7 +149,6 @@ async function startCamera(mode, options = {}) {
 
     state.stream = await navigator.mediaDevices.getUserMedia(constraints);
     cameraPreview.srcObject = mode === "audio" ? null : state.stream;
-    if (mode !== "audio") fileInput.capture = state.facingMode;
     updateSwitchCameraButton();
     setNotice(permissionNotice, getReadyNotice(mode), "success");
     return true;
@@ -156,7 +156,7 @@ async function startCamera(mode, options = {}) {
     updateSwitchCameraButton(true);
     setNotice(permissionNotice, mode === "audio"
       ? "Microphone permission was not available. Tap Upload from phone to choose an existing audio file."
-      : "Camera permission was not available. Tap Upload from phone to choose an existing file or use your phone camera.", "error");
+      : "Camera permission was not available. Tap Upload from phone to choose an existing file.", "error");
     return false;
   }
 }
@@ -168,14 +168,12 @@ async function switchCamera() {
   const previousFacingMode = state.facingMode;
 
   state.facingMode = nextFacingMode;
-  fileInput.capture = state.facingMode;
   updateSwitchCameraButton(true);
   setNotice(permissionNotice, `Switching to ${cameraLabel(state.facingMode)} camera...`);
 
   const switched = await startCamera(state.mode, { exactFacingMode: true });
   if (!switched) {
     state.facingMode = previousFacingMode;
-    fileInput.capture = state.facingMode;
     await startCamera(state.mode);
     setNotice(permissionNotice, "That camera was not available on this device. Keeping the current camera.", "error");
   }
@@ -197,7 +195,7 @@ function buildCameraConstraints(mode, facingMode, exactFacingMode = false) {
 
 function capturePhoto() {
   if (!state.stream) {
-    fileInput.click();
+    openPhoneLibrary();
     return;
   }
 
@@ -228,7 +226,7 @@ function startRecording() {
     setNotice(permissionNotice, state.mode === "audio"
       ? "Voice memo recording is not available in this browser. Upload an audio file instead."
       : "Video recording is not available in this browser. Upload a short phone video instead.", "error");
-    fileInput.click();
+    openPhoneLibrary();
     return;
   }
 

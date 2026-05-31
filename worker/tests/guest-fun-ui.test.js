@@ -9,8 +9,8 @@ test('guest link has a playful memory booth flow', async () => {
     readText('../../moments/styles.css')
   ]);
 
-  assert.match(guestHtml, /styles\.css\?v=20260531-guest-fun-1/);
-  assert.match(guestHtml, /app\.js\?v=20260531-guest-fun-1/);
+  assert.match(guestHtml, /styles\.css\?v=20260531-upload-picker-1/);
+  assert.match(guestHtml, /app\.js\?v=20260531-upload-picker-1/);
   assert.match(guestHtml, /class="guest-flow-card"/);
   assert.match(guestHtml, /class="memory-mode-card/);
   assert.match(guestHtml, /data-guest-step="choose"/);
@@ -21,6 +21,9 @@ test('guest link has a playful memory booth flow', async () => {
   assert.match(guestJs, /function updateGuestFlow/);
   assert.match(guestJs, /function renderSendSummary/);
   assert.match(guestJs, /function showGuestCelebration/);
+  assert.match(guestJs, /function openPhoneLibrary/);
+  assert.match(guestJs, /fileInput\.removeAttribute\("capture"\)/);
+  assert.doesNotMatch(guestJs, /fileInput\.capture\s*=/);
   assert.match(guestJs, /chooseMode\(button\.dataset\.mode\)/);
   assert.match(guestJs, /Your voice memo is ready/);
 
