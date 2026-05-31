@@ -694,6 +694,10 @@ async function handleAdminApi(request, env, url, corsHeaders, parts) {
     return updateAdminTag(request, env, corsHeaders, parts[1]);
   }
 
+  if (request.method === 'DELETE' && parts[0] === 'tags' && parts[1]) {
+    return deleteAdminTag(request, env, corsHeaders, parts[1]);
+  }
+
   return json({ ok: false, message: 'Admin route not found.' }, 404, corsHeaders);
 }
 
@@ -1029,6 +1033,18 @@ async function updateAdminTag(request, env, corsHeaders, tagId) {
   `).bind(next.label, next.status, next.activeEventId, new Date().toISOString(), tagId).run();
 
   return json({ ok: true, tag: { id: tagId, ...next } }, 200, corsHeaders);
+}
+
+async function deleteAdminTag(request, env, corsHeaders, tagId) {
+  const current = await env.MOMENTS_DB.prepare('SELECT * FROM tags WHERE id = ?').bind(tagId).first();
+  if (!current) return json({ ok: false, message: 'Tag not found.' }, 404, corsHeaders);
+
+  await env.MOMENTS_DB.prepare('DELETE FROM tags WHERE id = ?').bind(tagId).run();
+
+  return json({
+    ok: true,
+    deletedTagId: tagId
+  }, 200, corsHeaders);
 }
 
 function getAllowedOrigins(env) {

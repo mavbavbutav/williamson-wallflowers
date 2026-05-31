@@ -302,6 +302,7 @@ function renderTags() {
         <td>
           <div class="row-actions">
             <button class="small-button" type="button" data-save-tag>Save</button>
+            <button class="small-button is-danger" type="button" data-delete-tag data-tag-label="${escapeAttribute(tag.label)}">Delete</button>
           </div>
         </td>
       </tr>
@@ -468,6 +469,16 @@ function bindTagActions() {
     });
   });
 
+  qsaWithin("#tagsTable, #tagsCards", "[data-delete-tag]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest("[data-tag-id]");
+      const tagLabel = button.dataset.tagLabel || "this reusable tag";
+      const message = `Delete reusable tag "${tagLabel}"? This removes the NTAG record and guest scan link, but does not delete the event or any guest moments.`;
+      if (!window.confirm(message)) return;
+      await deleteTag(row.dataset.tagId, tagLabel);
+    });
+  });
+
   qsaWithin("#tagsTable, #tagsCards", "[data-copy]").forEach((button) => {
     button.addEventListener("click", () => copyText(decodeURIComponent(button.dataset.copy), button));
   });
@@ -555,6 +566,18 @@ async function updateTag(tagId, body, successMessage = "Tag updated.") {
     showAdminNotice(successMessage, "success");
   } catch (error) {
     showAdminNotice(error.message || "Could not update tag.", "error");
+  }
+}
+
+async function deleteTag(tagId, tagLabel) {
+  try {
+    await adminRequest(`/admin/tags/${encodeURIComponent(tagId)}`, {
+      method: "DELETE"
+    });
+    await loadAdmin();
+    showAdminNotice(`Reusable tag "${tagLabel}" was deleted. Event data and guest moments were not changed.`, "success");
+  } catch (error) {
+    showAdminNotice(error.message || "Could not delete reusable tag.", "error");
   }
 }
 
@@ -670,6 +693,7 @@ function renderTagCard(tag) {
       ])}
       <div class="row-actions">
         <button class="small-button" type="button" data-save-tag>Save</button>
+        <button class="small-button is-danger" type="button" data-delete-tag data-tag-label="${escapeAttribute(tag.label)}">Delete</button>
       </div>
     </article>
   `;
