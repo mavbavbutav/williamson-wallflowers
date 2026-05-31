@@ -12,7 +12,9 @@ const FIELD_LABELS = [
 const REQUIRED_FIELDS = ['name', 'email'];
 const PHOTO_MAX_BYTES = 8 * 1024 * 1024;
 const VIDEO_MAX_BYTES = 50 * 1024 * 1024;
+const AUDIO_MAX_BYTES = 20 * 1024 * 1024;
 const VIDEO_MAX_SECONDS = 30;
+const AUDIO_MAX_SECONDS = 60;
 const UPLOAD_TOKEN_TTL_SECONDS = 12 * 60 * 60;
 const MEDIA_TOKEN_TTL_SECONDS = 6 * 60 * 60;
 const UPLOAD_RATE_LIMIT = 12;
@@ -37,6 +39,20 @@ const VIDEO_TYPES = new Set([
   'video/h264'
 ]);
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'webm', '3gp', '3gpp', '3g2']);
+const AUDIO_TYPES = new Set([
+  'audio/aac',
+  'audio/flac',
+  'audio/m4a',
+  'audio/mp4',
+  'audio/mpeg',
+  'audio/ogg',
+  'audio/opus',
+  'audio/wav',
+  'audio/webm',
+  'audio/x-m4a',
+  'audio/x-wav'
+]);
+const AUDIO_EXTENSIONS = new Set(['aac', 'flac', 'm4a', 'mp3', 'oga', 'ogg', 'opus', 'wav', 'weba', 'webm']);
 const PUBLIC_SITE_URL = 'https://williamsonwallflowers.com';
 
 export default {
@@ -273,7 +289,7 @@ async function createSubmission(request, env, corsHeaders, eventId) {
   }
 
   if (!media || typeof media === 'string' || typeof media.stream !== 'function') {
-    return json({ ok: false, message: 'Please upload a photo or video.' }, 400, corsHeaders);
+    return json({ ok: false, message: 'Please upload a photo, video, or voice memo.' }, 400, corsHeaders);
   }
 
   if (!await verifySignedToken(env, uploadToken, 'upload', eventId)) {
@@ -388,13 +404,6 @@ async function updateHostTimeCapsule(request, env, url, corsHeaders, eventId) {
   const title = cleanText(body.title, 140) || event.record.timeCapsuleTitle || `${event.record.name} Time Capsule`;
   const now = new Date().toISOString();
   let publishedAt = status === 'published' ? (event.record.timeCapsulePublishedAt || now) : null;
-
-  if (status === 'published') {
-    const visibleItems = await getTimeCapsuleItems(env, event.record.id, request, { visibleOnly: true });
-    if (!visibleItems.length) {
-      return json({ ok: false, message: 'Add at least one visible approved moment before publishing.' }, 400, corsHeaders);
-    }
-  }
 
   await env.MOMENTS_DB.prepare(`
     UPDATE events
@@ -800,6 +809,8 @@ async function createAdminEvent(request, env, corsHeaders) {
   const adminToken = randomToken();
   const timeCapsuleShareToken = timeCapsuleEnabled ? randomToken() : null;
   const timeCapsuleTitle = timeCapsuleEnabled ? (cleanText(body.timeCapsuleTitle, 140) || `${name} Time Capsule`) : null;
+  const timeCapsuleStatus = timeCapsuleEnabled ? 'published' : 'draft';
+  const timeCapsulePublishedAt = timeCapsuleEnabled ? now : null;
   const retentionExpiresAt = getRetentionExpiresAt(eventDate, timeCapsuleEnabled ? TIME_CAPSULE_RETENTION_DAYS : STANDARD_RETENTION_DAYS);
 
   await env.MOMENTS_DB.prepare(`
@@ -821,10 +832,10 @@ async function createAdminEvent(request, env, corsHeaders) {
     now,
     now,
     timeCapsuleEnabled ? 1 : 0,
-    'draft',
+    timeCapsuleStatus,
     timeCapsuleTitle,
     timeCapsuleShareToken,
-    null
+    timeCapsulePublishedAt
   ).run();
 
   return json({
@@ -838,10 +849,10 @@ async function createAdminEvent(request, env, corsHeaders) {
       retentionExpiresAt,
       hostUrl: `${getSiteUrl(env)}/moments/host/?event=${encodeURIComponent(id)}#token=${encodeURIComponent(hostToken)}`,
       timeCapsuleEnabled,
-      timeCapsuleStatus: 'draft',
+      timeCapsuleStatus,
       timeCapsuleTitle,
       timeCapsuleShareToken,
-      timeCapsulePublishedAt: null,
+      timeCapsulePublishedAt,
       capsuleShareUrl: timeCapsuleEnabled ? buildTimeCapsuleShareUrl(env, id, timeCapsuleShareToken) : ''
     }
   }, 201, corsHeaders);
@@ -861,6 +872,12 @@ async function updateAdminEvent(request, env, corsHeaders, eventId) {
   const nextTimeCapsuleShareToken = nextTimeCapsuleEnabled
     ? (current.timeCapsuleShareToken || randomToken())
     : current.timeCapsuleShareToken;
+  const timeCapsuleWasEnabled = Boolean(current.timeCapsuleEnabled);
+  const requestedTimeCapsuleStatus = !nextTimeCapsuleEnabled
+    ? 'draft'
+    : body.timeCapsuleStatus === undefined
+    ? (nextTimeCapsuleEnabled && !timeCapsuleWasEnabled ? 'published' : current.timeCapsuleStatus)
+    : normalizeStatus(body.timeCapsuleStatus, ['draft', 'published']);
   const next = {
     name: body.name === undefined ? current.name : cleanText(body.name, 120),
     eventDate: nextEventDate || null,
@@ -874,12 +891,14 @@ async function updateAdminEvent(request, env, corsHeaders, eventId) {
         : current.retentionExpiresAt
     ),
     timeCapsuleEnabled: nextTimeCapsuleEnabled,
-    timeCapsuleStatus: body.timeCapsuleStatus === undefined ? current.timeCapsuleStatus : normalizeStatus(body.timeCapsuleStatus, ['draft', 'published']),
+    timeCapsuleStatus: requestedTimeCapsuleStatus,
     timeCapsuleTitle: body.timeCapsuleTitle === undefined ? current.timeCapsuleTitle : cleanText(body.timeCapsuleTitle, 140),
     timeCapsuleShareToken: nextTimeCapsuleShareToken,
-    timeCapsulePublishedAt: body.timeCapsuleStatus === 'published'
+    timeCapsulePublishedAt: !nextTimeCapsuleEnabled
+      ? null
+      : requestedTimeCapsuleStatus === 'published'
       ? (current.timeCapsulePublishedAt || new Date().toISOString())
-      : (body.timeCapsuleStatus === 'draft' || !nextTimeCapsuleEnabled ? null : current.timeCapsulePublishedAt)
+      : (requestedTimeCapsuleStatus === 'draft' || !nextTimeCapsuleEnabled ? null : current.timeCapsulePublishedAt)
   };
 
   if (!next.name) {
@@ -1437,11 +1456,13 @@ function isAdminRequest(request, url, env) {
 
 function normalizeMediaType(mediaType, mimeType, filename = '') {
   const requested = String(mediaType || '').toLowerCase();
-  if (requested === 'photo' || requested === 'video') return requested;
+  if (requested === 'photo' || requested === 'video' || requested === 'audio') return requested;
   const baseMimeType = getBaseMimeType(mimeType);
   if (baseMimeType.startsWith('image/')) return 'photo';
   if (baseMimeType.startsWith('video/')) return 'video';
+  if (baseMimeType.startsWith('audio/')) return 'audio';
   if (VIDEO_EXTENSIONS.has(getFileExtension(filename))) return 'video';
+  if (AUDIO_EXTENSIONS.has(getFileExtension(filename))) return 'audio';
   return '';
 }
 
@@ -1459,7 +1480,14 @@ function validateMedia(media, mediaType, durationSeconds) {
     return '';
   }
 
-  return 'Please upload a photo or video.';
+  if (mediaType === 'audio') {
+    if (!isAllowedVoiceMemo(media)) return 'Voice memos must be M4A, MP3, WAV, OGG, or WEBM audio.';
+    if (media.size > AUDIO_MAX_BYTES) return 'Voice memos must be 20 MB or smaller.';
+    if (Number(durationSeconds || 0) > AUDIO_MAX_SECONDS + 1) return 'Voice memos must be 60 seconds or shorter.';
+    return '';
+  }
+
+  return 'Please upload a photo, video, or voice memo.';
 }
 
 function isAllowedMobileVideo(media) {
@@ -1469,6 +1497,17 @@ function isAllowedMobileVideo(media) {
   if (VIDEO_TYPES.has(baseMimeType)) return true;
   if (baseMimeType.startsWith('video/') && VIDEO_EXTENSIONS.has(extension)) return true;
   if ((!baseMimeType || baseMimeType === 'application/octet-stream') && VIDEO_EXTENSIONS.has(extension)) return true;
+
+  return false;
+}
+
+function isAllowedVoiceMemo(media) {
+  const baseMimeType = getBaseMimeType(media.type);
+  const extension = getFileExtension(media.name);
+
+  if (AUDIO_TYPES.has(baseMimeType)) return true;
+  if (baseMimeType.startsWith('audio/') && AUDIO_EXTENSIONS.has(extension)) return true;
+  if ((!baseMimeType || baseMimeType === 'application/octet-stream') && AUDIO_EXTENSIONS.has(extension)) return true;
 
   return false;
 }
@@ -1524,7 +1563,18 @@ function extensionFor(mimeType, filename) {
     'video/3gpp': '3gp',
     'video/3gpp2': '3g2',
     'video/hevc': 'mov',
-    'video/h264': 'mp4'
+    'video/h264': 'mp4',
+    'audio/aac': 'aac',
+    'audio/flac': 'flac',
+    'audio/m4a': 'm4a',
+    'audio/mp4': 'm4a',
+    'audio/mpeg': 'mp3',
+    'audio/ogg': 'ogg',
+    'audio/opus': 'opus',
+    'audio/wav': 'wav',
+    'audio/webm': 'webm',
+    'audio/x-m4a': 'm4a',
+    'audio/x-wav': 'wav'
   };
 
   return map[getBaseMimeType(mimeType)] || 'bin';
@@ -1558,10 +1608,23 @@ function getStoredMimeType(mimeType, filename, mediaType) {
     webm: 'video/webm',
     '3gp': 'video/3gpp',
     '3gpp': 'video/3gpp',
-    '3g2': 'video/3gpp2'
+    '3g2': 'video/3gpp2',
+    aac: 'audio/aac',
+    flac: 'audio/flac',
+    m4a: 'audio/mp4',
+    mp3: 'audio/mpeg',
+    oga: 'audio/ogg',
+    ogg: 'audio/ogg',
+    opus: 'audio/opus',
+    wav: 'audio/wav',
+    weba: 'audio/webm'
   };
 
-  return byExtension[extension] || (mediaType === 'video' ? 'video/mp4' : 'application/octet-stream');
+  if (extension === 'webm' && mediaType === 'audio') return 'audio/webm';
+  if (byExtension[extension]) return byExtension[extension];
+  if (mediaType === 'video') return 'video/mp4';
+  if (mediaType === 'audio') return 'audio/webm';
+  return 'application/octet-stream';
 }
 
 async function createSignedToken(env, scope, subject, ttlSeconds) {

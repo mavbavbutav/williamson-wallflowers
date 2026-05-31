@@ -137,7 +137,7 @@ function renderSubmissionCard(submission) {
   body.innerHTML = `
     <div class="button-row">
       <span class="status-pill is-${submission.status}">${submission.status}</span>
-      <span class="status-pill">${submission.mediaType}</span>
+      <span class="status-pill">${escapeHtml(getMediaTypeLabel(submission.mediaType))}</span>
     </div>
     <strong>${escapeHtml(submission.guestName || "Anonymous guest")}</strong>
     <p class="muted">${escapeHtml(submission.guestNote || "No note added.")}</p>
@@ -269,6 +269,12 @@ function renderThumb(item, mediaUrl) {
     image.src = mediaUrl;
     image.alt = item.guestName ? `Photo from ${item.guestName}` : "Guest photo";
     thumb.append(image);
+  } else if (item.mediaType === "audio") {
+    const audio = document.createElement("audio");
+    audio.src = mediaUrl;
+    audio.controls = true;
+    audio.preload = "metadata";
+    thumb.append(audio);
   } else {
     const video = document.createElement("video");
     video.src = mediaUrl;
@@ -360,7 +366,7 @@ function openMediaModal(submission, mediaUrl) {
 
   lastFocusedElement = document.activeElement;
   stage.innerHTML = "";
-  title.textContent = `${submission.mediaType === "video" ? "Video" : "Photo"} from ${submission.guestName || "anonymous guest"}`;
+  title.textContent = `${getMediaTypeLabel(submission.mediaType)} from ${submission.guestName || "anonymous guest"}`;
   download.href = `${submission.downloadUrl}&disposition=attachment`;
   download.download = "";
 
@@ -369,6 +375,12 @@ function openMediaModal(submission, mediaUrl) {
     image.src = mediaUrl;
     image.alt = submission.guestName ? `Photo from ${submission.guestName}` : "Guest photo";
     stage.append(image);
+  } else if (submission.mediaType === "audio") {
+    const audio = document.createElement("audio");
+    audio.src = mediaUrl;
+    audio.controls = true;
+    audio.preload = "metadata";
+    stage.append(audio);
   } else {
     const video = document.createElement("video");
     video.src = mediaUrl;
@@ -387,7 +399,7 @@ function closeMediaModal() {
   const modal = qs("#mediaModal");
   const stage = qs("#modalStage");
 
-  qsa("video", stage).forEach((video) => video.pause());
+  qsa("video, audio", stage).forEach((media) => media.pause());
   stage.innerHTML = "";
   modal.hidden = true;
   document.body.classList.remove("modal-open");
@@ -469,6 +481,12 @@ function getEmptyMessage(status) {
     rejected: "No rejected submissions. Anything denied will stay here unless it is deleted."
   };
   return messages[status] || "No submissions in this view yet.";
+}
+
+function getMediaTypeLabel(mediaType) {
+  if (mediaType === "audio") return "Voice memo";
+  if (mediaType === "video") return "Video";
+  return "Photo";
 }
 
 function cssEscape(value) {

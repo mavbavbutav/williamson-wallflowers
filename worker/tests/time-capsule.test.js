@@ -58,10 +58,79 @@ test('admin can create a Time Capsule-enabled event with one-year retention', as
 
   assert.equal(response.status, 201);
   assert.equal(payload.event.timeCapsuleEnabled, true);
-  assert.equal(payload.event.timeCapsuleStatus, 'draft');
+  assert.equal(payload.event.timeCapsuleStatus, 'published');
   assert.ok(payload.event.timeCapsuleShareToken);
+  assert.ok(payload.event.timeCapsulePublishedAt);
   assert.match(payload.event.capsuleShareUrl, /^https:\/\/williamsonwallflowers\.com\/moments\/capsule\/\?event=.*#token=/);
   assert.equal(new Date(payload.event.retentionExpiresAt).toISOString().slice(0, 10), '2027-09-19');
+});
+
+test('published Time Capsule viewer can open before moments are added', async () => {
+  const db = new FakeMomentsDb({
+    events: [{
+      id: 'event-empty',
+      name: 'The Smith Wedding',
+      eventDate: '2026-09-19',
+      hostName: 'Taylor',
+      hostEmail: 'taylor@example.com',
+      hostToken: 'host-token',
+      adminToken: 'event-admin-token',
+      status: 'active',
+      retentionExpiresAt: '2027-09-19T23:59:59.000Z',
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+      timeCapsuleEnabled: true,
+      timeCapsuleStatus: 'published',
+      timeCapsuleTitle: 'The Smith Wedding Time Capsule',
+      timeCapsuleShareToken: 'share-token',
+      timeCapsulePublishedAt: '2026-05-01T00:00:00.000Z'
+    }]
+  });
+
+  const viewerResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/capsules/event-empty', {
+    headers: { Authorization: 'Bearer share-token' }
+  }), envWithDb(db));
+  const viewerPayload = await viewerResponse.json();
+
+  assert.equal(viewerResponse.status, 200);
+  assert.equal(viewerPayload.event.title, 'The Smith Wedding Time Capsule');
+  assert.equal(viewerPayload.items.length, 0);
+});
+
+test('host can publish a Time Capsule before moments are added', async () => {
+  const db = new FakeMomentsDb({
+    events: [{
+      id: 'event-empty',
+      name: 'The Smith Wedding',
+      eventDate: '2026-09-19',
+      hostName: 'Taylor',
+      hostEmail: 'taylor@example.com',
+      hostToken: 'host-token',
+      adminToken: 'event-admin-token',
+      status: 'active',
+      retentionExpiresAt: '2027-09-19T23:59:59.000Z',
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+      timeCapsuleEnabled: true,
+      timeCapsuleStatus: 'draft',
+      timeCapsuleTitle: 'The Smith Wedding Time Capsule',
+      timeCapsuleShareToken: 'share-token',
+      timeCapsulePublishedAt: null
+    }]
+  });
+
+  const publishResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/events/event-empty/time-capsule',
+    { status: 'published', title: 'The Smith Wedding Time Capsule' },
+    { Authorization: 'Bearer host-token' },
+    'PATCH'
+  ), envWithDb(db));
+  const publishPayload = await publishResponse.json();
+
+  assert.equal(publishResponse.status, 200);
+  assert.equal(publishPayload.timeCapsule.status, 'published');
+  assert.ok(publishPayload.timeCapsule.publishedAt);
+  assert.match(publishPayload.timeCapsule.shareUrl, /^https:\/\/williamsonwallflowers\.com\/moments\/capsule\/\?event=event-empty#token=/);
 });
 
 test('host curates approved submissions and publishes a private capsule', async () => {

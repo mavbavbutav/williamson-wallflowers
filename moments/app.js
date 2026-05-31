@@ -1,8 +1,12 @@
 import { apiBase, formatDate, getParam, qs, qsa, requestJson, setNotice } from "./shared.js?v=20260525-3";
 
 const MAX_VIDEO_SECONDS = 30;
+const MAX_AUDIO_SECONDS = 60;
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
+const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "webm", "3gp", "3gpp", "3g2"];
+const AUDIO_EXTENSIONS = ["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav", "weba", "webm"];
 
 const state = {
   tagCode: getParam("t"),
@@ -38,6 +42,8 @@ const progressTrack = qs("#progressTrack");
 const progressBar = qs("#progressBar");
 const uploadNotice = qs("#uploadNotice");
 const switchCameraButton = qs("#switchCameraButton");
+const cameraStage = qs("#cameraStage");
+const voiceMemoCue = qs("#voiceMemoCue");
 
 init();
 
@@ -54,7 +60,7 @@ async function init() {
     state.event = payload.event;
     state.uploadToken = payload.uploadToken || "";
     qs("#eventTitle").textContent = `${state.event.name}`;
-    qs("#eventDetails").textContent = `${formatDate(state.event.eventDate)}. Add a photo or a short video message for the host.`;
+    qs("#eventDetails").textContent = `${formatDate(state.event.eventDate)}. Add a photo, short video, or voice memo for the host.`;
     showView("welcome");
   } catch (error) {
     const message = error.message === "Failed to fetch" || error.message === "Request timed out"
@@ -94,6 +100,9 @@ async function chooseMode(mode) {
   state.mediaFile = null;
   state.durationSeconds = 0;
   state.facingMode = mode === "photo" ? "environment" : "user";
+  cameraStage.classList.toggle("is-audio", mode === "audio");
+  cameraPreview.hidden = mode === "audio";
+  if (voiceMemoCue) voiceMemoCue.hidden = mode !== "audio";
   updateSwitchCameraButton();
   setNotice(permissionNotice, "");
   setNotice(uploadNotice, "");
@@ -101,22 +110,23 @@ async function chooseMode(mode) {
   progressBar.style.width = "0%";
   progressTrack.setAttribute("aria-valuenow", "0");
   qs("#resetFlowButton").hidden = false;
-  qs("#captureTitle").textContent = mode === "photo" ? "Take a photo." : "Record a message.";
-  qs("#captureHelp").textContent = mode === "photo"
-    ? "Use the camera button or upload a photo from your phone."
-    : "Record up to 30 seconds or upload a short video from your phone.";
-  fileInput.accept = mode === "photo" ? "image/*" : "video/*,.mp4,.mov,.m4v,.webm,.3gp,.3gpp,.3g2";
-  fileInput.capture = state.facingMode;
+  qs("#captureTitle").textContent = getCaptureTitle(mode);
+  qs("#captureHelp").textContent = getCaptureHelp(mode);
+  fileInput.accept = getAcceptTypes(mode);
+  if (mode === "audio") {
+    fileInput.removeAttribute("capture");
+  } else {
+    fileInput.capture = state.facingMode;
+  }
   qs("#photoCaptureButton").hidden = mode !== "photo";
-  qs("#videoRecordButton").hidden = mode !== "video";
+  qs("#videoRecordButton").hidden = mode === "photo";
+  qs("#videoRecordButton").textContent = mode === "audio" ? "Start voice memo" : "Start recording";
   qs("#videoStopButton").hidden = true;
   qs("#recordTimer").hidden = true;
   showView("capture");
   setNotice(
     permissionNotice,
-    mode === "photo"
-      ? "Opening your camera. You can still upload from your phone if the prompt does not appear."
-      : "Opening your camera and microphone. You can still upload a short phone video instead."
+    getOpeningNotice(mode)
   );
   await startCamera(mode);
 }
@@ -126,7 +136,9 @@ async function startCamera(mode, options = {}) {
   updateSwitchCameraButton(true);
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    setNotice(permissionNotice, "Camera capture is not available in this browser. Use upload from phone instead.", "error");
+    setNotice(permissionNotice, mode === "audio"
+      ? "Microphone recording is not available in this browser. Use upload from phone instead."
+      : "Camera capture is not available in this browser. Use upload from phone instead.", "error");
     return false;
   }
 
@@ -134,20 +146,22 @@ async function startCamera(mode, options = {}) {
     const constraints = buildCameraConstraints(mode, state.facingMode, options.exactFacingMode);
 
     state.stream = await navigator.mediaDevices.getUserMedia(constraints);
-    cameraPreview.srcObject = state.stream;
-    fileInput.capture = state.facingMode;
+    cameraPreview.srcObject = mode === "audio" ? null : state.stream;
+    if (mode !== "audio") fileInput.capture = state.facingMode;
     updateSwitchCameraButton();
-    setNotice(permissionNotice, mode === "photo" ? "Camera ready. Tap Switch camera to flip views." : "Camera ready. Tap Switch camera before recording if you want the other camera.", "success");
+    setNotice(permissionNotice, getReadyNotice(mode), "success");
     return true;
   } catch (error) {
     updateSwitchCameraButton(true);
-    setNotice(permissionNotice, "Camera permission was not available. Tap Upload from phone to choose an existing file or use your phone camera.", "error");
+    setNotice(permissionNotice, mode === "audio"
+      ? "Microphone permission was not available. Tap Upload from phone to choose an existing audio file."
+      : "Camera permission was not available. Tap Upload from phone to choose an existing file or use your phone camera.", "error");
     return false;
   }
 }
 
 async function switchCamera() {
-  if (!state.mode || switchCameraButton.disabled) return;
+  if (!state.mode || state.mode === "audio" || switchCameraButton.disabled) return;
 
   const nextFacingMode = state.facingMode === "user" ? "environment" : "user";
   const previousFacingMode = state.facingMode;
@@ -167,6 +181,13 @@ async function switchCamera() {
 }
 
 function buildCameraConstraints(mode, facingMode, exactFacingMode = false) {
+  if (mode === "audio") {
+    return {
+      video: false,
+      audio: true
+    };
+  }
+
   return {
     video: { facingMode: exactFacingMode ? { exact: facingMode } : { ideal: facingMode } },
     audio: mode === "video"
@@ -203,12 +224,17 @@ function capturePhoto() {
 
 function startRecording() {
   if (!state.stream || !window.MediaRecorder) {
-    setNotice(permissionNotice, "Video recording is not available in this browser. Upload a short phone video instead.", "error");
+    setNotice(permissionNotice, state.mode === "audio"
+      ? "Voice memo recording is not available in this browser. Upload an audio file instead."
+      : "Video recording is not available in this browser. Upload a short phone video instead.", "error");
     fileInput.click();
     return;
   }
 
-  const mimeType = getSupportedVideoMimeType();
+  const isAudio = state.mode === "audio";
+  const mediaType = isAudio ? "audio" : "video";
+  const maxSeconds = getMaxDurationSeconds(mediaType);
+  const mimeType = isAudio ? getSupportedAudioMimeType() : getSupportedVideoMimeType();
   state.chunks = [];
   state.recorder = new MediaRecorder(state.stream, mimeType ? { mimeType } : undefined);
   state.recordStartedAt = Date.now();
@@ -218,27 +244,27 @@ function startRecording() {
   });
 
   state.recorder.addEventListener("stop", () => {
-    const type = state.recorder.mimeType || mimeType || "video/webm";
+    const type = state.recorder.mimeType || mimeType || (isAudio ? "audio/webm" : "video/webm");
     const blob = new Blob(state.chunks, { type });
-    state.durationSeconds = Math.min(MAX_VIDEO_SECONDS, Math.round((Date.now() - state.recordStartedAt) / 1000));
+    state.durationSeconds = Math.min(maxSeconds, Math.round((Date.now() - state.recordStartedAt) / 1000));
     state.mediaBlob = blob;
-    state.mediaFile = new File([blob], `wallflower-message-${Date.now()}.${type.includes("mp4") ? "mp4" : "webm"}`, { type });
-    state.mediaType = "video";
+    state.mediaFile = new File([blob], `${isAudio ? "wallflower-voice-memo" : "wallflower-message"}-${Date.now()}.${getRecorderExtension(type, mediaType)}`, { type });
+    state.mediaType = mediaType;
     stopTimer();
     stopStream();
     renderPreview();
   });
 
   state.recorder.start();
-  setNotice(permissionNotice, "Recording. Keep it under 30 seconds, then tap Stop when you are done.");
+  setNotice(permissionNotice, `Recording. Keep it under ${maxSeconds} seconds, then tap Stop when you are done.`);
   qs("#videoRecordButton").hidden = true;
   qs("#videoStopButton").hidden = false;
   qs("#recordTimer").hidden = false;
   updateSwitchCameraButton(true);
-  startTimer();
+  startTimer(maxSeconds);
   window.setTimeout(() => {
     if (state.recorder && state.recorder.state === "recording") stopRecording();
-  }, MAX_VIDEO_SECONDS * 1000);
+  }, maxSeconds * 1000);
 }
 
 function stopRecording() {
@@ -247,12 +273,12 @@ function stopRecording() {
   }
 }
 
-function startTimer() {
+function startTimer(maxSeconds = MAX_VIDEO_SECONDS) {
   stopTimer();
   const timer = qs("#recordTimer");
   state.timerId = window.setInterval(() => {
-    const elapsed = Math.min(MAX_VIDEO_SECONDS, Math.floor((Date.now() - state.recordStartedAt) / 1000));
-    timer.textContent = `00:${String(elapsed).padStart(2, "0")}`;
+    const elapsed = Math.min(maxSeconds, Math.floor((Date.now() - state.recordStartedAt) / 1000));
+    timer.textContent = formatTimer(elapsed);
   }, 250);
 }
 
@@ -274,14 +300,27 @@ function getSupportedVideoMimeType() {
   return candidates.find((type) => window.MediaRecorder && MediaRecorder.isTypeSupported(type)) || "";
 }
 
+function getSupportedAudioMimeType() {
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+    "audio/ogg;codecs=opus",
+    "audio/ogg"
+  ];
+
+  return candidates.find((type) => window.MediaRecorder && MediaRecorder.isTypeSupported(type)) || "";
+}
+
 async function acceptFile(file) {
   const baseMimeType = getBaseMimeType(file.type);
   const extension = getFileExtension(file.name);
   const isPhoto = baseMimeType.startsWith("image/");
-  const isVideo = baseMimeType.startsWith("video/") || ["mp4", "mov", "m4v", "webm", "3gp", "3gpp", "3g2"].includes(extension);
+  const isAudio = baseMimeType.startsWith("audio/") || (state.mode === "audio" && AUDIO_EXTENSIONS.includes(extension));
+  const isVideo = !isAudio && (baseMimeType.startsWith("video/") || VIDEO_EXTENSIONS.includes(extension));
 
-  if (!isPhoto && !isVideo) {
-    setNotice(permissionNotice, "Please choose a photo or a standard phone video file.", "error");
+  if (!isPhoto && !isVideo && !isAudio) {
+    setNotice(permissionNotice, "Please choose a photo, standard phone video, or voice memo file.", "error");
     return;
   }
 
@@ -295,8 +334,13 @@ async function acceptFile(file) {
     return;
   }
 
+  if (isAudio && file.size > MAX_AUDIO_BYTES) {
+    setNotice(permissionNotice, "Voice memos must be 20 MB or smaller.", "error");
+    return;
+  }
+
   if (isVideo) {
-    const duration = await readVideoDuration(file);
+    const duration = await readMediaDuration(file, "video");
     if (duration > MAX_VIDEO_SECONDS + 0.5) {
       setNotice(permissionNotice, "That video is longer than 30 seconds. Please trim it or record a shorter message.", "error");
       return;
@@ -304,9 +348,18 @@ async function acceptFile(file) {
     state.durationSeconds = Math.round(duration);
   }
 
+  if (isAudio) {
+    const duration = await readMediaDuration(file, "audio");
+    if (duration > MAX_AUDIO_SECONDS + 0.5) {
+      setNotice(permissionNotice, "That voice memo is longer than 60 seconds. Please trim it or record a shorter memo.", "error");
+      return;
+    }
+    state.durationSeconds = Math.round(duration);
+  }
+
   state.mediaFile = file;
   state.mediaBlob = file;
-  state.mediaType = isPhoto ? "photo" : "video";
+  state.mediaType = isPhoto ? "photo" : (isAudio ? "audio" : "video");
   stopStream();
   renderPreview();
 }
@@ -321,19 +374,19 @@ function getFileExtension(filename) {
   return index >= 0 ? clean.slice(index + 1).toLowerCase() : "";
 }
 
-function readVideoDuration(file) {
+function readMediaDuration(file, mediaType) {
   return new Promise((resolve) => {
-    const video = document.createElement("video");
-    video.preload = "metadata";
-    video.onloadedmetadata = () => {
-      URL.revokeObjectURL(video.src);
-      resolve(video.duration || 0);
+    const element = document.createElement(mediaType === "audio" ? "audio" : "video");
+    element.preload = "metadata";
+    element.onloadedmetadata = () => {
+      URL.revokeObjectURL(element.src);
+      resolve(element.duration || 0);
     };
-    video.onerror = () => {
-      URL.revokeObjectURL(video.src);
+    element.onerror = () => {
+      URL.revokeObjectURL(element.src);
       resolve(0);
     };
-    video.src = URL.createObjectURL(file);
+    element.src = URL.createObjectURL(file);
   });
 }
 
@@ -349,6 +402,11 @@ function renderPreview() {
     image.src = url;
     image.alt = "Preview of your photo";
     frame.append(image);
+  } else if (state.mediaType === "audio") {
+    const audio = document.createElement("audio");
+    audio.src = url;
+    audio.controls = true;
+    frame.append(audio);
   } else {
     const video = document.createElement("video");
     video.src = url;
@@ -364,7 +422,7 @@ async function submitMoment(event) {
   event.preventDefault();
 
   if (!state.mediaFile) {
-    setNotice(uploadNotice, "Please capture or choose a photo or video first.", "error");
+    setNotice(uploadNotice, "Please capture or choose a photo, video, or voice memo first.", "error");
     return;
   }
 
@@ -445,6 +503,9 @@ function resetFlow() {
   stopTimer();
   state.mode = "";
   state.facingMode = "environment";
+  cameraStage.classList.remove("is-audio");
+  cameraPreview.hidden = false;
+  if (voiceMemoCue) voiceMemoCue.hidden = true;
   state.mediaBlob = null;
   state.mediaFile = null;
   state.mediaType = "";
@@ -494,7 +555,7 @@ function revokePreviewUrl() {
 function updateSwitchCameraButton(disabled = false) {
   if (!switchCameraButton) return;
   const isRecording = state.recorder && state.recorder.state === "recording";
-  switchCameraButton.hidden = !state.mode || qs("#captureView").hidden || !state.stream || isRecording;
+  switchCameraButton.hidden = state.mode === "audio" || !state.mode || qs("#captureView").hidden || !state.stream || isRecording;
   switchCameraButton.disabled = disabled || isRecording;
   switchCameraButton.textContent = `Use ${state.facingMode === "user" ? "back" : "front"} camera`;
   switchCameraButton.setAttribute("aria-label", `Switch to ${state.facingMode === "user" ? "back" : "front"} camera`);
@@ -502,4 +563,57 @@ function updateSwitchCameraButton(disabled = false) {
 
 function cameraLabel(facingMode) {
   return facingMode === "user" ? "front" : "back";
+}
+
+function getCaptureTitle(mode) {
+  if (mode === "photo") return "Take a photo.";
+  if (mode === "audio") return "Record a voice memo.";
+  return "Record a video.";
+}
+
+function getCaptureHelp(mode) {
+  if (mode === "photo") return "Use the camera button or upload a photo from your phone.";
+  if (mode === "audio") return "Record up to 60 seconds or upload an audio file from your phone.";
+  return "Record up to 30 seconds or upload a short video from your phone.";
+}
+
+function getAcceptTypes(mode) {
+  if (mode === "photo") return "image/*";
+  if (mode === "audio") return "audio/*,.m4a,.mp3,.wav,.ogg,.oga,.opus,.aac,.webm,.weba";
+  return "video/*,.mp4,.mov,.m4v,.webm,.3gp,.3gpp,.3g2";
+}
+
+function getOpeningNotice(mode) {
+  if (mode === "photo") return "Opening your camera. You can still upload from your phone if the prompt does not appear.";
+  if (mode === "audio") return "Opening your microphone. You can still upload a voice memo from your phone instead.";
+  return "Opening your camera and microphone. You can still upload a short phone video instead.";
+}
+
+function getReadyNotice(mode) {
+  if (mode === "photo") return "Camera ready. Tap Switch camera to flip views.";
+  if (mode === "audio") return "Microphone ready. Tap Start voice memo when you are ready.";
+  return "Camera ready. Tap Switch camera before recording if you want the other camera.";
+}
+
+function getMaxDurationSeconds(mediaType) {
+  return mediaType === "audio" ? MAX_AUDIO_SECONDS : MAX_VIDEO_SECONDS;
+}
+
+function getRecorderExtension(mimeType, mediaType) {
+  const baseMimeType = getBaseMimeType(mimeType);
+  const map = {
+    "audio/mp4": "m4a",
+    "audio/ogg": "ogg",
+    "audio/webm": "webm",
+    "video/mp4": "mp4",
+    "video/webm": "webm"
+  };
+
+  return map[baseMimeType] || (mediaType === "audio" ? "webm" : "webm");
+}
+
+function formatTimer(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }

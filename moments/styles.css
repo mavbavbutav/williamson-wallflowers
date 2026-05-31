@@ -427,6 +427,38 @@ textarea:focus-visible {
   object-fit: cover;
 }
 
+.capture-stage.is-audio .camera-frame {
+  min-height: 260px;
+  aspect-ratio: auto;
+  background:
+    radial-gradient(circle at 22% 24%, rgba(244, 213, 193, 0.24), transparent 34%),
+    linear-gradient(135deg, #2f2b28 0%, #5b514b 100%);
+}
+
+.voice-memo-cue {
+  display: grid;
+  place-items: center;
+  gap: 0.45rem;
+  width: min(100%, 440px);
+  padding: 2rem;
+  text-align: center;
+  color: #fffaf5;
+}
+
+.voice-memo-cue strong {
+  font-family: var(--font-display);
+  font-size: clamp(2.3rem, 9vw, 4.5rem);
+  line-height: 0.95;
+}
+
+.voice-memo-cue span {
+  font-weight: 800;
+}
+
+.preview-frame audio {
+  width: min(100% - 2rem, 640px);
+}
+
 .camera-switch-button {
   position: absolute;
   z-index: 2;
@@ -709,6 +741,19 @@ textarea:focus-visible {
   object-fit: contain;
 }
 
+.media-thumb audio {
+  width: min(100% - 2rem, 520px);
+}
+
+.media-thumb.is-audio {
+  min-height: 180px;
+  padding: 1rem;
+  aspect-ratio: auto;
+  background:
+    radial-gradient(circle at 18% 20%, rgba(244, 213, 193, 0.2), transparent 34%),
+    linear-gradient(135deg, #2f2b28 0%, #5b514b 100%);
+}
+
 .media-body {
   display: grid;
   gap: 0.7rem;
@@ -739,6 +784,11 @@ textarea:focus-visible {
 .host-page .media-thumb.is-video {
   height: clamp(190px, 22vw, 260px);
   aspect-ratio: auto;
+}
+
+.host-page .media-thumb.is-audio {
+  height: auto;
+  min-height: 170px;
 }
 
 .host-page .media-thumb img,
@@ -956,6 +1006,32 @@ textarea:focus-visible {
   margin: 0;
 }
 
+.admin-link-list {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.admin-link-item {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.admin-link-label {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.admin-link-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
 td select {
   min-height: 38px;
   max-width: 100%;
@@ -1105,6 +1181,11 @@ tr:last-child td {
   border-radius: 14px;
   background: #000;
   box-shadow: 0 20px 70px rgba(0, 0, 0, 0.38);
+}
+
+.media-modal-stage audio {
+  width: min(100%, 720px);
+  margin: 2rem;
 }
 
 .admin-auth {

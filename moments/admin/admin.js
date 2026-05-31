@@ -1,16 +1,16 @@
 import {
-  buildCapsuleUrl,
   buildGuestUrl,
   buildHostUrl,
   clearAdminToken,
   copyText,
   formatDate,
   getAdminToken,
+  getPublishedCapsuleShareUrl,
   qs,
   requestJson,
   setAdminToken,
   setNotice
-} from "../shared.js?v=20260531-1";
+} from "../shared.js?v=20260531-3";
 
 let adminToken = getAdminToken();
 let events = [];
@@ -193,10 +193,11 @@ function renderEvents() {
 
   const rows = events.map((event) => {
     const hostUrl = buildHostUrl(event.id, event.hostToken);
-    const capsuleUrl = event.capsuleShareUrl || (event.timeCapsuleEnabled && event.timeCapsuleShareToken ? buildCapsuleUrl(event.id, event.timeCapsuleShareToken) : "");
+    const capsuleUrl = getPublishedCapsuleShareUrl(event);
     const statusButton = event.status === "active" ? "Deactivate" : "Activate";
     const nextStatus = event.status === "active" ? "inactive" : "active";
     const capsuleStatus = event.timeCapsuleEnabled ? (event.timeCapsuleStatus || "draft") : "not added";
+    const capsuleNote = capsuleUrl ? capsuleUrl : "Draft: add an approved moment in the host dashboard, then publish to share.";
 
     return `
       <tr data-event-id="${event.id}">
@@ -205,8 +206,18 @@ function renderEvents() {
           <span class="muted">${formatDate(event.eventDate)} | expires ${formatDate(event.retentionExpiresAt?.slice(0, 10))}</span>
         </td>
         <td>
-          <span class="muted link-preview">${escapeHtml(hostUrl)}</span>
-          ${capsuleUrl ? `<span class="muted link-preview">Capsule: ${escapeHtml(capsuleUrl)}</span>` : ""}
+          <div class="admin-link-list">
+            <div class="admin-link-item">
+              <span class="admin-link-label">Host</span>
+              <span class="muted link-preview">${escapeHtml(hostUrl)}</span>
+            </div>
+            ${event.timeCapsuleEnabled ? `
+              <div class="admin-link-item">
+                <span class="admin-link-label">Capsule</span>
+                <span class="muted ${capsuleUrl ? "link-preview" : "admin-link-note"}">${escapeHtml(capsuleNote)}</span>
+              </div>
+            ` : ""}
+          </div>
         </td>
         <td>
           <span class="status-pill is-pending">${event.pendingCount || 0} pending</span>
@@ -390,10 +401,11 @@ function renderTagCard(tag) {
 
 function renderEventCard(event) {
   const hostUrl = buildHostUrl(event.id, event.hostToken);
-  const capsuleUrl = event.capsuleShareUrl || (event.timeCapsuleEnabled && event.timeCapsuleShareToken ? buildCapsuleUrl(event.id, event.timeCapsuleShareToken) : "");
+  const capsuleUrl = getPublishedCapsuleShareUrl(event);
   const statusButton = event.status === "active" ? "Deactivate" : "Activate";
   const nextStatus = event.status === "active" ? "inactive" : "active";
   const capsuleStatus = event.timeCapsuleEnabled ? (event.timeCapsuleStatus || "draft") : "not added";
+  const capsuleNote = capsuleUrl ? capsuleUrl : "Draft: add an approved moment in the host dashboard, then publish to share.";
 
   return `
     <article class="admin-mobile-card" data-event-id="${event.id}">
@@ -409,8 +421,18 @@ function renderEventCard(event) {
         <span class="status-pill is-approved">${event.approvedCount || 0} approved</span>
         <span class="status-pill">${escapeHtml(`Capsule ${capsuleStatus}`)}</span>
       </div>
-      <p class="link-preview">${escapeHtml(hostUrl)}</p>
-      ${capsuleUrl ? `<p class="link-preview">Capsule: ${escapeHtml(capsuleUrl)}</p>` : ""}
+      <div class="admin-link-list">
+        <div class="admin-link-item">
+          <span class="admin-link-label">Host</span>
+          <p class="link-preview">${escapeHtml(hostUrl)}</p>
+        </div>
+        ${event.timeCapsuleEnabled ? `
+          <div class="admin-link-item">
+            <span class="admin-link-label">Capsule</span>
+            <p class="${capsuleUrl ? "link-preview" : "admin-link-note"}">${escapeHtml(capsuleNote)}</p>
+          </div>
+        ` : ""}
+      </div>
       <div class="row-actions">
         <button class="small-button" type="button" data-event-status="${nextStatus}">${statusButton}</button>
         <button class="small-button is-danger" type="button" data-rotate-host>Rotate host link</button>

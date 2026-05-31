@@ -1,4 +1,4 @@
-import { formatDate, formatDateTime, getParam, qs, requestJson, setNotice } from "../shared.js?v=20260531-1";
+import { formatDate, formatDateTime, getParam, qs, requestJson, setNotice } from "../shared.js?v=20260531-2";
 
 const eventId = getParam("event");
 const token = readShareToken();
@@ -52,7 +52,9 @@ function render() {
         <span class="media-thumb is-${escapeAttribute(item.mediaType)}">
           ${item.mediaType === "photo"
             ? `<img src="${escapeAttribute(item.mediaUrl)}&disposition=inline" alt="${escapeAttribute(item.title)}" loading="lazy" />`
-            : `<video src="${escapeAttribute(item.mediaUrl)}&disposition=inline" preload="metadata" muted playsinline></video>`}
+            : item.mediaType === "audio"
+              ? `<audio src="${escapeAttribute(item.mediaUrl)}&disposition=inline" preload="metadata" controls></audio>`
+              : `<video src="${escapeAttribute(item.mediaUrl)}&disposition=inline" preload="metadata" muted playsinline></video>`}
         </span>
         <span class="media-body">
           <span class="status-pill">${escapeHtml(item.chapter || "Guest moments")}</span>
@@ -92,6 +94,12 @@ function renderSlide() {
     image.src = `${item.mediaUrl}&disposition=inline`;
     image.alt = item.title || "Time Capsule photo";
     stage.append(image);
+  } else if (item.mediaType === "audio") {
+    const audio = document.createElement("audio");
+    audio.src = `${item.mediaUrl}&disposition=inline`;
+    audio.controls = true;
+    audio.preload = "metadata";
+    stage.append(audio);
   } else {
     const video = document.createElement("video");
     video.src = `${item.mediaUrl}&disposition=inline`;
@@ -108,7 +116,7 @@ function changeSlide(delta) {
 }
 
 function closeSlide() {
-  qsaVideos(qs("#slideStage")).forEach((video) => video.pause());
+  qsaPlayableMedia(qs("#slideStage")).forEach((media) => media.pause());
   qs("#slideStage").innerHTML = "";
   qs("#slideshowModal").hidden = true;
   document.body.classList.remove("modal-open");
@@ -128,18 +136,7 @@ function showError(message) {
 function readShareToken() {
   const query = new URLSearchParams(window.location.search);
   const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-  const value = hash.get("token") || query.get("token") || "";
-
-  if (value) {
-    query.delete("token");
-    hash.delete("token");
-    const nextUrl = new URL(window.location.href);
-    nextUrl.search = query.toString();
-    nextUrl.hash = hash.toString();
-    window.history.replaceState(null, "", nextUrl.toString());
-  }
-
-  return value;
+  return hash.get("token") || query.get("token") || "";
 }
 
 function normalizeSlideIndex(index) {
@@ -150,8 +147,8 @@ function qsaSlides() {
   return Array.from(document.querySelectorAll("[data-slide]"));
 }
 
-function qsaVideos(root) {
-  return Array.from(root.querySelectorAll("video"));
+function qsaPlayableMedia(root) {
+  return Array.from(root.querySelectorAll("video, audio"));
 }
 
 function escapeHtml(value) {

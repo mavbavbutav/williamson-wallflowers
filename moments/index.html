@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20260525-11" />
+  <link rel="stylesheet" href="styles.css?v=20260531-voice-1" />
 </head>
 <body class="guest-page">
   <main class="app-shell">
@@ -62,7 +62,7 @@
     <section class="hero" id="welcomeView" hidden>
       <div class="hero-main">
         <h1 id="eventTitle" tabindex="-1">Leave a little love.</h1>
-        <p id="eventDetails">Send the host a photo or a short video message from tonight's celebration.</p>
+        <p id="eventDetails">Send the host a photo, short video, or voice memo from tonight's celebration.</p>
         <div class="step-row" aria-label="Guest upload steps">
           <span class="step-pill is-active">1. Choose</span>
           <span class="step-pill">2. Capture</span>
@@ -71,6 +71,7 @@
         <div class="button-row">
           <button class="button button-primary" type="button" data-mode="photo">Take a photo</button>
           <button class="button button-secondary" type="button" data-mode="video">Record a video</button>
+          <button class="button button-secondary" type="button" data-mode="audio">Voice Memo</button>
         </div>
       </div>
       <aside class="hero-side">
@@ -81,8 +82,8 @@
           </div>
         </div>
         <div class="capture-card">
-          <strong>Video limit</strong>
-          <span class="muted">Keep it sweet: video messages are capped at 30 seconds.</span>
+          <strong>Message limits</strong>
+          <span class="muted">Videos are capped at 30 seconds. Voice memos are capped at 60 seconds.</span>
         </div>
       </aside>
     </section>
@@ -99,6 +100,10 @@
       <div class="capture-card">
         <div class="capture-stage" id="cameraStage">
           <div class="camera-frame">
+            <div class="voice-memo-cue" id="voiceMemoCue" hidden>
+              <strong>Voice Memo</strong>
+              <span>Microphone ready when you are.</span>
+            </div>
             <video id="cameraPreview" autoplay playsinline muted></video>
             <button class="small-button camera-switch-button" type="button" id="switchCameraButton" hidden>Switch camera</button>
           </div>
@@ -139,7 +144,7 @@
 
           <label class="checkbox-row">
             <input id="consent" name="consent" type="checkbox" required />
-            <span>I agree that this photo or video can be shared privately with the event host and retained for up to 90 days.</span>
+            <span>I agree that this photo, video, or voice memo can be shared privately with the event host and retained for up to 90 days.</span>
           </label>
 
           <div class="progress-track" id="progressTrack" role="progressbar" aria-label="Upload progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
@@ -175,6 +180,6 @@
     </section>
   </main>
 
-  <script type="module" src="app.js?v=20260525-5"></script>
+  <script type="module" src="app.js?v=20260531-voice-1"></script>
 </body>
 </html>

@@ -1,6 +1,8 @@
 const API_OVERRIDE_KEY = "wallflowerMomentsApi";
+const SITE_OVERRIDE_KEY = "wallflowerMomentsSite";
 const ADMIN_TOKEN_KEY = "wallflowerMomentsAdminToken";
 const HOST_TOKEN_KEY_PREFIX = "wallflowerMomentsHostToken:";
+const PUBLIC_SITE_URL = "https://williamsonwallflowers.com";
 
 function isLocalHost() {
   return ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
@@ -31,6 +33,26 @@ export function getApiBase() {
 }
 
 export const apiBase = getApiBase();
+
+function getShareBase() {
+  const params = new URLSearchParams(window.location.search);
+  const explicit = params.get("site");
+
+  if (explicit && isLocalHost()) {
+    const siteBase = explicit.replace(/\/$/, "");
+    window.sessionStorage.setItem(SITE_OVERRIDE_KEY, siteBase);
+    return siteBase;
+  }
+
+  if (!isLocalHost()) {
+    window.sessionStorage.removeItem(SITE_OVERRIDE_KEY);
+  }
+
+  const saved = isLocalHost() ? window.sessionStorage.getItem(SITE_OVERRIDE_KEY) : "";
+  if (saved) return saved;
+
+  return isLocalHost() ? PUBLIC_SITE_URL : window.location.origin;
+}
 
 export function qs(selector, root = document) {
   return root.querySelector(selector);
@@ -155,15 +177,20 @@ export function clearAdminToken() {
 }
 
 export function buildGuestUrl(tagCode) {
-  return `${window.location.origin}/moments/?t=${encodeURIComponent(tagCode)}`;
+  return `${getShareBase()}/moments/?t=${encodeURIComponent(tagCode)}`;
 }
 
 export function buildHostUrl(eventId, token) {
-  return `${window.location.origin}/moments/host/?event=${encodeURIComponent(eventId)}#token=${encodeURIComponent(token)}`;
+  return `${getShareBase()}/moments/host/?event=${encodeURIComponent(eventId)}#token=${encodeURIComponent(token)}`;
 }
 
 export function buildCapsuleUrl(eventId, token) {
-  return `${window.location.origin}/moments/capsule/?event=${encodeURIComponent(eventId)}#token=${encodeURIComponent(token)}`;
+  return `${getShareBase()}/moments/capsule/?event=${encodeURIComponent(eventId)}#token=${encodeURIComponent(token)}`;
+}
+
+export function getPublishedCapsuleShareUrl(event) {
+  if (!event?.timeCapsuleEnabled || event.timeCapsuleStatus !== "published") return "";
+  return event.capsuleShareUrl || (event.timeCapsuleShareToken ? buildCapsuleUrl(event.id, event.timeCapsuleShareToken) : "");
 }
 
 function readUrlSecret(name, storageKey) {
