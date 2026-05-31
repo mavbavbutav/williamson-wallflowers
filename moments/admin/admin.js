@@ -369,7 +369,7 @@ function renderEvents() {
         <td>
           <div class="row-actions">
             <button class="small-button" type="button" data-event-status="${nextStatus}">${statusButton}</button>
-            ${renderMoreActions()}
+            ${renderMoreActions(event)}
           </div>
         </td>
       </tr>
@@ -443,12 +443,13 @@ function renderLinkActions(items) {
   `;
 }
 
-function renderMoreActions() {
+function renderMoreActions(event) {
   return `
     <details class="more-actions">
       <summary class="small-button">More actions</summary>
       <div class="more-actions-menu">
         <button class="small-button is-danger" type="button" data-rotate-host>Rotate host link</button>
+        <button class="small-button is-danger" type="button" data-delete-event data-event-name="${escapeAttribute(event.name)}">Delete event</button>
       </div>
     </details>
   `;
@@ -497,6 +498,16 @@ function bindEventActions() {
       if (!window.confirm("Rotate this host link? The previous host link will stop working.")) return;
       const row = button.closest("[data-event-id]");
       await updateEvent(row.dataset.eventId, { rotateHostToken: true });
+    });
+  });
+
+  qsaWithin("#eventsTable, #eventsCards", "[data-delete-event]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest("[data-event-id]");
+      const eventName = button.dataset.eventName || "this event";
+      const message = `Permanently delete "${eventName}"? This removes the host link, guest submissions, Time Capsule items, and unassigns any NTAGs. This cannot be undone.`;
+      if (!window.confirm(message)) return;
+      await deleteEvent(row.dataset.eventId, eventName);
     });
   });
 }
@@ -557,6 +568,18 @@ async function updateEvent(eventId, body) {
     showAdminNotice("Event updated.", "success");
   } catch (error) {
     showAdminNotice(error.message || "Could not update event.", "error");
+  }
+}
+
+async function deleteEvent(eventId, eventName) {
+  try {
+    await adminRequest(`/admin/events/${encodeURIComponent(eventId)}`, {
+      method: "DELETE"
+    });
+    await loadAdmin();
+    showAdminNotice(`Event "${eventName}" was deleted. Any assigned NTAG is now unassigned.`, "success");
+  } catch (error) {
+    showAdminNotice(error.message || "Could not delete event.", "error");
   }
 }
 
@@ -676,7 +699,7 @@ function renderEventCard(event) {
       ${renderLinkActions(buildEventLinkActions(event, hostUrl, capsuleUrl))}
       <div class="row-actions">
         <button class="small-button" type="button" data-event-status="${nextStatus}">${statusButton}</button>
-        ${renderMoreActions()}
+        ${renderMoreActions(event)}
       </div>
     </article>
   `;

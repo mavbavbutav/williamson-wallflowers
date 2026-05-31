@@ -682,6 +682,10 @@ async function handleAdminApi(request, env, url, corsHeaders, parts) {
     return updateAdminEvent(request, env, corsHeaders, parts[1]);
   }
 
+  if (request.method === 'DELETE' && parts[0] === 'events' && parts[1]) {
+    return deleteAdminEvent(request, env, corsHeaders, parts[1]);
+  }
+
   if (request.method === 'POST' && parts[0] === 'tags') {
     return createAdminTag(request, env, corsHeaders);
   }
@@ -929,6 +933,48 @@ async function updateAdminEvent(request, env, corsHeaders, eventId) {
   ).run();
 
   return json({ ok: true, event: { id: eventId, ...next } }, 200, corsHeaders);
+}
+
+async function deleteAdminEvent(request, env, corsHeaders, eventId) {
+  const current = await getEventById(env, eventId);
+  if (!current) return json({ ok: false, message: 'Event not found.' }, 404, corsHeaders);
+
+  const mediaResult = await env.MOMENTS_DB.prepare(`
+    SELECT id, object_key AS objectKey
+    FROM submissions
+    WHERE event_id = ?
+  `).bind(eventId).all();
+  const mediaRows = mediaResult.results || [];
+  const now = new Date().toISOString();
+
+  await env.MOMENTS_DB.prepare(`
+    UPDATE tags
+    SET active_event_id = NULL, updated_at = ?
+    WHERE active_event_id = ?
+  `).bind(now, eventId).run();
+  await env.MOMENTS_DB.prepare('DELETE FROM time_capsule_items WHERE event_id = ?').bind(eventId).run();
+  await env.MOMENTS_DB.prepare('DELETE FROM submissions WHERE event_id = ?').bind(eventId).run();
+  await env.MOMENTS_DB.prepare('DELETE FROM events WHERE id = ?').bind(eventId).run();
+
+  let deletedMedia = 0;
+  const mediaErrors = [];
+  for (const row of mediaRows) {
+    if (!row.objectKey) continue;
+    try {
+      await env.MOMENTS_BUCKET.delete(row.objectKey);
+      deletedMedia += 1;
+    } catch (error) {
+      console.error('R2 delete failed for admin-deleted event media', eventId, row.id, error);
+      mediaErrors.push({ id: row.id, message: String(error.message || error) });
+    }
+  }
+
+  return json({
+    ok: true,
+    deletedEventId: eventId,
+    deletedMedia,
+    mediaErrors
+  }, 200, corsHeaders);
 }
 
 async function createAdminTag(request, env, corsHeaders) {
