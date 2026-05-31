@@ -31,7 +31,7 @@ function init() {
   qs("#saveCapsuleButton").addEventListener("click", () => saveCapsule());
   qs("#publishCapsuleButton").addEventListener("click", () => saveCapsule("published"));
   qs("#unpublishCapsuleButton").addEventListener("click", () => saveCapsule("draft"));
-  qs("#copyCapsuleLinkButton").addEventListener("click", () => copyText(qs("#capsuleShareUrl").value, qs("#copyCapsuleLinkButton")));
+  qs("#copyCapsuleLinkButton").addEventListener("click", copyCapsuleLink);
   qs("#openCapsuleLinkButton").addEventListener("click", () => {
     const url = qs("#capsuleShareUrl").value;
     if (url) window.open(url, "_blank", "noopener,noreferrer");
@@ -91,10 +91,49 @@ async function loadCapsule({ silent = false } = {}) {
 }
 
 function render() {
+  renderHostPulse();
   renderWorkspaceTabs();
   renderSubmissions();
   renderCapsule();
   renderShare();
+}
+
+function renderHostPulse() {
+  const pulse = qs("#hostPulse");
+  if (!eventRecord) {
+    pulse.hidden = true;
+    return;
+  }
+
+  const counts = getSubmissionCounts();
+  const pending = counts.pending || 0;
+  const approved = counts.approved || 0;
+  const capsuleCount = capsuleItems.length;
+  const voiceCount = submissions.filter((item) => item.mediaType === "audio").length;
+  const hasCapsule = Boolean(eventRecord.timeCapsule?.enabled);
+
+  pulse.hidden = false;
+  qs("#hostPulseTitle").textContent = approved
+    ? `${approved} ${approved === 1 ? "memory" : "memories"} saved so far.`
+    : "Guest moments are warming up.";
+  qs("#hostPulseSubtitle").textContent = pending
+    ? `${pending} waiting for your yes. Pending moments stay private until approved.`
+    : approved
+      ? "You are caught up. New memories will land here first."
+      : "Share the guest QR and watch this gallery come alive.";
+  qs("#hostPulseKicker").textContent = hasCapsule
+    ? (timeCapsule?.status === "published" ? "Time Capsule is live" : "Time Capsule draft")
+    : "Private host gallery";
+
+  setHostStat("pending", pending);
+  setHostStat("approved", approved);
+  setHostStat("capsule", hasCapsule ? capsuleCount : "Off");
+  setHostStat("voice", voiceCount);
+}
+
+function setHostStat(name, value) {
+  const element = qs(`[data-host-stat="${name}"]`);
+  if (element) element.textContent = String(value);
 }
 
 function renderWorkspaceTabs() {
@@ -153,32 +192,51 @@ function renderSubmissionCard(submission) {
   }
 
   const actions = document.createElement("div");
-  actions.className = "row-actions";
-  actions.append(actionButton("View", "is-primary", () => openMediaModal(submission, mediaUrl)));
+  actions.className = "row-actions card-actions";
 
   if (submission.status !== "approved") {
-    actions.append(actionButton("Approve", "is-success", () => approveSubmission(submission)));
+    actions.append(actionButton("Approve", "is-success is-featured", () => approveSubmission(submission)));
   }
 
-  if (submission.status !== "rejected") {
-    actions.append(actionButton("Deny", "is-danger", () => updateSubmission(submission.id, "rejected")));
-  }
+  actions.append(actionButton("View", "is-primary", () => openMediaModal(submission, mediaUrl)));
 
   if (eventRecord?.timeCapsule?.enabled && submission.status === "approved" && !isInCapsule(submission.id)) {
-    actions.append(actionButton("Add to Capsule", "", () => addSubmissionToCapsule(submission)));
+    actions.append(actionButton("Add to Capsule", "is-success", () => addSubmissionToCapsule(submission)));
   }
+
+  actions.append(renderCardMoreActions(submission, downloadUrl));
+  body.append(actions);
+
+  card.append(thumb, body);
+  return card;
+}
+
+function renderCardMoreActions(submission, downloadUrl) {
+  const details = document.createElement("details");
+  details.className = "card-more-actions";
+
+  const summary = document.createElement("summary");
+  summary.className = "small-button";
+  summary.textContent = "More";
+  details.append(summary);
+
+  const menu = document.createElement("div");
+  menu.className = "card-more-menu";
 
   const download = document.createElement("a");
   download.className = "small-button";
   download.href = downloadUrl;
   download.textContent = "Download";
   download.download = "";
-  actions.append(download);
-  actions.append(actionButton("Delete", "is-danger", () => deleteSubmission(submission.id)));
-  body.append(actions);
+  menu.append(download);
 
-  card.append(thumb, body);
-  return card;
+  if (submission.status !== "rejected") {
+    menu.append(actionButton("Deny", "is-danger", () => updateSubmission(submission.id, "rejected")));
+  }
+
+  menu.append(actionButton("Delete", "is-danger", () => deleteSubmission(submission.id)));
+  details.append(menu);
+  return details;
 }
 
 function renderApproveCapsuleOption(submissionId) {
@@ -270,6 +328,13 @@ function renderShare() {
 
   const shareUrl = timeCapsule?.shareUrl || eventRecord.timeCapsule.shareUrl || "";
   const isPublished = timeCapsule?.status === "published";
+  qs("#shareCard").classList.toggle("is-live", isPublished);
+  qs("#shareStatusPill").textContent = isPublished ? "Live" : "Draft";
+  qs("#shareStatusPill").className = `status-pill${isPublished ? " is-approved" : ""}`;
+  qs("#shareTitle").textContent = isPublished ? "Your Time Capsule is ready to share" : "Private Time Capsule link";
+  qs("#shareHint").textContent = isPublished
+    ? "Copy the private keepsake link and send it to the people who should relive the day."
+    : "Publish the capsule when the story feels ready, then the private link appears here.";
   qs("#capsuleShareUrl").value = isPublished ? shareUrl : "";
   qs("#copyCapsuleLinkButton").disabled = !isPublished || !shareUrl;
   qs("#openCapsuleLinkButton").disabled = !isPublished || !shareUrl;
@@ -346,7 +411,7 @@ async function addSubmissionToCapsule(submission) {
     const result = await createCapsuleItem(submission);
     capsuleItems = [...capsuleItems, result.item].sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
     currentView = "capsule";
-    setNotice(qs("#capsuleNotice"), "Moment added to the Time Capsule.", "success");
+    showHostCelebration("Moment added to the Time Capsule.", qs("#capsuleNotice"));
     render();
   } catch (error) {
     setNotice(qs("#hostNotice"), error.message || "Could not add this moment to the Time Capsule.", "error");
@@ -374,7 +439,11 @@ async function saveCapsule(status = "") {
       body: JSON.stringify(body)
     });
     timeCapsule = result.timeCapsule;
-    setNotice(qs("#capsuleNotice"), status === "published" ? "Time Capsule published." : "Time Capsule saved.", "success");
+    if (status === "published") {
+      showHostCelebration("Time Capsule published. Your private keepsake link is ready.", qs("#capsuleNotice"));
+    } else {
+      setNotice(qs("#capsuleNotice"), "Time Capsule saved.", "success");
+    }
     render();
   } catch (error) {
     setNotice(qs("#capsuleNotice"), error.message || "Could not save the Time Capsule.", "error");
@@ -396,11 +465,16 @@ async function saveCapsuleItem(itemId) {
       body: JSON.stringify(body)
     });
     capsuleItems = capsuleItems.map((item) => item.id === itemId ? result.item : item);
-    setNotice(qs("#capsuleNotice"), "Capsule moment saved.", "success");
+    showHostCelebration("Capsule moment saved.", qs("#capsuleNotice"));
     render();
   } catch (error) {
     setNotice(qs("#capsuleNotice"), error.message || "Could not save this capsule moment.", "error");
   }
+}
+
+function copyCapsuleLink() {
+  copyText(qs("#capsuleShareUrl").value, qs("#copyCapsuleLinkButton"));
+  showHostCelebration("Private Time Capsule link copied.");
 }
 
 async function removeCapsuleItem(itemId) {
@@ -495,15 +569,16 @@ async function approveSubmission(submission) {
     }
 
     await loadGallery();
-    setNotice(
-      qs("#hostNotice"),
-      capsuleAddFailed
-        ? "Submission approved, but could not add it to the Time Capsule. Add it later from the Approved tab."
-        : addToCapsule
-          ? "Submission approved and added to the Time Capsule."
-          : "Submission approved.",
-      capsuleAddFailed ? "error" : "success"
-    );
+    const message = capsuleAddFailed
+      ? "Submission approved, but could not add it to the Time Capsule. Add it later from the Approved tab."
+      : addToCapsule
+        ? "Submission approved and added to the Time Capsule."
+        : "Submission approved. Another memory is saved.";
+    if (capsuleAddFailed) {
+      setNotice(qs("#hostNotice"), message, "error");
+    } else {
+      showHostCelebration(message);
+    }
   } catch (error) {
     setNotice(qs("#hostNotice"), error.message || "Could not approve this submission.", "error");
   }
@@ -545,10 +620,7 @@ function hostRequest(path, options = {}) {
 }
 
 function updateSubmissionTabs() {
-  const counts = submissions.reduce((acc, item) => {
-    acc[item.status] = (acc[item.status] || 0) + 1;
-    return acc;
-  }, { pending: 0, approved: 0, rejected: 0 });
+  const counts = getSubmissionCounts();
 
   qsa("[data-status]").forEach((tab) => {
     const isActive = tab.dataset.status === currentStatus;
@@ -559,6 +631,13 @@ function updateSubmissionTabs() {
   qsa("[data-count]").forEach((count) => {
     count.textContent = counts[count.dataset.count] || 0;
   });
+}
+
+function getSubmissionCounts() {
+  return submissions.reduce((acc, item) => {
+    acc[item.status] = (acc[item.status] || 0) + 1;
+    return acc;
+  }, { pending: 0, approved: 0, rejected: 0 });
 }
 
 function isInCapsule(submissionId) {
@@ -597,6 +676,21 @@ function formatDuration(seconds) {
   const minutes = Math.floor(value / 60);
   const remainder = value % 60;
   return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function showHostCelebration(message, notice = qs("#hostNotice")) {
+  setNotice(notice, message, "success");
+
+  const burst = document.createElement("div");
+  burst.className = "host-celebration";
+  burst.setAttribute("aria-hidden", "true");
+  [0, 1, 2, 3, 4, 5].forEach((index) => {
+    const petal = document.createElement("span");
+    petal.style.setProperty("--petal-index", String(index));
+    burst.append(petal);
+  });
+  document.body.append(burst);
+  window.setTimeout(() => burst.remove(), 1200);
 }
 
 function cssEscape(value) {

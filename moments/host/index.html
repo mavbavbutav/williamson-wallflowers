@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260531-approve-capsule-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260531-host-fun-1" />
 </head>
 <body class="host-page">
   <main class="app-shell">
@@ -38,6 +38,32 @@
           <p class="muted" id="eventMeta">Review and download guest moments.</p>
         </div>
       </div>
+
+      <section class="host-pulse" id="hostPulse" aria-label="Event memory status" hidden>
+        <div class="host-pulse-copy">
+          <span class="host-eyebrow" id="hostPulseKicker">Memory check-in</span>
+          <strong id="hostPulseTitle">Guest moments are warming up.</strong>
+          <span id="hostPulseSubtitle">New memories will land here first.</span>
+        </div>
+        <div class="host-pulse-stats">
+          <div class="host-pulse-stat">
+            <strong data-host-stat="pending">0</strong>
+            <span>Pending</span>
+          </div>
+          <div class="host-pulse-stat">
+            <strong data-host-stat="approved">0</strong>
+            <span>Saved</span>
+          </div>
+          <div class="host-pulse-stat">
+            <strong data-host-stat="capsule">0</strong>
+            <span>Capsule</span>
+          </div>
+          <div class="host-pulse-stat">
+            <strong data-host-stat="voice">0</strong>
+            <span>Voice memos</span>
+          </div>
+        </div>
+      </section>
 
       <div id="hostNotice" class="notice" role="status" aria-live="polite" hidden></div>
 
@@ -102,18 +128,19 @@
       </section>
 
       <section class="dashboard" id="sharePanel" hidden>
-        <div class="panel">
+        <div class="share-card" id="shareCard">
           <div class="panel-heading">
             <div>
-              <h2>Private Time Capsule link</h2>
-              <p class="muted">Publish the capsule before sharing this link with guests.</p>
+              <span class="status-pill" id="shareStatusPill">Draft</span>
+              <h2 id="shareTitle">Private Time Capsule link</h2>
+              <p class="muted" id="shareHint">Publish the capsule before sharing this link with guests.</p>
             </div>
           </div>
           <label class="field">
             Share link
             <input id="capsuleShareUrl" readonly />
           </label>
-          <div class="row-actions">
+          <div class="row-actions share-actions">
             <button class="small-button" type="button" id="copyCapsuleLinkButton">Copy capsule link</button>
             <button class="small-button is-primary" type="button" id="openCapsuleLinkButton">Open capsule</button>
           </div>
@@ -133,6 +160,6 @@
     <div class="media-modal-stage" id="modalStage"></div>
   </div>
 
-  <script type="module" src="host.js?v=20260531-approve-capsule-1"></script>
+  <script type="module" src="host.js?v=20260531-host-fun-1"></script>
 </body>
 </html>
