@@ -363,8 +363,8 @@ a {
   overflow: hidden;
   display: grid;
   align-content: start;
-  gap: 0.42rem;
-  min-height: 184px;
+  gap: 0.48rem;
+  min-height: 228px;
   padding: 1rem;
   border: 1px solid rgba(222, 211, 200, 0.95);
   border-radius: 20px;
@@ -377,8 +377,11 @@ a {
 
 .memory-mode-card::before {
   content: "";
-  width: 44px;
-  height: 5px;
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 6px;
   border-radius: 999px;
   background: var(--accent);
 }
@@ -406,6 +409,32 @@ a {
   box-shadow: var(--focus), 0 18px 40px rgba(47, 43, 40, 0.14);
 }
 
+.mode-badge {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0.32rem 0.62rem;
+  border-radius: 999px;
+  color: #fffaf5;
+  background: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.memory-mode-card.is-photo .mode-badge {
+  background: var(--accent-deep);
+}
+
+.memory-mode-card.is-video .mode-badge {
+  background: var(--success);
+}
+
+.memory-mode-card.is-audio .mode-badge {
+  background: var(--warning);
+}
+
 .mode-kicker {
   color: var(--accent-deep);
   font-size: 0.72rem;
@@ -416,9 +445,35 @@ a {
 
 .mode-title {
   font-family: "Cormorant Garamond", Georgia, serif;
-  font-size: clamp(1.8rem, 3vw, 2.45rem);
+  font-size: clamp(2rem, 3vw, 2.7rem);
   font-weight: 700;
   line-height: 0.95;
+}
+
+.mode-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 42px;
+  margin-top: 0.2rem;
+  border-radius: 999px;
+  color: #fffaf5;
+  background: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.memory-mode-card.is-photo .mode-action {
+  background: var(--accent-deep);
+}
+
+.memory-mode-card.is-video .mode-action {
+  background: var(--success);
+}
+
+.memory-mode-card.is-audio .mode-action {
+  background: var(--warning);
 }
 
 .mode-copy {
@@ -2160,7 +2215,7 @@ tr:last-child td {
   }
 
   .memory-mode-card {
-    min-height: 132px;
+    min-height: 178px;
   }
 
   .step-row {

@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20260531-upload-picker-1" />
+  <link rel="stylesheet" href="styles.css?v=20260531-mode-clarity-1" />
 </head>
 <body class="guest-page">
   <main class="app-shell">
@@ -80,19 +80,25 @@
         <p id="eventDetails">Send the host a photo, short video, or voice memo from tonight's celebration.</p>
         <div class="memory-mode-grid" aria-label="Choose what to send">
           <button class="memory-mode-card is-photo" type="button" data-mode="photo">
-            <span class="mode-kicker">Quick snap</span>
-            <strong class="mode-title">Photo</strong>
-            <span class="mode-copy">Catch the bouquet, the table, the grin.</span>
+            <span class="mode-badge">PHOTO</span>
+            <span class="mode-kicker">Camera action</span>
+            <strong class="mode-title">Take Photo</strong>
+            <span class="mode-action">Opens your camera</span>
+            <span class="mode-copy">Best for flowers, tables, group shots, and quick smiles.</span>
           </button>
           <button class="memory-mode-card is-video" type="button" data-mode="video">
-            <span class="mode-kicker">30 seconds</span>
-            <strong class="mode-title">Video</strong>
-            <span class="mode-copy">Record a toast, dance move, or tiny scene.</span>
+            <span class="mode-badge">VIDEO</span>
+            <span class="mode-kicker">Camera action</span>
+            <strong class="mode-title">Record Video</strong>
+            <span class="mode-action">Starts recording video</span>
+            <span class="mode-copy">30 sec max for toasts, dance moves, or a tiny scene.</span>
           </button>
           <button class="memory-mode-card is-audio" type="button" data-mode="audio">
-            <span class="mode-kicker">60 seconds</span>
-            <strong class="mode-title">Voice Memo</strong>
-            <span class="mode-copy">Leave a warm message without opening the camera.</span>
+            <span class="mode-badge">AUDIO</span>
+            <span class="mode-kicker">Microphone action</span>
+            <strong class="mode-title">Record Voice Memo</strong>
+            <span class="mode-action">Starts your microphone</span>
+            <span class="mode-copy">60 sec max for a toast, hello, or sweet message.</span>
           </button>
         </div>
       </div>
@@ -216,6 +222,6 @@
     </section>
   </main>
 
-  <script type="module" src="app.js?v=20260531-upload-picker-1"></script>
+  <script type="module" src="app.js?v=20260531-mode-clarity-1"></script>
 </body>
 </html>
