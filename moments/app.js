@@ -112,6 +112,7 @@ async function chooseMode(mode) {
   qs("#resetFlowButton").hidden = false;
   qs("#captureTitle").textContent = getCaptureTitle(mode);
   qs("#captureHelp").textContent = getCaptureHelp(mode);
+  qs("#guestEncouragement").textContent = getCaptureTip(mode);
   fileInput.accept = getAcceptTypes(mode);
   if (mode === "audio") {
     fileInput.removeAttribute("capture");
@@ -415,7 +416,20 @@ function renderPreview() {
     frame.append(video);
   }
 
+  renderSendSummary();
   showView("review");
+}
+
+function renderSendSummary() {
+  const summary = qs("#sendSummary");
+  if (!summary) return;
+
+  const title = summary.querySelector("strong");
+  const detail = summary.querySelector("span:last-child");
+  const duration = state.durationSeconds ? ` It is ${formatTimer(state.durationSeconds)} long.` : "";
+
+  if (title) title.textContent = getSendSummaryTitle(state.mediaType);
+  if (detail) detail.textContent = `${getSendSummaryDetail(state.mediaType)}${duration}`;
 }
 
 async function submitMoment(event) {
@@ -450,6 +464,7 @@ async function submitMoment(event) {
     await uploadWithProgress(`/events/${encodeURIComponent(state.event.id)}/submissions`, formData);
     qs("#submissionForm").reset();
     showView("success");
+    showGuestCelebration();
   } catch (error) {
     setNotice(uploadNotice, error.message || "Upload failed. Please try again.", "error");
   } finally {
@@ -529,6 +544,7 @@ function showView(name) {
   Object.entries(views).forEach(([key, element]) => {
     element.hidden = key !== name;
   });
+  updateGuestFlow(name);
   window.requestAnimationFrame(() => {
     const activeView = views[name];
     const heading = activeView && activeView.querySelector("h1");
@@ -538,6 +554,29 @@ function showView(name) {
     } catch {
       heading.focus();
     }
+  });
+}
+
+function updateGuestFlow(viewName) {
+  const stepMap = {
+    welcome: "choose",
+    capture: "capture",
+    review: "review",
+    success: "review"
+  };
+  const activeStep = stepMap[viewName] || "";
+  const flowCard = qs("#guestFlowCard");
+  if (flowCard) flowCard.hidden = !activeStep;
+
+  qsa("[data-guest-step]").forEach((step) => {
+    const isActive = step.dataset.guestStep === activeStep;
+    const isDone = (
+      activeStep === "capture" && step.dataset.guestStep === "choose"
+    ) || (
+      activeStep === "review" && step.dataset.guestStep !== "review"
+    );
+    step.classList.toggle("is-active", isActive);
+    step.classList.toggle("is-done", isDone);
   });
 }
 
@@ -575,6 +614,32 @@ function getCaptureHelp(mode) {
   if (mode === "photo") return "Use the camera button or upload a photo from your phone.";
   if (mode === "audio") return "Record up to 60 seconds or upload an audio file from your phone.";
   return "Record up to 30 seconds or upload a short video from your phone.";
+}
+
+function getCaptureTip(mode) {
+  if (mode === "photo") return "One good frame is enough. Catch the feeling, not perfection.";
+  if (mode === "audio") return "A toast, a laugh, or a tiny hello works beautifully.";
+  return "Keep it short and lively, like a moving postcard from the party.";
+}
+
+function getSendSummaryTitle(mediaType) {
+  if (mediaType === "photo") return "Your photo is ready.";
+  if (mediaType === "audio") return "Your voice memo is ready.";
+  return "Your video is ready.";
+}
+
+function getSendSummaryDetail(mediaType) {
+  if (mediaType === "photo") return "Add a name or note so the host knows who caught this moment.";
+  if (mediaType === "audio") return "Give the host a little context, then send your voice memo their way.";
+  return "Add a name or note, then send this short scene to the host.";
+}
+
+function showGuestCelebration() {
+  const celebration = qs("#guestCelebration");
+  if (!celebration) return;
+  celebration.classList.remove("is-celebrating");
+  void celebration.offsetWidth;
+  celebration.classList.add("is-celebrating");
 }
 
 function getAcceptTypes(mode) {

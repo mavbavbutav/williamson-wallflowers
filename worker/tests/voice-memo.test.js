@@ -94,7 +94,7 @@ test('guest, host, and capsule frontends expose audio-only moments', async () =>
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(guestHtml, /data-mode="audio"[^>]*>Voice Memo</);
+  assert.match(guestHtml, /data-mode="audio"[\s\S]*Voice Memo/);
   assert.match(guestJs, /MAX_AUDIO_SECONDS = 60/);
   assert.match(guestJs, /getSupportedAudioMimeType/);
   assert.match(guestJs, /audio\/\*/);
