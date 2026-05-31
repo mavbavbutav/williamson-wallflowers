@@ -31,7 +31,9 @@ function init() {
   qs("#signOutButton").addEventListener("click", signOut);
   qs("#eventForm").addEventListener("submit", createEvent);
   qs("#tagForm").addEventListener("submit", createTag);
+  qs("#assignTagForm").addEventListener("submit", assignTag);
   qs("#generateTagCodeButton").addEventListener("click", generateTagCode);
+  bindScrollActions();
 
   if (adminToken) {
     qs("#adminToken").value = adminToken;
@@ -50,9 +52,11 @@ async function loadAdmin() {
     qs("#authPanel").hidden = true;
     qs("#adminApp").hidden = false;
     renderStats(payload.stats || {});
+    renderAttention();
     renderGuide();
-    renderTags();
+    renderAssignTagForm();
     renderEvents();
+    renderTags();
     if (shouldFocusTitle) focusElement(qs("#adminTitle"));
   } catch (error) {
     qs("#authPanel").hidden = false;
@@ -109,6 +113,36 @@ async function createTag(event) {
   }
 }
 
+async function assignTag(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submitButton = form.querySelector("button[type='submit']");
+  const formData = new FormData(form);
+  const tagId = formData.get("tagId");
+  const activeEventId = formData.get("eventId");
+
+  if (!tagId || !activeEventId) {
+    showAdminNotice("Choose a tag and an event before assigning.", "error");
+    return;
+  }
+
+  const tag = tags.find((item) => item.id === tagId);
+  const targetEvent = events.find((item) => item.id === activeEventId);
+
+  try {
+    setButtonBusy(submitButton, true, "Assigning tag...");
+    await updateTag(
+      tagId,
+      { status: "active", activeEventId },
+      `Tag "${tag?.label || "NTAG"}" was assigned to "${targetEvent?.name || "the event"}". Copy the guest link from Reusable tags when you are ready to write the NTAG.`
+    );
+  } catch (error) {
+    showAdminNotice(error.message || "Could not assign tag.", "error");
+  } finally {
+    setButtonBusy(submitButton, false);
+  }
+}
+
 function showAdminNotice(message, type = "") {
   const notice = qs("#adminNotice");
   setNotice(notice, message, type);
@@ -148,6 +182,98 @@ function renderStats(stats) {
   `).join("");
 }
 
+function renderAttention() {
+  const items = buildAttentionItems();
+  qs("#attentionCountLabel").textContent = `${items.length} ${items.length === 1 ? "item" : "items"}`;
+  qs("#attentionList").innerHTML = items.length ? items.map(renderAttentionItem).join("") : `
+    <div class="empty-state attention-empty">
+      <strong>Nothing needs immediate attention.</strong>
+      <span>Events, tags, and private links are ready for normal setup work.</span>
+    </div>
+  `;
+  bindAttentionActions();
+}
+
+function buildAttentionItems() {
+  const assignedActiveEventIds = new Set(tags.filter((tag) => tag.status === "active" && tag.activeEventId).map((tag) => tag.activeEventId));
+  const items = [];
+
+  events.forEach((event) => {
+    const hostUrl = buildHostUrl(event.id, event.hostToken);
+    if (Number(event.pendingCount || 0) > 0) {
+      items.push({
+        tone: "pending",
+        title: `${event.pendingCount} pending ${Number(event.pendingCount) === 1 ? "moment" : "moments"}`,
+        body: `${event.name} has guest submissions waiting for host review.`,
+        actions: [
+          { label: "Open host", url: hostUrl },
+          { label: "Copy host link", copy: hostUrl }
+        ]
+      });
+    }
+
+    if (event.status === "active" && !assignedActiveEventIds.has(event.id)) {
+      items.push({
+        tone: "setup",
+        title: "Missing active tag",
+        body: `${event.name} does not have an active NTAG assigned.`,
+        actions: [
+          { label: "Assign tag", scrollTarget: "#assignTagForm" }
+        ]
+      });
+    }
+
+    if (event.timeCapsuleEnabled && event.timeCapsuleStatus !== "published") {
+      items.push({
+        tone: "capsule",
+        title: "Capsule draft",
+        body: `${event.name} has Time Capsule enabled but not published.`,
+        actions: [
+          { label: "Open host", url: hostUrl },
+          { label: "Copy host link", copy: hostUrl }
+        ]
+      });
+    }
+  });
+
+  tags.filter((tag) => tag.status === "active" && !tag.activeEventId).forEach((tag) => {
+    items.push({
+      tone: "setup",
+      title: "Unassigned active tag",
+      body: `${tag.label} is active but not assigned to an event.`,
+      actions: [
+        { label: "Assign tag", scrollTarget: "#assignTagForm" }
+      ]
+    });
+  });
+
+  return items.slice(0, 6);
+}
+
+function renderAttentionItem(item) {
+  return `
+    <article class="attention-item is-${escapeAttribute(item.tone)}">
+      <div>
+        <strong>${escapeHtml(item.title)}</strong>
+        <p>${escapeHtml(item.body)}</p>
+      </div>
+      <div class="row-actions">
+        ${item.actions.map(renderAttentionAction).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderAttentionAction(action) {
+  if (action.url) {
+    return `<button class="small-button" type="button" data-open="${encodeURIComponent(action.url)}">${escapeHtml(action.label)}</button>`;
+  }
+  if (action.copy) {
+    return `<button class="small-button" type="button" data-copy="${encodeURIComponent(action.copy)}">${escapeHtml(action.label)}</button>`;
+  }
+  return `<button class="small-button" type="button" data-scroll-target="${escapeAttribute(action.scrollTarget)}">${escapeHtml(action.label)}</button>`;
+}
+
 function renderTags() {
   qs("#tagsCountLabel").textContent = `${tags.length} ${tags.length === 1 ? "tag" : "tags"}`;
 
@@ -169,12 +295,13 @@ function renderTags() {
         </td>
         <td><select data-tag-event>${assignedOptions}</select></td>
         <td>
-          <span class="muted link-preview">${escapeHtml(guestUrl)}</span>
+          ${renderLinkActions([
+            { label: "Guest scan", summary: "Guest upload link", copyLabel: "Copy guest link", openLabel: "Open guest", url: guestUrl }
+          ])}
         </td>
         <td>
           <div class="row-actions">
             <button class="small-button" type="button" data-save-tag>Save</button>
-            <button class="small-button" type="button" data-copy="${encodeURIComponent(guestUrl)}">Copy guest link</button>
           </div>
         </td>
       </tr>
@@ -188,16 +315,41 @@ function renderTags() {
   bindTagActions();
 }
 
+function renderAssignTagForm() {
+  const form = qs("#assignTagForm");
+  const tagSelect = qs("#assignTagSelect");
+  const eventSelect = qs("#assignEventSelect");
+  const submitButton = form.querySelector("button[type='submit']");
+  const activeEvents = events.filter((event) => event.status === "active");
+
+  tagSelect.innerHTML = tags.length
+    ? tags.map((tag) => `<option value="${escapeAttribute(tag.id)}">${escapeHtml(`${tag.label} (${tag.publicCode})`)}</option>`).join("")
+    : `<option value="">No tags registered</option>`;
+
+  eventSelect.innerHTML = activeEvents.length
+    ? activeEvents.map((event) => `<option value="${escapeAttribute(event.id)}">${escapeHtml(event.name)}</option>`).join("")
+    : `<option value="">No active events</option>`;
+
+  const canAssign = tags.length > 0 && activeEvents.length > 0;
+  tagSelect.disabled = !canAssign;
+  eventSelect.disabled = !canAssign;
+  submitButton.disabled = !canAssign;
+  qs("#assignTagHelp").textContent = canAssign
+    ? "Choose a tag and event, then copy the guest link from Reusable tags when you are ready to write the NTAG."
+    : "Create an event and register a tag before assigning.";
+}
+
 function renderEvents() {
   qs("#eventsCountLabel").textContent = `${events.length} ${events.length === 1 ? "event" : "events"}`;
 
-  const rows = events.map((event) => {
+  const operationalEvents = getOperationalEvents();
+  const rows = operationalEvents.map((event) => {
     const hostUrl = buildHostUrl(event.id, event.hostToken);
     const capsuleUrl = getPublishedCapsuleShareUrl(event);
     const statusButton = event.status === "active" ? "Deactivate" : "Activate";
     const nextStatus = event.status === "active" ? "inactive" : "active";
     const capsuleStatus = event.timeCapsuleEnabled ? (event.timeCapsuleStatus || "draft") : "not added";
-    const capsuleNote = capsuleUrl ? capsuleUrl : "Draft: add an approved moment in the host dashboard, then publish to share.";
+    const linkActions = buildEventLinkActions(event, hostUrl, capsuleUrl);
 
     return `
       <tr data-event-id="${event.id}">
@@ -206,18 +358,7 @@ function renderEvents() {
           <span class="muted">${formatDate(event.eventDate)} | expires ${formatDate(event.retentionExpiresAt?.slice(0, 10))}</span>
         </td>
         <td>
-          <div class="admin-link-list">
-            <div class="admin-link-item">
-              <span class="admin-link-label">Host</span>
-              <span class="muted link-preview">${escapeHtml(hostUrl)}</span>
-            </div>
-            ${event.timeCapsuleEnabled ? `
-              <div class="admin-link-item">
-                <span class="admin-link-label">Capsule</span>
-                <span class="muted ${capsuleUrl ? "link-preview" : "admin-link-note"}">${escapeHtml(capsuleNote)}</span>
-              </div>
-            ` : ""}
-          </div>
+          ${renderLinkActions(linkActions)}
         </td>
         <td>
           <span class="status-pill is-pending">${event.pendingCount || 0} pending</span>
@@ -228,20 +369,89 @@ function renderEvents() {
         <td>
           <div class="row-actions">
             <button class="small-button" type="button" data-event-status="${nextStatus}">${statusButton}</button>
-            <button class="small-button is-danger" type="button" data-rotate-host>Rotate host link</button>
-            <button class="small-button" type="button" data-copy="${encodeURIComponent(hostUrl)}">Copy host link</button>
-            ${capsuleUrl ? `<button class="small-button" type="button" data-copy="${encodeURIComponent(capsuleUrl)}">Copy capsule link</button>` : ""}
+            ${renderMoreActions()}
           </div>
         </td>
       </tr>
     `;
   }).join("");
 
-  const cards = events.map((event) => renderEventCard(event)).join("");
+  const cards = operationalEvents.map((event) => renderEventCard(event)).join("");
 
   qs("#eventsTable").innerHTML = rows || `<tr><td colspan="5">No events created yet.</td></tr>`;
   qs("#eventsCards").innerHTML = cards || `<div class="empty-state">No events created yet.</div>`;
   bindEventActions();
+}
+
+function getOperationalEvents() {
+  return [...events].sort((a, b) => {
+    const pendingDiff = Number(b.pendingCount || 0) - Number(a.pendingCount || 0);
+    if (pendingDiff) return pendingDiff;
+    if (a.status !== b.status) return a.status === "active" ? -1 : 1;
+    return String(a.eventDate || "9999-12-31").localeCompare(String(b.eventDate || "9999-12-31"));
+  });
+}
+
+function buildEventLinkActions(event, hostUrl, capsuleUrl) {
+  const actions = [
+    {
+      label: "Host",
+      summary: "Private host dashboard",
+      copyLabel: "Copy host link",
+      openLabel: "Open host",
+      url: hostUrl
+    }
+  ];
+
+  if (event.timeCapsuleEnabled) {
+    actions.push(capsuleUrl
+      ? {
+        label: "Capsule",
+        summary: "Published private share link",
+        copyLabel: "Copy capsule link",
+        openLabel: "Open capsule",
+        url: capsuleUrl
+      }
+      : {
+        label: "Capsule",
+        summary: "Draft: publish from the host dashboard to share.",
+        noteOnly: true
+      });
+  }
+
+  return actions;
+}
+
+function renderLinkActions(items) {
+  return `
+    <div class="admin-link-list">
+      ${items.map((item) => `
+        <div class="admin-link-item link-action-group">
+          <div>
+            <span class="admin-link-label">${escapeHtml(item.label)}</span>
+            <span class="${item.noteOnly ? "admin-link-note" : "admin-link-summary"}">${escapeHtml(item.summary)}</span>
+          </div>
+          ${item.url ? `
+            <div class="row-actions">
+              <button class="small-button" type="button" data-copy="${encodeURIComponent(item.url)}">${escapeHtml(item.copyLabel)}</button>
+              <button class="small-button" type="button" data-open="${encodeURIComponent(item.url)}">${escapeHtml(item.openLabel)}</button>
+            </div>
+          ` : ""}
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderMoreActions() {
+  return `
+    <details class="more-actions">
+      <summary class="small-button">More actions</summary>
+      <div class="more-actions-menu">
+        <button class="small-button is-danger" type="button" data-rotate-host>Rotate host link</button>
+      </div>
+    </details>
+  `;
 }
 
 function bindTagActions() {
@@ -260,6 +470,10 @@ function bindTagActions() {
   qsaWithin("#tagsTable, #tagsCards", "[data-copy]").forEach((button) => {
     button.addEventListener("click", () => copyText(decodeURIComponent(button.dataset.copy), button));
   });
+
+  qsaWithin("#tagsTable, #tagsCards", "[data-open]").forEach((button) => {
+    button.addEventListener("click", () => openUrl(decodeURIComponent(button.dataset.open)));
+  });
 }
 
 function bindEventActions() {
@@ -274,6 +488,10 @@ function bindEventActions() {
     button.addEventListener("click", () => copyText(decodeURIComponent(button.dataset.copy), button));
   });
 
+  qsaWithin("#eventsTable, #eventsCards", "[data-open]").forEach((button) => {
+    button.addEventListener("click", () => openUrl(decodeURIComponent(button.dataset.open)));
+  });
+
   qsaWithin("#eventsTable, #eventsCards", "[data-rotate-host]").forEach((button) => {
     button.addEventListener("click", async () => {
       if (!window.confirm("Rotate this host link? The previous host link will stop working.")) return;
@@ -283,16 +501,49 @@ function bindEventActions() {
   });
 }
 
-async function updateTag(tagId, body) {
+function bindAttentionActions() {
+  qsaWithin("#attentionPanel", "[data-copy]").forEach((button) => {
+    button.addEventListener("click", () => copyText(decodeURIComponent(button.dataset.copy), button));
+  });
+
+  qsaWithin("#attentionPanel", "[data-open]").forEach((button) => {
+    button.addEventListener("click", () => openUrl(decodeURIComponent(button.dataset.open)));
+  });
+
+  qsaWithin("#attentionPanel", "[data-scroll-target]").forEach((button) => {
+    button.addEventListener("click", () => scrollToTarget(button.dataset.scrollTarget));
+  });
+}
+
+function bindScrollActions() {
+  Array.from(document.querySelectorAll("[data-scroll-target]")).forEach((button) => {
+    button.addEventListener("click", () => scrollToTarget(button.dataset.scrollTarget));
+  });
+}
+
+function scrollToTarget(selector) {
+  const target = qs(selector);
+  if (!target) return;
+  target.scrollIntoView({ behavior: "smooth", block: "start" });
+  const focusTarget = target.matches("form") ? target.querySelector("input, select, button") : target;
+  focusElement(focusTarget);
+}
+
+function openUrl(url) {
+  if (!url) return;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+async function updateTag(tagId, body, successMessage = "Tag updated.") {
   try {
     await adminRequest(`/admin/tags/${encodeURIComponent(tagId)}`, {
       method: "PATCH",
       body: JSON.stringify(body)
     });
     await loadAdmin();
-    setNotice(qs("#adminNotice"), "Tag updated.", "success");
+    showAdminNotice(successMessage, "success");
   } catch (error) {
-    setNotice(qs("#adminNotice"), error.message || "Could not update tag.", "error");
+    showAdminNotice(error.message || "Could not update tag.", "error");
   }
 }
 
@@ -303,9 +554,9 @@ async function updateEvent(eventId, body) {
       body: JSON.stringify(body)
     });
     await loadAdmin();
-    setNotice(qs("#adminNotice"), "Event updated.", "success");
+    showAdminNotice("Event updated.", "success");
   } catch (error) {
-    setNotice(qs("#adminNotice"), error.message || "Could not update event.", "error");
+    showAdminNotice(error.message || "Could not update event.", "error");
   }
 }
 
@@ -358,6 +609,7 @@ function renderGuide() {
     share: hasEvent && hasAssignedTag
   };
   const firstOpen = Object.keys(steps).find((key) => !steps[key]);
+  qs(".setup-guide").classList.toggle("is-collapsed", !firstOpen);
 
   Object.entries(steps).forEach(([key, isDone]) => {
     const element = qs(`[data-guide-step="${key}"]`);
@@ -390,10 +642,11 @@ function renderTagCard(tag) {
         <label>Assigned event</label>
         <select data-tag-event>${buildEventOptions(tag.activeEventId)}</select>
       </div>
-      <p class="link-preview">${escapeHtml(guestUrl)}</p>
+      ${renderLinkActions([
+        { label: "Guest scan", summary: "Guest upload link", copyLabel: "Copy guest link", openLabel: "Open guest", url: guestUrl }
+      ])}
       <div class="row-actions">
         <button class="small-button" type="button" data-save-tag>Save</button>
-        <button class="small-button" type="button" data-copy="${encodeURIComponent(guestUrl)}">Copy guest link</button>
       </div>
     </article>
   `;
@@ -405,7 +658,6 @@ function renderEventCard(event) {
   const statusButton = event.status === "active" ? "Deactivate" : "Activate";
   const nextStatus = event.status === "active" ? "inactive" : "active";
   const capsuleStatus = event.timeCapsuleEnabled ? (event.timeCapsuleStatus || "draft") : "not added";
-  const capsuleNote = capsuleUrl ? capsuleUrl : "Draft: add an approved moment in the host dashboard, then publish to share.";
 
   return `
     <article class="admin-mobile-card" data-event-id="${event.id}">
@@ -421,23 +673,10 @@ function renderEventCard(event) {
         <span class="status-pill is-approved">${event.approvedCount || 0} approved</span>
         <span class="status-pill">${escapeHtml(`Capsule ${capsuleStatus}`)}</span>
       </div>
-      <div class="admin-link-list">
-        <div class="admin-link-item">
-          <span class="admin-link-label">Host</span>
-          <p class="link-preview">${escapeHtml(hostUrl)}</p>
-        </div>
-        ${event.timeCapsuleEnabled ? `
-          <div class="admin-link-item">
-            <span class="admin-link-label">Capsule</span>
-            <p class="${capsuleUrl ? "link-preview" : "admin-link-note"}">${escapeHtml(capsuleNote)}</p>
-          </div>
-        ` : ""}
-      </div>
+      ${renderLinkActions(buildEventLinkActions(event, hostUrl, capsuleUrl))}
       <div class="row-actions">
         <button class="small-button" type="button" data-event-status="${nextStatus}">${statusButton}</button>
-        <button class="small-button is-danger" type="button" data-rotate-host>Rotate host link</button>
-        <button class="small-button" type="button" data-copy="${encodeURIComponent(hostUrl)}">Copy host link</button>
-        ${capsuleUrl ? `<button class="small-button" type="button" data-copy="${encodeURIComponent(capsuleUrl)}">Copy capsule link</button>` : ""}
+        ${renderMoreActions()}
       </div>
     </article>
   `;
@@ -471,4 +710,8 @@ function escapeHtml(value) {
     "\"": "&quot;",
     "'": "&#39;"
   })[char]);
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value);
 }

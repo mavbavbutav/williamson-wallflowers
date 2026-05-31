@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260525-11" />
+  <link rel="stylesheet" href="../styles.css?v=20260531-admin-ux-1" />
 </head>
 <body class="admin-page">
   <main class="app-shell">
@@ -39,101 +39,164 @@
           </span>
         </a>
         <div class="topbar-actions">
+          <button class="button button-secondary" type="button" data-scroll-target="#eventForm">New event</button>
           <button class="button button-secondary" type="button" id="refreshButton">Refresh</button>
-          <button class="button button-secondary" type="button" id="cleanupButton">Run cleanup</button>
           <button class="button button-secondary" type="button" id="signOutButton">Sign out</button>
         </div>
       </header>
 
       <div class="dashboard-header">
         <div>
-          <h1 class="section-title" id="adminTitle" tabindex="-1">Event setup</h1>
-          <p class="muted">Create host galleries, assign tags, and copy private links.</p>
+          <h1 class="section-title" id="adminTitle" tabindex="-1">Admin dashboard</h1>
+          <p class="muted">Review events, copy private links, and handle setup tasks.</p>
         </div>
       </div>
 
       <div class="stats-grid" id="statsGrid"></div>
       <div id="adminNotice" class="notice" role="status" aria-live="polite" hidden></div>
 
-      <section class="setup-guide" aria-label="Setup guide">
-        <div class="guide-step" data-guide-step="event">
-          <span>1</span>
-          <strong>Create an event</strong>
-          <small>Name the host gallery and set the date.</small>
+      <section class="panel attention-panel" id="attentionPanel">
+        <div class="panel-heading">
+          <div>
+            <h2>Needs attention</h2>
+            <p class="muted">The next event work that may need a staff follow-up.</p>
+          </div>
+          <span class="status-pill" id="attentionCountLabel">0 items</span>
         </div>
-        <div class="guide-step" data-guide-step="tag">
-          <span>2</span>
-          <strong>Register a tag</strong>
-          <small>Generate or enter the reusable NTAG code.</small>
+        <div class="attention-list" id="attentionList"></div>
+      </section>
+
+      <section class="panel data-panel" id="eventsPanel">
+        <div class="panel-heading">
+          <div>
+            <h2>Events</h2>
+            <p class="muted">Copy host links, open galleries, and check capsule status.</p>
+          </div>
+          <span class="status-pill" id="eventsCountLabel">0 events</span>
         </div>
-        <div class="guide-step" data-guide-step="assign">
-          <span>3</span>
-          <strong>Assign the tag</strong>
-          <small>Connect the physical tag to the active event.</small>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Event</th>
+                <th>Private links</th>
+                <th>Counts</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="eventsTable"></tbody>
+          </table>
         </div>
-        <div class="guide-step" data-guide-step="share">
-          <span>4</span>
-          <strong>Share private links</strong>
-          <small>Test guest scan, then give the host gallery link.</small>
+        <div class="mobile-card-list event-card-list" id="eventsCards"></div>
+      </section>
+
+      <section class="setup-workflow" id="setupPanel" aria-label="Setup workflow">
+        <div class="section-kicker">
+          <h2>Setup workflow</h2>
+          <p class="muted">Use this when creating a new event or pairing a physical tag.</p>
+        </div>
+
+        <section class="setup-guide" aria-label="Setup guide">
+          <div class="guide-step" data-guide-step="event">
+            <span>1</span>
+            <strong>Create event</strong>
+            <small>Name the host gallery and set the date.</small>
+          </div>
+          <div class="guide-step" data-guide-step="tag">
+            <span>2</span>
+            <strong>Register tag</strong>
+            <small>Generate or enter the reusable NTAG code.</small>
+          </div>
+          <div class="guide-step" data-guide-step="assign">
+            <span>3</span>
+            <strong>Assign tag</strong>
+            <small>Connect the physical tag to the event.</small>
+          </div>
+          <div class="guide-step" data-guide-step="share">
+            <span>4</span>
+            <strong>Share links</strong>
+            <small>Test guest scan, then give the host link.</small>
+          </div>
+        </section>
+
+        <div class="admin-grid">
+          <form class="panel setup-panel" id="eventForm">
+            <div class="panel-heading">
+              <h2>Create event</h2>
+              <span class="status-pill">Step 1</span>
+            </div>
+            <div class="field">
+              <label for="eventNameInput">Event name</label>
+              <input id="eventNameInput" name="name" required placeholder="The Smith Wedding" />
+            </div>
+            <div class="form-grid">
+              <div class="field">
+                <label for="eventDate">Event date</label>
+                <input id="eventDate" name="eventDate" type="date" />
+              </div>
+              <div class="field">
+                <label for="hostName">Host name</label>
+                <input id="hostName" name="hostName" placeholder="Host name" />
+              </div>
+            </div>
+            <div class="field">
+              <label for="hostEmail">Host email</label>
+              <input id="hostEmail" name="hostEmail" type="email" placeholder="host@example.com" />
+            </div>
+            <label class="checkbox-row">
+              <input name="timeCapsuleEnabled" type="checkbox" value="true" />
+              <span>Add Wallflower Time Capsule for this host.</span>
+            </label>
+            <button class="button button-primary" type="submit">Create event</button>
+          </form>
+
+          <form class="panel setup-panel" id="tagForm">
+            <div class="panel-heading">
+              <h2>Register NTAG</h2>
+              <span class="status-pill">Step 2</span>
+            </div>
+            <div class="form-grid">
+              <div class="field">
+                <label for="tagCode">Public tag code</label>
+                <input id="tagCode" name="publicCode" placeholder="Leave blank to generate" />
+              </div>
+              <div class="field">
+                <label for="tagLabel">Tag label</label>
+                <input id="tagLabel" name="label" required placeholder="Gold frame tag" />
+              </div>
+            </div>
+            <div class="button-row">
+              <button class="button button-secondary" type="button" id="generateTagCodeButton">Generate code</button>
+              <button class="button button-primary" type="submit">Register tag</button>
+            </div>
+          </form>
+
+          <form class="panel setup-panel assign-panel" id="assignTagForm">
+            <div class="panel-heading">
+              <h2>Assign a tag</h2>
+              <span class="status-pill">Step 3</span>
+            </div>
+            <div class="field">
+              <label for="assignTagSelect">Reusable tag</label>
+              <select id="assignTagSelect" name="tagId" required></select>
+            </div>
+            <div class="field">
+              <label for="assignEventSelect">Active event</label>
+              <select id="assignEventSelect" name="eventId" required></select>
+            </div>
+            <p class="muted" id="assignTagHelp">Choose a tag and event, then copy the guest link from the tag list.</p>
+            <button class="button button-primary" type="submit">Assign tag</button>
+          </form>
         </div>
       </section>
 
-      <div class="admin-grid">
-        <form class="panel setup-panel" id="eventForm">
-          <div class="panel-heading">
-            <h2>Create event</h2>
-            <span class="status-pill">Step 1</span>
-          </div>
-          <div class="field">
-            <label for="eventNameInput">Event name</label>
-            <input id="eventNameInput" name="name" required placeholder="The Smith Wedding" />
-          </div>
-          <div class="form-grid">
-            <div class="field">
-              <label for="eventDate">Event date</label>
-              <input id="eventDate" name="eventDate" type="date" />
-            </div>
-            <div class="field">
-              <label for="hostName">Host name</label>
-              <input id="hostName" name="hostName" placeholder="Host name" />
-            </div>
-          </div>
-          <div class="field">
-            <label for="hostEmail">Host email</label>
-            <input id="hostEmail" name="hostEmail" type="email" placeholder="host@example.com" />
-          </div>
-          <label class="checkbox-row">
-            <input name="timeCapsuleEnabled" type="checkbox" value="true" />
-            <span>Add Wallflower Time Capsule for this host.</span>
-          </label>
-          <button class="button button-primary" type="submit">Create event</button>
-        </form>
-
-        <form class="panel setup-panel" id="tagForm">
-          <div class="panel-heading">
-            <h2>Register NTAG</h2>
-            <span class="status-pill">Step 2</span>
-          </div>
-          <div class="form-grid">
-            <div class="field">
-              <label for="tagCode">Public tag code</label>
-              <input id="tagCode" name="publicCode" placeholder="Leave blank to generate" />
-            </div>
-            <div class="field">
-              <label for="tagLabel">Tag label</label>
-              <input id="tagLabel" name="label" required placeholder="Gold frame tag" />
-            </div>
-          </div>
-          <div class="button-row">
-            <button class="button button-secondary" type="button" id="generateTagCodeButton">Generate code</button>
-            <button class="button button-primary" type="submit">Register tag</button>
-          </div>
-        </form>
-      </div>
-
-      <section class="panel data-panel">
+      <section class="panel data-panel" id="tagsPanel">
         <div class="panel-heading">
-          <h2>Reusable tags</h2>
+          <div>
+            <h2>Reusable tags</h2>
+            <p class="muted">Manage physical NTAGs and guest scan links.</p>
+          </div>
           <span class="status-pill" id="tagsCountLabel">0 tags</span>
         </div>
         <div class="table-wrap">
@@ -153,30 +216,19 @@
         <div class="mobile-card-list" id="tagsCards"></div>
       </section>
 
-      <section class="panel data-panel">
+      <section class="panel maintenance-panel" id="maintenancePanel">
         <div class="panel-heading">
-          <h2>Events</h2>
-          <span class="status-pill" id="eventsCountLabel">0 events</span>
+          <div>
+            <h2>Maintenance</h2>
+            <p class="muted">Use cleanup after confirming old, expired media can be purged.</p>
+          </div>
+          <span class="status-pill">Staff only</span>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Event</th>
-                <th>Host link</th>
-                <th>Counts</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="eventsTable"></tbody>
-          </table>
-        </div>
-        <div class="mobile-card-list" id="eventsCards"></div>
+        <button class="button button-secondary" type="button" id="cleanupButton">Run cleanup</button>
       </section>
     </section>
   </main>
 
-  <script type="module" src="admin.js?v=20260531-3"></script>
+  <script type="module" src="admin.js?v=20260531-admin-ux-1"></script>
 </body>
 </html>
