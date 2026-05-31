@@ -144,6 +144,7 @@ function renderSubmissionCard(submission) {
     <div class="media-meta">
       <span>${formatDateTime(submission.createdAt)}</span>
       <span>${formatBytes(submission.size)}</span>
+      ${submission.mediaType === "audio" && submission.durationSeconds ? `<span>${formatDuration(submission.durationSeconds)}</span>` : ""}
     </div>
   `;
 
@@ -270,11 +271,7 @@ function renderThumb(item, mediaUrl) {
     image.alt = item.guestName ? `Photo from ${item.guestName}` : "Guest photo";
     thumb.append(image);
   } else if (item.mediaType === "audio") {
-    const audio = document.createElement("audio");
-    audio.src = mediaUrl;
-    audio.controls = true;
-    audio.preload = "metadata";
-    thumb.append(audio);
+    renderVoiceMemoThumb(thumb, item, mediaUrl);
   } else {
     const video = document.createElement("video");
     video.src = mediaUrl;
@@ -285,6 +282,49 @@ function renderThumb(item, mediaUrl) {
   }
 
   return thumb;
+}
+
+function renderVoiceMemoThumb(thumb, item, mediaUrl) {
+  const panel = document.createElement("div");
+  panel.className = "voice-memo-panel";
+  panel.setAttribute("aria-label", "Voice memo audio");
+
+  const header = document.createElement("div");
+  header.className = "voice-memo-header";
+
+  const copy = document.createElement("div");
+  copy.className = "voice-memo-copy";
+
+  const kicker = document.createElement("span");
+  kicker.className = "voice-memo-kicker";
+  kicker.textContent = "Audio only";
+
+  const title = document.createElement("strong");
+  title.textContent = "Voice Memo";
+
+  const detail = document.createElement("span");
+  detail.className = "voice-memo-detail";
+  detail.textContent = item.durationSeconds ? formatDuration(item.durationSeconds) : "Tap play to listen";
+
+  copy.append(kicker, title, detail);
+  header.append(copy);
+
+  const waveform = document.createElement("div");
+  waveform.className = "voice-waveform";
+  waveform.setAttribute("aria-hidden", "true");
+  [34, 62, 48, 78, 42, 90, 56, 70, 38, 82, 50, 66].forEach((height) => {
+    const bar = document.createElement("span");
+    bar.style.setProperty("--bar-height", `${height}%`);
+    waveform.append(bar);
+  });
+
+  const audio = document.createElement("audio");
+  audio.src = mediaUrl;
+  audio.controls = true;
+  audio.preload = "metadata";
+
+  panel.append(header, waveform, audio);
+  thumb.append(panel);
 }
 
 async function addSubmissionToCapsule(submission) {
@@ -487,6 +527,13 @@ function getMediaTypeLabel(mediaType) {
   if (mediaType === "audio") return "Voice memo";
   if (mediaType === "video") return "Video";
   return "Photo";
+}
+
+function formatDuration(seconds) {
+  const value = Math.max(0, Math.round(Number(seconds || 0)));
+  const minutes = Math.floor(value / 60);
+  const remainder = value % 60;
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
 }
 
 function cssEscape(value) {

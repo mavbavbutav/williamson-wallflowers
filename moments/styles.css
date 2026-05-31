@@ -788,13 +788,82 @@ textarea:focus-visible {
 
 .host-page .media-thumb.is-audio {
   height: auto;
-  min-height: 170px;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
 }
 
 .host-page .media-thumb img,
 .host-page .media-thumb video {
   object-fit: contain;
   background: #2f2b28;
+}
+
+.voice-memo-panel {
+  display: grid;
+  gap: 1rem;
+  width: 100%;
+  min-height: clamp(190px, 22vw, 260px);
+  padding: 1rem;
+  color: #fffaf5;
+  background:
+    radial-gradient(circle at 18% 20%, rgba(244, 213, 193, 0.28), transparent 34%),
+    linear-gradient(135deg, #2f2b28 0%, #5b514b 100%);
+}
+
+.voice-memo-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.voice-memo-copy {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.voice-memo-kicker {
+  color: rgba(255, 250, 245, 0.74);
+  font-size: 0.74rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.voice-memo-copy strong {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4.2vw, 3.4rem);
+  line-height: 0.95;
+}
+
+.voice-memo-detail {
+  color: rgba(255, 250, 245, 0.86);
+  font-weight: 800;
+}
+
+.voice-waveform {
+  display: grid;
+  align-items: center;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 0.28rem;
+  height: 5rem;
+  padding: 0.8rem;
+  border: 1px solid rgba(255, 250, 245, 0.18);
+  border-radius: 16px;
+  background: rgba(255, 250, 245, 0.08);
+}
+
+.voice-waveform span {
+  display: block;
+  height: var(--bar-height, 50%);
+  min-height: 0.45rem;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #fffaf5 0%, #d8bfa9 100%);
+}
+
+.voice-memo-panel audio {
+  width: 100%;
 }
 
 .host-page .row-actions {
