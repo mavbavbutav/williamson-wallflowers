@@ -5,6 +5,7 @@ const FIELD_LABELS = [
   ['event-type', 'Event Type'],
   ['venue', 'Venue / Location'],
   ['preferred-wall', 'Preferred Wall'],
+  ['ask-time-capsule', 'Wallflower Time Capsule'],
   ['details', 'Event Details']
 ];
 
@@ -21,6 +22,8 @@ const TAG_RATE_WINDOW_SECONDS = 60 * 60;
 const DEFAULT_EVENT_MAX_SUBMISSIONS = 500;
 const DEFAULT_EVENT_MAX_BYTES = 10 * 1024 * 1024 * 1024;
 const RETENTION_CLEANUP_LIMIT = 100;
+const STANDARD_RETENTION_DAYS = 90;
+const TIME_CAPSULE_RETENTION_DAYS = 365;
 const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 const VIDEO_TYPES = new Set([
   'video/mp4',
@@ -121,6 +124,34 @@ async function handleMomentsApi(request, env, url, corsHeaders) {
 
     if (request.method === 'GET' && parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'submissions') {
       return listHostSubmissions(request, env, url, corsHeaders, parts[2]);
+    }
+
+    if (parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'time-capsule') {
+      if (request.method === 'GET') {
+        return getHostTimeCapsule(request, env, url, corsHeaders, parts[2]);
+      }
+
+      if (request.method === 'PATCH') {
+        return updateHostTimeCapsule(request, env, url, corsHeaders, parts[2]);
+      }
+
+      if (request.method === 'POST' && parts[4] === 'items') {
+        return createTimeCapsuleItem(request, env, url, corsHeaders, parts[2]);
+      }
+    }
+
+    if (parts[0] === 'host' && parts[1] === 'time-capsule' && parts[2] === 'items' && parts[3]) {
+      if (request.method === 'PATCH') {
+        return updateTimeCapsuleItem(request, env, url, corsHeaders, parts[3]);
+      }
+
+      if (request.method === 'DELETE') {
+        return deleteTimeCapsuleItem(request, env, url, corsHeaders, parts[3]);
+      }
+    }
+
+    if (request.method === 'GET' && parts[0] === 'capsules' && parts[1]) {
+      return getPublishedTimeCapsule(request, env, url, corsHeaders, parts[1]);
     }
 
     if (parts[0] === 'host' && parts[1] === 'submissions' && parts[2]) {
@@ -328,8 +359,190 @@ async function listHostSubmissions(request, env, url, corsHeaders, eventId) {
 
   return json({
     ok: true,
-    event: toEventClient(event),
+    event: toEventClient(event, env),
     submissions: await Promise.all((result.results || []).map((row) => toSubmissionClient(row, request, env)))
+  }, 200, corsHeaders);
+}
+
+async function getHostTimeCapsule(request, env, url, corsHeaders, eventId) {
+  const event = await getAuthorizedCapsuleEvent(request, env, url, eventId);
+  if (event.response) return event.response;
+
+  const items = await getTimeCapsuleItems(env, event.record.id, request, { includeHidden: true });
+
+  return json({
+    ok: true,
+    event: toEventClient(event.record, env),
+    timeCapsule: toTimeCapsuleClient(event.record, env),
+    items
+  }, 200, corsHeaders);
+}
+
+async function updateHostTimeCapsule(request, env, url, corsHeaders, eventId) {
+  const event = await getAuthorizedCapsuleEvent(request, env, url, eventId);
+  if (event.response) return event.response;
+
+  const body = await request.json();
+  const requestedStatus = body.status === undefined ? event.record.timeCapsuleStatus : String(body.status || '').toLowerCase();
+  const status = requestedStatus === 'published' ? 'published' : 'draft';
+  const title = cleanText(body.title, 140) || event.record.timeCapsuleTitle || `${event.record.name} Time Capsule`;
+  const now = new Date().toISOString();
+  let publishedAt = status === 'published' ? (event.record.timeCapsulePublishedAt || now) : null;
+
+  if (status === 'published') {
+    const visibleItems = await getTimeCapsuleItems(env, event.record.id, request, { visibleOnly: true });
+    if (!visibleItems.length) {
+      return json({ ok: false, message: 'Add at least one visible approved moment before publishing.' }, 400, corsHeaders);
+    }
+  }
+
+  await env.MOMENTS_DB.prepare(`
+    UPDATE events
+    SET time_capsule_status = ?, time_capsule_title = ?, time_capsule_published_at = ?, updated_at = ?
+    WHERE id = ?
+  `).bind(status, title, publishedAt, now, event.record.id).run();
+
+  const updated = await getEventById(env, event.record.id);
+  return json({
+    ok: true,
+    timeCapsule: toTimeCapsuleClient(updated, env)
+  }, 200, corsHeaders);
+}
+
+async function createTimeCapsuleItem(request, env, url, corsHeaders, eventId) {
+  const event = await getAuthorizedCapsuleEvent(request, env, url, eventId);
+  if (event.response) return event.response;
+
+  const body = await request.json();
+  const submissionId = cleanText(body.submissionId, 80);
+  const submission = await getSubmissionWithEvent(env, submissionId);
+
+  if (!submission || submission.eventId !== event.record.id || submission.deletedAt || submission.status === 'deleted') {
+    return json({ ok: false, message: 'Submission not found for this event.' }, 404, corsHeaders);
+  }
+
+  if (submission.status !== 'approved') {
+    return json({ ok: false, message: 'Only approved submissions can be added to the Time Capsule.' }, 400, corsHeaders);
+  }
+
+  const existing = await getTimeCapsuleItemBySubmission(env, event.record.id, submissionId);
+  if (existing) {
+    return json({ ok: false, message: 'That moment is already in the Time Capsule.' }, 409, corsHeaders);
+  }
+
+  const now = new Date().toISOString();
+  const id = crypto.randomUUID();
+  const sortOrder = Number.isFinite(Number(body.sortOrder))
+    ? Number(body.sortOrder)
+    : await getNextTimeCapsuleSortOrder(env, event.record.id);
+
+  await env.MOMENTS_DB.prepare(`
+    INSERT INTO time_capsule_items (
+      id, event_id, submission_id, title, caption, chapter, captured_at, location,
+      sort_order, is_visible, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    id,
+    event.record.id,
+    submission.id,
+    cleanText(body.title, 120) || submission.guestName || 'Guest moment',
+    cleanText(body.caption, 600) || submission.guestNote || '',
+    cleanText(body.chapter, 80) || 'Guest moments',
+    cleanText(body.capturedAt, 40) || submission.createdAt,
+    cleanText(body.location, 100),
+    sortOrder,
+    body.isVisible === false ? 0 : 1,
+    now,
+    now
+  ).run();
+
+  const item = await getTimeCapsuleItemById(env, id, request);
+  return json({ ok: true, item: await toTimeCapsuleItemClient(item, request, env) }, 201, corsHeaders);
+}
+
+async function updateTimeCapsuleItem(request, env, url, corsHeaders, itemId) {
+  const token = getAccessToken(request, url);
+  const item = await getTimeCapsuleItemWithEvent(env, itemId);
+
+  if (!item || token !== item.hostToken) {
+    return json({ ok: false, message: 'This host gallery link is not valid.' }, 403, corsHeaders);
+  }
+
+  if (!item.timeCapsuleEnabled) {
+    return json({ ok: false, message: 'Wallflower Time Capsule is not enabled for this event.' }, 404, corsHeaders);
+  }
+
+  const body = await request.json();
+  const next = {
+    title: body.title === undefined ? item.title : cleanText(body.title, 120),
+    caption: body.caption === undefined ? item.caption : cleanText(body.caption, 600),
+    chapter: body.chapter === undefined ? item.chapter : cleanText(body.chapter, 80),
+    capturedAt: body.capturedAt === undefined ? item.capturedAt : cleanText(body.capturedAt, 40),
+    location: body.location === undefined ? item.location : cleanText(body.location, 100),
+    sortOrder: body.sortOrder === undefined || !Number.isFinite(Number(body.sortOrder)) ? item.sortOrder : Number(body.sortOrder),
+    isVisible: body.isVisible === undefined ? item.isVisible : (body.isVisible ? 1 : 0)
+  };
+
+  await env.MOMENTS_DB.prepare(`
+    UPDATE time_capsule_items
+    SET title = ?, caption = ?, chapter = ?, captured_at = ?, location = ?,
+      sort_order = ?, is_visible = ?, updated_at = ?
+    WHERE id = ?
+  `).bind(
+    next.title || 'Guest moment',
+    next.caption || '',
+    next.chapter || 'Guest moments',
+    next.capturedAt || item.createdAt,
+    next.location || '',
+    next.sortOrder,
+    next.isVisible,
+    new Date().toISOString(),
+    itemId
+  ).run();
+
+  const updated = await getTimeCapsuleItemById(env, itemId, request);
+  return json({ ok: true, item: await toTimeCapsuleItemClient(updated, request, env) }, 200, corsHeaders);
+}
+
+async function deleteTimeCapsuleItem(request, env, url, corsHeaders, itemId) {
+  const token = getAccessToken(request, url);
+  const item = await getTimeCapsuleItemWithEvent(env, itemId);
+
+  if (!item || token !== item.hostToken) {
+    return json({ ok: false, message: 'This host gallery link is not valid.' }, 403, corsHeaders);
+  }
+
+  await env.MOMENTS_DB.prepare('DELETE FROM time_capsule_items WHERE id = ?').bind(itemId).run();
+  return json({ ok: true }, 200, corsHeaders);
+}
+
+async function getPublishedTimeCapsule(request, env, url, corsHeaders, eventId) {
+  const token = getAccessToken(request, url);
+  const event = await getEventById(env, eventId);
+
+  if (
+    !event ||
+    !event.timeCapsuleEnabled ||
+    event.timeCapsuleStatus !== 'published' ||
+    !event.timeCapsuleShareToken ||
+    token !== event.timeCapsuleShareToken
+  ) {
+    return json({ ok: false, message: 'This Time Capsule link is not valid.' }, 403, corsHeaders);
+  }
+
+  const items = await getTimeCapsuleItems(env, event.id, request, { visibleOnly: true });
+
+  return json({
+    ok: true,
+    event: {
+      id: event.id,
+      name: event.name,
+      title: event.timeCapsuleTitle || `${event.name} Time Capsule`,
+      eventDate: event.eventDate,
+      publishedAt: event.timeCapsulePublishedAt
+    },
+    items
   }, 200, corsHeaders);
 }
 
@@ -372,6 +585,8 @@ async function deleteHostSubmission(request, env, url, corsHeaders, submissionId
     SET status = 'deleted', deleted_at = ?, updated_at = ?
     WHERE id = ?
   `).bind(now, now, submissionId).run();
+
+  await env.MOMENTS_DB.prepare('DELETE FROM time_capsule_items WHERE submission_id = ?').bind(submissionId).run();
 
   try {
     await env.MOMENTS_BUCKET.delete(submission.objectKey);
@@ -579,17 +794,21 @@ async function createAdminEvent(request, env, corsHeaders) {
 
   const now = new Date().toISOString();
   const eventDate = cleanText(body.eventDate, 20);
+  const timeCapsuleEnabled = normalizeBoolean(body.timeCapsuleEnabled);
   const id = crypto.randomUUID();
   const hostToken = randomToken();
   const adminToken = randomToken();
-  const retentionExpiresAt = getRetentionExpiresAt(eventDate);
+  const timeCapsuleShareToken = timeCapsuleEnabled ? randomToken() : null;
+  const timeCapsuleTitle = timeCapsuleEnabled ? (cleanText(body.timeCapsuleTitle, 140) || `${name} Time Capsule`) : null;
+  const retentionExpiresAt = getRetentionExpiresAt(eventDate, timeCapsuleEnabled ? TIME_CAPSULE_RETENTION_DAYS : STANDARD_RETENTION_DAYS);
 
   await env.MOMENTS_DB.prepare(`
     INSERT INTO events (
       id, name, event_date, host_name, host_email, host_token, admin_token,
-      status, retention_expires_at, created_at, updated_at
+      status, retention_expires_at, created_at, updated_at, time_capsule_enabled,
+      time_capsule_status, time_capsule_title, time_capsule_share_token, time_capsule_published_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     id,
     name,
@@ -600,7 +819,12 @@ async function createAdminEvent(request, env, corsHeaders) {
     adminToken,
     retentionExpiresAt,
     now,
-    now
+    now,
+    timeCapsuleEnabled ? 1 : 0,
+    'draft',
+    timeCapsuleTitle,
+    timeCapsuleShareToken,
+    null
   ).run();
 
   return json({
@@ -612,7 +836,13 @@ async function createAdminEvent(request, env, corsHeaders) {
       hostToken,
       adminToken,
       retentionExpiresAt,
-      hostUrl: `${getSiteUrl(env)}/moments/host/?event=${encodeURIComponent(id)}#token=${encodeURIComponent(hostToken)}`
+      hostUrl: `${getSiteUrl(env)}/moments/host/?event=${encodeURIComponent(id)}#token=${encodeURIComponent(hostToken)}`,
+      timeCapsuleEnabled,
+      timeCapsuleStatus: 'draft',
+      timeCapsuleTitle,
+      timeCapsuleShareToken,
+      timeCapsulePublishedAt: null,
+      capsuleShareUrl: timeCapsuleEnabled ? buildTimeCapsuleShareUrl(env, id, timeCapsuleShareToken) : ''
     }
   }, 201, corsHeaders);
 }
@@ -623,6 +853,14 @@ async function updateAdminEvent(request, env, corsHeaders, eventId) {
 
   const body = await request.json();
   const nextEventDate = body.eventDate === undefined ? current.eventDate : cleanText(body.eventDate, 20);
+  const nextTimeCapsuleEnabled = body.timeCapsuleEnabled === undefined
+    ? Boolean(current.timeCapsuleEnabled)
+    : normalizeBoolean(body.timeCapsuleEnabled);
+  const shouldRecalculateRetention = body.retentionExpiresAt === undefined
+    && (body.eventDate !== undefined || body.timeCapsuleEnabled !== undefined);
+  const nextTimeCapsuleShareToken = nextTimeCapsuleEnabled
+    ? (current.timeCapsuleShareToken || randomToken())
+    : current.timeCapsuleShareToken;
   const next = {
     name: body.name === undefined ? current.name : cleanText(body.name, 120),
     eventDate: nextEventDate || null,
@@ -630,7 +868,18 @@ async function updateAdminEvent(request, env, corsHeaders, eventId) {
     hostEmail: body.hostEmail === undefined ? current.hostEmail : cleanText(body.hostEmail, 140),
     status: body.status === undefined ? current.status : normalizeStatus(body.status, ['active', 'inactive', 'archived']),
     hostToken: body.rotateHostToken ? randomToken() : current.hostToken,
-    retentionExpiresAt: body.retentionExpiresAt || (body.eventDate === undefined ? current.retentionExpiresAt : getRetentionExpiresAt(nextEventDate))
+    retentionExpiresAt: body.retentionExpiresAt || (
+      shouldRecalculateRetention
+        ? getRetentionExpiresAt(nextEventDate, nextTimeCapsuleEnabled ? TIME_CAPSULE_RETENTION_DAYS : STANDARD_RETENTION_DAYS)
+        : current.retentionExpiresAt
+    ),
+    timeCapsuleEnabled: nextTimeCapsuleEnabled,
+    timeCapsuleStatus: body.timeCapsuleStatus === undefined ? current.timeCapsuleStatus : normalizeStatus(body.timeCapsuleStatus, ['draft', 'published']),
+    timeCapsuleTitle: body.timeCapsuleTitle === undefined ? current.timeCapsuleTitle : cleanText(body.timeCapsuleTitle, 140),
+    timeCapsuleShareToken: nextTimeCapsuleShareToken,
+    timeCapsulePublishedAt: body.timeCapsuleStatus === 'published'
+      ? (current.timeCapsulePublishedAt || new Date().toISOString())
+      : (body.timeCapsuleStatus === 'draft' || !nextTimeCapsuleEnabled ? null : current.timeCapsulePublishedAt)
   };
 
   if (!next.name) {
@@ -639,7 +888,9 @@ async function updateAdminEvent(request, env, corsHeaders, eventId) {
 
   await env.MOMENTS_DB.prepare(`
     UPDATE events
-    SET name = ?, event_date = ?, host_name = ?, host_email = ?, status = ?, host_token = ?, retention_expires_at = ?, updated_at = ?
+    SET name = ?, event_date = ?, host_name = ?, host_email = ?, status = ?, host_token = ?,
+      retention_expires_at = ?, time_capsule_enabled = ?, time_capsule_status = ?,
+      time_capsule_title = ?, time_capsule_share_token = ?, time_capsule_published_at = ?, updated_at = ?
     WHERE id = ?
   `).bind(
     next.name,
@@ -649,6 +900,11 @@ async function updateAdminEvent(request, env, corsHeaders, eventId) {
     next.status,
     next.hostToken,
     next.retentionExpiresAt,
+    next.timeCapsuleEnabled ? 1 : 0,
+    next.timeCapsuleStatus,
+    next.timeCapsuleTitle || (next.timeCapsuleEnabled ? `${next.name} Time Capsule` : null),
+    next.timeCapsuleShareToken,
+    next.timeCapsulePublishedAt,
     new Date().toISOString(),
     eventId
   ).run();
@@ -883,11 +1139,15 @@ function getInternalRecipients(env) {
 function buildInternalEmail(submission) {
   return FIELD_LABELS
     .filter(([key]) => submission[key])
-    .map(([key, label]) => `${label}: ${submission[key]}`)
+    .map(([key, label]) => `${label}: ${formatSubmissionField(key, submission[key])}`)
     .join('\n\n');
 }
 
 function buildApplicantConfirmation(submission) {
+  const timeCapsuleLine = normalizeBoolean(submission['ask-time-capsule'])
+    ? '\nWallflower Time Capsule: We will include add-on details in your follow-up.'
+    : '';
+
   return `Hi ${getFirstName(submission.name)},
 
 Thanks for reaching out to Williamson Wallflowers.
@@ -898,11 +1158,19 @@ Quick summary:
 Event Date: ${submission['event-date'] || 'Not provided'}
 Event Type: ${submission['event-type'] || 'Not provided'}
 Venue / Location: ${submission.venue || 'Not provided'}
-Preferred Wall: ${submission['preferred-wall'] || 'Not provided'}
+Preferred Wall: ${submission['preferred-wall'] || 'Not provided'}${timeCapsuleLine}
 
 Williamson Wallflowers
 Luxury flower wall rentals for Nashville, Williamson County, and Middle Tennessee
 jamicarswell@gmail.com`;
+}
+
+function formatSubmissionField(key, value) {
+  if (key === 'ask-time-capsule') {
+    return normalizeBoolean(value) ? 'Yes' : 'No';
+  }
+
+  return value;
 }
 
 function getFirstName(fullName) {
@@ -950,6 +1218,11 @@ async function getEventById(env, eventId) {
       admin_token AS adminToken,
       status,
       retention_expires_at AS retentionExpiresAt,
+      time_capsule_enabled AS timeCapsuleEnabled,
+      time_capsule_status AS timeCapsuleStatus,
+      time_capsule_title AS timeCapsuleTitle,
+      time_capsule_share_token AS timeCapsuleShareToken,
+      time_capsule_published_at AS timeCapsulePublishedAt,
       created_at AS createdAt,
       updated_at AS updatedAt
     FROM events
@@ -973,6 +1246,11 @@ async function getHostEvent(env, eventId, token) {
       admin_token AS adminToken,
       status,
       retention_expires_at AS retentionExpiresAt,
+      time_capsule_enabled AS timeCapsuleEnabled,
+      time_capsule_status AS timeCapsuleStatus,
+      time_capsule_title AS timeCapsuleTitle,
+      time_capsule_share_token AS timeCapsuleShareToken,
+      time_capsule_published_at AS timeCapsulePublishedAt,
       created_at AS createdAt,
       updated_at AS updatedAt
     FROM events
@@ -980,6 +1258,125 @@ async function getHostEvent(env, eventId, token) {
   `).bind(eventId, token).first();
 
   return row || null;
+}
+
+async function getAuthorizedCapsuleEvent(request, env, url, eventId) {
+  const token = getAccessToken(request, url);
+  const event = await getHostEvent(env, eventId, token);
+
+  if (!event) {
+    return { response: json({ ok: false, message: 'This host gallery link is not valid.' }, 403, getCorsHeaders(request.headers.get('Origin') || '', env)) };
+  }
+
+  if (!event.timeCapsuleEnabled) {
+    return { response: json({ ok: false, message: 'Wallflower Time Capsule is not enabled for this event.' }, 404, getCorsHeaders(request.headers.get('Origin') || '', env)) };
+  }
+
+  return { record: event };
+}
+
+async function getTimeCapsuleItems(env, eventId, request, options = {}) {
+  const visibilityFilter = options.visibleOnly ? 'AND i.is_visible = 1' : '';
+  const result = await env.MOMENTS_DB.prepare(`
+    SELECT
+      i.id,
+      i.event_id AS eventId,
+      i.submission_id AS submissionId,
+      i.title,
+      i.caption,
+      i.chapter,
+      i.captured_at AS capturedAt,
+      i.location,
+      i.sort_order AS sortOrder,
+      i.is_visible AS isVisible,
+      i.created_at AS createdAt,
+      i.updated_at AS updatedAt,
+      s.media_type AS mediaType,
+      s.mime_type AS mimeType,
+      s.size,
+      s.duration_seconds AS durationSeconds,
+      s.guest_name AS guestName,
+      s.guest_note AS guestNote,
+      s.status AS submissionStatus,
+      s.deleted_at AS deletedAt,
+      s.created_at AS submissionCreatedAt,
+      s.updated_at AS submissionUpdatedAt
+    FROM time_capsule_items i
+    INNER JOIN submissions s ON s.id = i.submission_id
+    WHERE i.event_id = ? AND s.status = 'approved' AND s.deleted_at IS NULL ${visibilityFilter}
+    ORDER BY i.sort_order ASC, i.created_at ASC
+  `).bind(eventId).all();
+
+  return Promise.all((result.results || []).map((row) => toTimeCapsuleItemClient(row, request, env)));
+}
+
+async function getTimeCapsuleItemBySubmission(env, eventId, submissionId) {
+  return env.MOMENTS_DB.prepare(`
+    SELECT id
+    FROM time_capsule_items
+    WHERE event_id = ? AND submission_id = ?
+  `).bind(eventId, submissionId).first();
+}
+
+async function getNextTimeCapsuleSortOrder(env, eventId) {
+  const row = await env.MOMENTS_DB.prepare(`
+    SELECT COALESCE(MAX(sort_order), 0) + 1 AS nextSortOrder
+    FROM time_capsule_items
+    WHERE event_id = ?
+  `).bind(eventId).first();
+
+  return Number(row?.nextSortOrder || row?.next_sort_order || 1);
+}
+
+async function getTimeCapsuleItemById(env, itemId) {
+  return env.MOMENTS_DB.prepare(`
+    SELECT
+      i.id,
+      i.event_id AS eventId,
+      i.submission_id AS submissionId,
+      i.title,
+      i.caption,
+      i.chapter,
+      i.captured_at AS capturedAt,
+      i.location,
+      i.sort_order AS sortOrder,
+      i.is_visible AS isVisible,
+      i.created_at AS createdAt,
+      i.updated_at AS updatedAt,
+      s.media_type AS mediaType,
+      s.mime_type AS mimeType,
+      s.size,
+      s.duration_seconds AS durationSeconds,
+      s.guest_name AS guestName,
+      s.guest_note AS guestNote,
+      s.status AS submissionStatus,
+      s.deleted_at AS deletedAt,
+      s.created_at AS submissionCreatedAt,
+      s.updated_at AS submissionUpdatedAt
+    FROM time_capsule_items i
+    INNER JOIN submissions s ON s.id = i.submission_id
+    WHERE i.id = ?
+  `).bind(itemId).first();
+}
+
+async function getTimeCapsuleItemWithEvent(env, itemId) {
+  return env.MOMENTS_DB.prepare(`
+    SELECT
+      i.id,
+      i.title,
+      i.caption,
+      i.chapter,
+      i.captured_at AS capturedAt,
+      i.location,
+      i.sort_order AS sortOrder,
+      i.is_visible AS isVisible,
+      i.created_at AS createdAt,
+      e.host_token AS hostToken,
+      e.time_capsule_enabled AS timeCapsuleEnabled
+    FROM time_capsule_items i
+    INNER JOIN events e ON e.id = i.event_id
+    WHERE i.id = ?
+  `).bind(itemId).first();
 }
 
 async function getSubmissionWithEvent(env, submissionId) {
@@ -1081,6 +1478,11 @@ function cleanText(value, maxLength) {
     .trim()
     .replace(/\s+/g, ' ')
     .slice(0, maxLength);
+}
+
+function normalizeBoolean(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return value === true || normalized === 'true' || normalized === 'yes' || normalized === 'on' || normalized === '1';
 }
 
 function normalizeTagCode(value) {
@@ -1227,21 +1629,34 @@ function randomToken(length = 32) {
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
-function getRetentionExpiresAt(eventDate) {
+function getRetentionExpiresAt(eventDate, retentionDays = STANDARD_RETENTION_DAYS) {
   const base = eventDate ? new Date(`${eventDate}T23:59:59Z`) : new Date();
   if (Number.isNaN(base.getTime())) base.setTime(Date.now());
-  base.setUTCDate(base.getUTCDate() + 90);
+  base.setUTCDate(base.getUTCDate() + retentionDays);
   return base.toISOString();
 }
 
-function toEventClient(row) {
+function toEventClient(row, env) {
   return {
     id: row.id,
     name: row.name,
     eventDate: row.eventDate,
     hostName: row.hostName,
     status: row.status,
-    retentionExpiresAt: row.retentionExpiresAt
+    retentionExpiresAt: row.retentionExpiresAt,
+    timeCapsule: toTimeCapsuleClient(row, env)
+  };
+}
+
+function toTimeCapsuleClient(row, env) {
+  const enabled = Boolean(row.timeCapsuleEnabled);
+  return {
+    enabled,
+    status: row.timeCapsuleStatus || 'draft',
+    title: row.timeCapsuleTitle || (enabled ? `${row.name} Time Capsule` : ''),
+    shareToken: enabled ? row.timeCapsuleShareToken || '' : '',
+    publishedAt: row.timeCapsulePublishedAt || '',
+    shareUrl: enabled && row.timeCapsuleShareToken ? buildTimeCapsuleShareUrl(env, row.id, row.timeCapsuleShareToken) : ''
   };
 }
 
@@ -1257,10 +1672,46 @@ function toAdminEventClient(row, env) {
     status: row.status,
     retentionExpiresAt: row.retention_expires_at,
     createdAt: row.created_at,
+    timeCapsuleEnabled: Boolean(row.time_capsule_enabled),
+    timeCapsuleStatus: row.time_capsule_status || 'draft',
+    timeCapsuleTitle: row.time_capsule_title || '',
+    timeCapsuleShareToken: row.time_capsule_share_token || '',
+    timeCapsulePublishedAt: row.time_capsule_published_at || '',
+    capsuleShareUrl: row.time_capsule_enabled && row.time_capsule_share_token
+      ? buildTimeCapsuleShareUrl(env, row.id, row.time_capsule_share_token)
+      : '',
     pendingCount: row.pending_count,
     approvedCount: row.approved_count,
     rejectedCount: row.rejected_count,
     hostUrl: `${getSiteUrl(env)}/moments/host/?event=${encodeURIComponent(row.id)}#token=${encodeURIComponent(row.host_token)}`
+  };
+}
+
+async function toTimeCapsuleItemClient(row, request, env) {
+  const mediaToken = await createSignedToken(env, 'media', row.submissionId, MEDIA_TOKEN_TTL_SECONDS);
+  const mediaUrl = `${getApiOrigin(request, env)}/moments-api/media/${encodeURIComponent(row.submissionId)}?mediaToken=${encodeURIComponent(mediaToken)}`;
+
+  return {
+    id: row.id,
+    eventId: row.eventId,
+    submissionId: row.submissionId,
+    title: row.title || 'Guest moment',
+    caption: row.caption || '',
+    chapter: row.chapter || 'Guest moments',
+    capturedAt: row.capturedAt || row.submissionCreatedAt || row.createdAt,
+    location: row.location || '',
+    sortOrder: Number(row.sortOrder || 0),
+    isVisible: row.isVisible !== 0,
+    mediaType: row.mediaType,
+    mimeType: row.mimeType,
+    size: row.size,
+    durationSeconds: row.durationSeconds,
+    guestName: row.guestName || '',
+    guestNote: row.guestNote || '',
+    mediaUrl,
+    downloadUrl: mediaUrl,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
   };
 }
 
@@ -1303,6 +1754,10 @@ function getApiOrigin(request, env) {
 
 function getSiteUrl(env) {
   return (env.PUBLIC_SITE_URL || PUBLIC_SITE_URL).replace(/\/$/, '');
+}
+
+function buildTimeCapsuleShareUrl(env, eventId, shareToken) {
+  return `${getSiteUrl(env)}/moments/capsule/?event=${encodeURIComponent(eventId)}#token=${encodeURIComponent(shareToken)}`;
 }
 
 function getDisposition(url) {

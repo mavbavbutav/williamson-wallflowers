@@ -1,8 +1,8 @@
 # Williamson Wallflowers Worker
 
-This Cloudflare Worker receives the Williamson Wallflowers inquiry form and powers the hidden Wallflower Moments add-on.
+This Cloudflare Worker receives the Williamson Wallflowers inquiry form and powers the hidden Wallflower Moments and Wallflower Time Capsule add-on.
 
-The public flower wall site stays static on GitHub Pages. The Moments frontend is intentionally hidden under `/moments/`, `/moments/host/`, and `/moments/admin/`; do not link it from the public homepage until the service is approved.
+The public flower wall site stays static on GitHub Pages. The Moments frontend is intentionally hidden under `/moments/`, `/moments/host/`, `/moments/capsule/`, and `/moments/admin/`; do not link hidden host/admin flows from the public homepage.
 
 ## Setup
 
@@ -66,6 +66,12 @@ Host gallery URL:
 https://williamsonwallflowers.com/moments/host/?event=<eventId>#token=<hostToken>
 ```
 
+Private Wallflower Time Capsule URL:
+
+```text
+https://williamsonwallflowers.com/moments/capsule/?event=<eventId>#token=<shareToken>
+```
+
 Admin URL:
 
 ```text
@@ -81,6 +87,12 @@ Admin access uses the `MOMENTS_ADMIN_TOKEN` secret. Hosts use event-specific mag
 - `GET /moments-api/host/events/:eventId/submissions` with host token in `Authorization: Bearer ...`
 - `PATCH /moments-api/host/submissions/:submissionId` with host token in `Authorization: Bearer ...`
 - `DELETE /moments-api/host/submissions/:submissionId` with host token in `Authorization: Bearer ...`
+- `GET /moments-api/host/events/:eventId/time-capsule` with host token in `Authorization: Bearer ...`
+- `PATCH /moments-api/host/events/:eventId/time-capsule` with host token in `Authorization: Bearer ...`
+- `POST /moments-api/host/events/:eventId/time-capsule/items` with host token in `Authorization: Bearer ...`
+- `PATCH /moments-api/host/time-capsule/items/:itemId` with host token in `Authorization: Bearer ...`
+- `DELETE /moments-api/host/time-capsule/items/:itemId` with host token in `Authorization: Bearer ...`
+- `GET /moments-api/capsules/:eventId` with share token in `Authorization: Bearer ...`
 - `GET /moments-api/media/:submissionId?mediaToken=...`
 - `GET /moments-api/admin/overview`
 - `POST /moments-api/admin/events`
@@ -94,6 +106,8 @@ Photo uploads are capped at 8 MB. Video uploads are capped at 50 MB and 30 secon
 
 Host media URLs use short-lived media tokens so the long-lived host gallery token is not embedded in every video/photo request.
 
+Wallflower Time Capsule events use the same guest QR/tag capture and host approval flow. Only approved, non-deleted submissions can be added to a capsule. Published capsules are private-link only and use separate share tokens; media still streams through short-lived media URLs.
+
 ## Retention
 
-Events default to 90 days of retention from the event date. `GET /moments-api/admin/retention-candidates` lists media records whose event retention has expired. `POST /moments-api/admin/retention-cleanup` deletes expired R2 objects and marks those submissions deleted. The Worker also has a daily scheduled cleanup trigger.
+Standard Moments events default to 90 days of retention from the event date. Time Capsule-enabled events default to 365 days. `GET /moments-api/admin/retention-candidates` lists media records whose event retention has expired. `POST /moments-api/admin/retention-cleanup` deletes expired R2 objects and marks those submissions deleted. The Worker also has a daily scheduled cleanup trigger.

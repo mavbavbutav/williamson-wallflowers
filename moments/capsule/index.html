@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex,nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Wallflower Time Capsule</title>
+  <link rel="icon" type="image/png" sizes="48x48" href="../../favicon-48.png?v=ww-logo-favicon-1" />
+  <link rel="icon" type="image/png" sizes="96x96" href="../../favicon-96.png?v=ww-logo-favicon-1" />
+  <link rel="icon" type="image/svg+xml" href="../../favicon.svg?v=ww-logo-favicon-1" />
+  <link rel="apple-touch-icon" sizes="180x180" href="../../apple-touch-icon.png?v=ww-logo-favicon-1" />
+  <link rel="shortcut icon" href="../../favicon.ico?v=ww-logo-favicon-1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css?v=20260525-12" />
+</head>
+<body class="host-page capsule-viewer">
+  <main class="app-shell">
+    <header class="site-topbar">
+      <a class="brand-lockup" href="../" aria-label="Wallflower Moments home">
+        <img src="../../assets/williamson-wallflowers-logo.png" alt="" />
+        <span class="brand-copy">
+          <strong>Wallflower Time Capsule</strong>
+          <span>Private keepsake timeline</span>
+        </span>
+      </a>
+    </header>
+
+    <section class="dashboard">
+      <div class="dashboard-header">
+        <div>
+          <h1 class="section-title" id="capsuleTitle" tabindex="-1">Opening Time Capsule</h1>
+          <p class="muted" id="capsuleMeta">Loading the private keepsake timeline.</p>
+        </div>
+        <button class="button button-primary" type="button" id="playSlideshowButton" hidden>Play slideshow</button>
+      </div>
+
+      <div id="capsuleNotice" class="notice" role="status" aria-live="polite" hidden></div>
+      <div class="capsule-timeline" id="capsuleTimeline"></div>
+      <div class="empty-state" id="capsuleEmpty" hidden>This Time Capsule does not have visible moments yet.</div>
+    </section>
+  </main>
+
+  <div class="media-modal" id="slideshowModal" role="dialog" aria-modal="true" aria-labelledby="slideTitle" hidden>
+    <div class="media-modal-bar">
+      <strong id="slideTitle">Time Capsule moment</strong>
+      <div class="modal-actions">
+        <button class="button button-secondary" type="button" id="slidePrev">Previous</button>
+        <button class="button button-secondary" type="button" id="slideNext">Next</button>
+        <button class="button button-secondary" type="button" id="slideClose">Close</button>
+      </div>
+    </div>
+    <div class="media-modal-stage" id="slideStage"></div>
+    <div class="capsule-slide-copy">
+      <p class="muted" id="slideMeta"></p>
+      <p id="slideCaption"></p>
+    </div>
+  </div>
+
+  <script type="module" src="capsule.js?v=20260531-1"></script>
+</body>
+</html>

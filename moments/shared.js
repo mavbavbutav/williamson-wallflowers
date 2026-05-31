@@ -162,6 +162,10 @@ export function buildHostUrl(eventId, token) {
   return `${window.location.origin}/moments/host/?event=${encodeURIComponent(eventId)}#token=${encodeURIComponent(token)}`;
 }
 
+export function buildCapsuleUrl(eventId, token) {
+  return `${window.location.origin}/moments/capsule/?event=${encodeURIComponent(eventId)}#token=${encodeURIComponent(token)}`;
+}
+
 function readUrlSecret(name, storageKey) {
   const query = new URLSearchParams(window.location.search);
   const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));

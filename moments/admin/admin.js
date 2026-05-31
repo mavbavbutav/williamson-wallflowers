@@ -1,4 +1,5 @@
 import {
+  buildCapsuleUrl,
   buildGuestUrl,
   buildHostUrl,
   clearAdminToken,
@@ -9,7 +10,7 @@ import {
   requestJson,
   setAdminToken,
   setNotice
-} from "../shared.js?v=20260525-3";
+} from "../shared.js?v=20260531-1";
 
 let adminToken = getAdminToken();
 let events = [];
@@ -192,8 +193,10 @@ function renderEvents() {
 
   const rows = events.map((event) => {
     const hostUrl = buildHostUrl(event.id, event.hostToken);
+    const capsuleUrl = event.capsuleShareUrl || (event.timeCapsuleEnabled && event.timeCapsuleShareToken ? buildCapsuleUrl(event.id, event.timeCapsuleShareToken) : "");
     const statusButton = event.status === "active" ? "Deactivate" : "Activate";
     const nextStatus = event.status === "active" ? "inactive" : "active";
+    const capsuleStatus = event.timeCapsuleEnabled ? (event.timeCapsuleStatus || "draft") : "not added";
 
     return `
       <tr data-event-id="${event.id}">
@@ -201,10 +204,14 @@ function renderEvents() {
           <strong>${escapeHtml(event.name)}</strong><br />
           <span class="muted">${formatDate(event.eventDate)} | expires ${formatDate(event.retentionExpiresAt?.slice(0, 10))}</span>
         </td>
-        <td><span class="muted link-preview">${escapeHtml(hostUrl)}</span></td>
+        <td>
+          <span class="muted link-preview">${escapeHtml(hostUrl)}</span>
+          ${capsuleUrl ? `<span class="muted link-preview">Capsule: ${escapeHtml(capsuleUrl)}</span>` : ""}
+        </td>
         <td>
           <span class="status-pill is-pending">${event.pendingCount || 0} pending</span>
           <span class="status-pill is-approved">${event.approvedCount || 0} approved</span>
+          <span class="status-pill">${escapeHtml(`Capsule ${capsuleStatus}`)}</span>
         </td>
         <td><span class="status-pill">${event.status}</span></td>
         <td>
@@ -212,6 +219,7 @@ function renderEvents() {
             <button class="small-button" type="button" data-event-status="${nextStatus}">${statusButton}</button>
             <button class="small-button is-danger" type="button" data-rotate-host>Rotate host link</button>
             <button class="small-button" type="button" data-copy="${encodeURIComponent(hostUrl)}">Copy host link</button>
+            ${capsuleUrl ? `<button class="small-button" type="button" data-copy="${encodeURIComponent(capsuleUrl)}">Copy capsule link</button>` : ""}
           </div>
         </td>
       </tr>
@@ -382,8 +390,10 @@ function renderTagCard(tag) {
 
 function renderEventCard(event) {
   const hostUrl = buildHostUrl(event.id, event.hostToken);
+  const capsuleUrl = event.capsuleShareUrl || (event.timeCapsuleEnabled && event.timeCapsuleShareToken ? buildCapsuleUrl(event.id, event.timeCapsuleShareToken) : "");
   const statusButton = event.status === "active" ? "Deactivate" : "Activate";
   const nextStatus = event.status === "active" ? "inactive" : "active";
+  const capsuleStatus = event.timeCapsuleEnabled ? (event.timeCapsuleStatus || "draft") : "not added";
 
   return `
     <article class="admin-mobile-card" data-event-id="${event.id}">
@@ -397,12 +407,15 @@ function renderEventCard(event) {
       <div class="button-row">
         <span class="status-pill is-pending">${event.pendingCount || 0} pending</span>
         <span class="status-pill is-approved">${event.approvedCount || 0} approved</span>
+        <span class="status-pill">${escapeHtml(`Capsule ${capsuleStatus}`)}</span>
       </div>
       <p class="link-preview">${escapeHtml(hostUrl)}</p>
+      ${capsuleUrl ? `<p class="link-preview">Capsule: ${escapeHtml(capsuleUrl)}</p>` : ""}
       <div class="row-actions">
         <button class="small-button" type="button" data-event-status="${nextStatus}">${statusButton}</button>
         <button class="small-button is-danger" type="button" data-rotate-host>Rotate host link</button>
         <button class="small-button" type="button" data-copy="${encodeURIComponent(hostUrl)}">Copy host link</button>
+        ${capsuleUrl ? `<button class="small-button" type="button" data-copy="${encodeURIComponent(capsuleUrl)}">Copy capsule link</button>` : ""}
       </div>
     </article>
   `;

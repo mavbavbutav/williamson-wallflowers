@@ -756,6 +756,82 @@ textarea:focus-visible {
   text-align: center;
 }
 
+.capsule-grid {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.capsule-settings .row-actions {
+  align-items: center;
+}
+
+.capsule-item-form label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.capsule-item-form input,
+.capsule-item-form textarea {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(222, 211, 200, 0.95);
+  border-radius: 12px;
+  padding: 0.62rem 0.7rem;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.capsule-item-form textarea {
+  min-height: 86px;
+  resize: vertical;
+}
+
+.capsule-item-form .capsule-visible {
+  grid-template-columns: 22px 1fr;
+  align-items: center;
+  min-height: 42px;
+}
+
+.capsule-item-form .capsule-visible input {
+  min-height: auto;
+  padding: 0;
+}
+
+.capsule-timeline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.capsule-memory-button {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+}
+
+.capsule-memory-button .media-body {
+  gap: 0.55rem;
+}
+
+.capsule-slide-copy {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.9rem 1rem 1rem;
+  color: #fffaf5;
+  background: #2f2b28;
+}
+
+.capsule-slide-copy p {
+  margin: 0;
+}
+
 .media-meta {
   display: flex;
   flex-wrap: wrap;
@@ -948,6 +1024,12 @@ tr:last-child td {
 .small-button:hover {
   transform: translateY(-1px);
   background: rgba(255, 255, 255, 0.9);
+}
+
+.small-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
 }
 
 .small-button.is-danger {

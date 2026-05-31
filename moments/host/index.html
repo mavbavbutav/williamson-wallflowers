@@ -39,27 +39,86 @@
         </div>
       </div>
 
-      <div class="toolbar">
-        <div class="tabs" aria-label="Submission status">
-          <button class="tab-button is-active" type="button" data-status="pending" aria-pressed="true">
-            <span>Pending</span>
-            <span class="tab-count" data-count="pending">0</span>
-          </button>
-          <button class="tab-button" type="button" data-status="approved" aria-pressed="false">
-            <span>Approved</span>
-            <span class="tab-count" data-count="approved">0</span>
-          </button>
-          <button class="tab-button" type="button" data-status="rejected" aria-pressed="false">
-            <span>Rejected</span>
-            <span class="tab-count" data-count="rejected">0</span>
-          </button>
+      <div id="hostNotice" class="notice" role="status" aria-live="polite" hidden></div>
+
+      <div class="toolbar" id="workspaceToolbar" hidden>
+        <div class="tabs" aria-label="Host workspace">
+          <button class="tab-button is-active" type="button" data-view="submissions" aria-pressed="true">Submissions</button>
+          <button class="tab-button" type="button" data-view="capsule" aria-pressed="false">Time Capsule</button>
+          <button class="tab-button" type="button" data-view="share" aria-pressed="false">Share</button>
         </div>
-        <span class="muted" id="countLabel">0 submissions</span>
       </div>
 
-      <div id="hostNotice" class="notice" role="status" aria-live="polite" hidden></div>
-      <div class="media-grid" id="mediaGrid"></div>
-      <div class="empty-state" id="emptyState" hidden>No submissions in this view yet.</div>
+      <section class="dashboard" id="submissionsPanel">
+        <div class="toolbar">
+          <div class="tabs" aria-label="Submission status">
+            <button class="tab-button is-active" type="button" data-status="pending" aria-pressed="true">
+              <span>Pending</span>
+              <span class="tab-count" data-count="pending">0</span>
+            </button>
+            <button class="tab-button" type="button" data-status="approved" aria-pressed="false">
+              <span>Approved</span>
+              <span class="tab-count" data-count="approved">0</span>
+            </button>
+            <button class="tab-button" type="button" data-status="rejected" aria-pressed="false">
+              <span>Rejected</span>
+              <span class="tab-count" data-count="rejected">0</span>
+            </button>
+          </div>
+          <span class="muted" id="countLabel">0 submissions</span>
+        </div>
+
+        <div class="media-grid" id="mediaGrid"></div>
+        <div class="empty-state" id="emptyState" hidden>No submissions in this view yet.</div>
+      </section>
+
+      <section class="dashboard" id="capsulePanel" hidden>
+        <div class="panel capsule-settings">
+          <div class="panel-heading">
+            <div>
+              <h2>Wallflower Time Capsule</h2>
+              <p class="muted" id="capsuleStatus">Draft keepsake timeline.</p>
+            </div>
+            <span class="status-pill" id="capsuleStatusPill">draft</span>
+          </div>
+          <div class="form-grid">
+            <div class="field">
+              <label for="capsuleTitle">Capsule title</label>
+              <input id="capsuleTitle" name="capsuleTitle" />
+            </div>
+            <div class="field capsule-actions">
+              <label>Publish controls</label>
+              <div class="row-actions">
+                <button class="small-button" type="button" id="saveCapsuleButton">Save title</button>
+                <button class="small-button is-success" type="button" id="publishCapsuleButton">Publish</button>
+                <button class="small-button" type="button" id="unpublishCapsuleButton">Unpublish</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="capsuleNotice" class="notice" role="status" aria-live="polite" hidden></div>
+        <div class="media-grid capsule-grid" id="capsuleGrid"></div>
+        <div class="empty-state" id="capsuleEmpty" hidden>No moments in the Time Capsule yet. Approve a submission, then add it from the Approved tab.</div>
+      </section>
+
+      <section class="dashboard" id="sharePanel" hidden>
+        <div class="panel">
+          <div class="panel-heading">
+            <div>
+              <h2>Private Time Capsule link</h2>
+              <p class="muted">Publish the capsule before sharing this link with guests.</p>
+            </div>
+          </div>
+          <label class="field">
+            Share link
+            <input id="capsuleShareUrl" readonly />
+          </label>
+          <div class="row-actions">
+            <button class="small-button" type="button" id="copyCapsuleLinkButton">Copy capsule link</button>
+            <button class="small-button is-primary" type="button" id="openCapsuleLinkButton">Open capsule</button>
+          </div>
+        </div>
+      </section>
     </section>
   </main>
 
@@ -74,6 +133,6 @@
     <div class="media-modal-stage" id="modalStage"></div>
   </div>
 
-  <script type="module" src="host.js?v=20260525-9"></script>
+  <script type="module" src="host.js?v=20260531-1"></script>
 </body>
 </html>

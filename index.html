@@ -641,6 +641,38 @@
       gap: 1rem;
     }
 
+    .addon-checkbox {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 0.72rem;
+      align-items: start;
+      padding: 0.95rem;
+      border: 1px solid rgba(139, 107, 91, 0.18);
+      border-radius: 18px;
+      background: rgba(251, 247, 238, 0.72);
+      color: var(--muted);
+    }
+
+    .addon-checkbox input {
+      width: 1.1rem;
+      height: 1.1rem;
+      margin-top: 0.2rem;
+      accent-color: var(--accent);
+    }
+
+    .addon-checkbox strong {
+      display: block;
+      color: var(--text);
+      font-size: 0.96rem;
+    }
+
+    .addon-checkbox span {
+      display: block;
+      margin-top: 0.2rem;
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+
     input,
     select,
     textarea {
@@ -1479,6 +1511,14 @@
                 <textarea id="details" name="details" placeholder="Event style, guest count, colors, or anything you'd like us to know"></textarea>
               </div>
 
+              <label class="addon-checkbox" for="askTimeCapsule">
+                <input id="askTimeCapsule" name="ask-time-capsule" type="checkbox" value="yes" />
+                <span>
+                  <strong>Ask about Wallflower Time Capsule</strong>
+                  <span>Add a private QR photo/video collection and host-curated keepsake timeline to your flower wall rental.</span>
+                </span>
+              </label>
+
               <button class="text-button" type="submit">Start your inquiry</button>
               <p class="form-status" id="inquiryStatus" role="status" aria-live="polite"></p>
             </form>
@@ -1759,6 +1799,7 @@
       const venue = formData.get("venue") || "";
       const preferredWall = formData.get("preferred-wall") || "";
       const details = formData.get("details") || "";
+      const askTimeCapsule = formData.get("ask-time-capsule") ? "Yes" : "No";
 
       if (eventDate && !isBookingDay(eventDate)) {
         alert(`${formatDate(eventDate)} is not available for online booking. Please choose a Friday, Saturday, or Sunday.`);
@@ -1793,6 +1834,7 @@
         `Event Type: ${eventType}`,
         `Venue / Location: ${venue}`,
         `Preferred Wall: ${preferredWall}`,
+        `Wallflower Time Capsule: ${askTimeCapsule}`,
         "",
         "Event Details:",
         details
