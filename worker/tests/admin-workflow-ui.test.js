@@ -14,8 +14,8 @@ test('admin page prioritizes event operations and setup workflow', async () => {
   assert.match(adminHtml, /id="maintenancePanel"/);
   assert.doesNotMatch(adminHtml, /id="cleanupButton">Run cleanup<\/button>[\s\S]*id="signOutButton"/);
   assert.ok(adminHtml.indexOf('id="eventsPanel"') < adminHtml.indexOf('id="tagsPanel"'));
-  assert.match(adminHtml, /admin\.js\?v=20260531-admin-ux-1/);
-  assert.match(adminHtml, /styles\.css\?v=20260531-admin-ux-1/);
+  assert.match(adminHtml, /admin\.js\?v=20260531-admin-polish-1/);
+  assert.match(adminHtml, /styles\.css\?v=20260531-admin-polish-1/);
 
   assert.match(adminJs, /function renderAttention/);
   assert.match(adminJs, /function renderAssignTagForm/);
@@ -32,6 +32,12 @@ test('admin page prioritizes event operations and setup workflow', async () => {
   assert.match(styles, /\.link-action-group/);
   assert.match(styles, /\.maintenance-panel/);
   assert.match(styles, /\.setup-guide\.is-collapsed/);
+  assert.match(styles, /\.admin-page \.panel/);
+  assert.match(styles, /\.admin-page \.button/);
+  assert.match(styles, /\.admin-page \.status-pill/);
+  assert.match(styles, /\.admin-page \.data-panel/);
+  assert.match(styles, /\.admin-page \.attention-item/);
+  assert.match(styles, /\.admin-page \.admin-mobile-card/);
 });
 
 async function readText(path) {

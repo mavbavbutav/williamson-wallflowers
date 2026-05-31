@@ -1407,6 +1407,177 @@ tr:last-child td {
   margin: 10vh auto 0;
 }
 
+.admin-page .app-shell {
+  padding-top: 0.65rem;
+}
+
+.admin-page .dashboard {
+  gap: 0.75rem;
+}
+
+.admin-page .site-topbar {
+  padding: 0.45rem 0 0.65rem;
+}
+
+.admin-page .brand-lockup img {
+  width: 42px;
+  height: 42px;
+}
+
+.admin-page .brand-copy strong {
+  font-size: 0.76rem;
+}
+
+.admin-page .brand-copy span {
+  font-size: 0.7rem;
+}
+
+.admin-page .dashboard-header {
+  margin-top: 0;
+}
+
+.admin-page .section-title {
+  font-size: clamp(2.4rem, 5vw, 3.85rem);
+}
+
+.admin-page .dashboard-header .muted {
+  margin-top: 0.6rem;
+  font-size: 0.98rem;
+}
+
+.admin-page .panel,
+.admin-page .capture-card,
+.admin-page .media-card,
+.admin-page .toolbar,
+.admin-page .empty-state,
+.admin-page .notice,
+.admin-page .stat,
+.admin-page .admin-mobile-card {
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(47, 43, 40, 0.07);
+}
+
+.admin-page .panel {
+  padding: 1rem;
+}
+
+.admin-page .panel-heading {
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+}
+
+.admin-page .panel-heading h2,
+.admin-page .section-kicker h2 {
+  font-size: clamp(1.42rem, 2.4vw, 1.9rem);
+  line-height: 1.02;
+}
+
+.admin-page .panel-heading .muted,
+.admin-page .section-kicker .muted {
+  margin: 0.32rem 0 0;
+  font-size: 0.9rem;
+}
+
+.admin-page .stats-grid,
+.admin-page .admin-grid,
+.admin-page .setup-guide {
+  gap: 0.75rem;
+}
+
+.admin-page .stat {
+  padding: 0.85rem;
+}
+
+.admin-page .stat strong {
+  font-size: 1.55rem;
+}
+
+.admin-page .stat span {
+  font-size: 0.76rem;
+}
+
+.admin-page .button,
+.admin-page .small-button,
+.admin-page .status-pill {
+  border-radius: 8px;
+}
+
+.admin-page .button {
+  min-height: 40px;
+  padding: 0.58rem 0.86rem;
+}
+
+.admin-page .small-button {
+  min-height: 32px;
+  padding: 0.35rem 0.58rem;
+}
+
+.admin-page .status-pill {
+  min-height: 28px;
+  padding: 0.28rem 0.54rem;
+  font-size: 0.74rem;
+}
+
+.admin-page .attention-list {
+  gap: 0.65rem;
+}
+
+.admin-page .attention-item {
+  gap: 0.7rem;
+  padding: 0.82rem;
+  border-radius: 8px;
+}
+
+.admin-page .attention-item p {
+  font-size: 0.82rem;
+}
+
+.admin-page .data-panel {
+  gap: 0.72rem;
+}
+
+.admin-page .table-wrap,
+.admin-page .link-action-group,
+.admin-page .guide-step {
+  border-radius: 8px;
+}
+
+.admin-page .link-action-group {
+  padding: 0.62rem;
+}
+
+.admin-page .admin-link-summary,
+.admin-page .admin-link-note {
+  font-size: 0.81rem;
+}
+
+.admin-page th,
+.admin-page td {
+  padding: 0.7rem;
+}
+
+.admin-page th {
+  letter-spacing: 0;
+  font-size: 0.72rem;
+}
+
+.admin-page td {
+  font-size: 0.92rem;
+}
+
+.admin-page .guide-step {
+  padding: 0.82rem;
+}
+
+.admin-page .setup-guide.is-collapsed .guide-step {
+  padding: 0.58rem 0.66rem;
+}
+
+.admin-page .admin-mobile-card {
+  gap: 0.72rem;
+  padding: 0.85rem;
+}
+
 [hidden] {
   display: none !important;
 }
