@@ -148,12 +148,16 @@ function renderSubmissionCard(submission) {
     </div>
   `;
 
+  if (shouldShowApproveCapsuleOption(submission)) {
+    body.append(renderApproveCapsuleOption(submission.id));
+  }
+
   const actions = document.createElement("div");
   actions.className = "row-actions";
   actions.append(actionButton("View", "is-primary", () => openMediaModal(submission, mediaUrl)));
 
   if (submission.status !== "approved") {
-    actions.append(actionButton("Approve", "is-success", () => updateSubmission(submission.id, "approved")));
+    actions.append(actionButton("Approve", "is-success", () => approveSubmission(submission)));
   }
 
   if (submission.status !== "rejected") {
@@ -175,6 +179,16 @@ function renderSubmissionCard(submission) {
 
   card.append(thumb, body);
   return card;
+}
+
+function renderApproveCapsuleOption(submissionId) {
+  const label = document.createElement("label");
+  label.className = "checkbox-row approve-capsule-option";
+  label.innerHTML = `
+    <input type="checkbox" data-approve-capsule="${escapeAttribute(submissionId)}" />
+    <span>Add to Time Capsule when approved</span>
+  `;
+  return label;
 }
 
 function renderCapsule() {
@@ -329,15 +343,7 @@ function renderVoiceMemoThumb(thumb, item, mediaUrl) {
 
 async function addSubmissionToCapsule(submission) {
   try {
-    const result = await hostRequest(`/host/events/${encodeURIComponent(eventId)}/time-capsule/items`, {
-      method: "POST",
-      body: JSON.stringify({
-        submissionId: submission.id,
-        title: submission.guestName ? `Moment from ${submission.guestName}` : "Guest moment",
-        caption: submission.guestNote || "",
-        chapter: "Guest moments"
-      })
-    });
+    const result = await createCapsuleItem(submission);
     capsuleItems = [...capsuleItems, result.item].sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
     currentView = "capsule";
     setNotice(qs("#capsuleNotice"), "Moment added to the Time Capsule.", "success");
@@ -345,6 +351,18 @@ async function addSubmissionToCapsule(submission) {
   } catch (error) {
     setNotice(qs("#hostNotice"), error.message || "Could not add this moment to the Time Capsule.", "error");
   }
+}
+
+function createCapsuleItem(submission) {
+  return hostRequest(`/host/events/${encodeURIComponent(eventId)}/time-capsule/items`, {
+    method: "POST",
+    body: JSON.stringify({
+      submissionId: submission.id,
+      title: submission.guestName ? `Moment from ${submission.guestName}` : "Guest moment",
+      caption: submission.guestNote || "",
+      chapter: "Guest moments"
+    })
+  });
 }
 
 async function saveCapsule(status = "") {
@@ -458,6 +476,39 @@ function actionButton(label, className, onClick) {
   return button;
 }
 
+async function approveSubmission(submission) {
+  const addToCapsule = shouldAddToCapsuleOnApprove(submission.id);
+  let capsuleAddFailed = false;
+
+  try {
+    await hostRequest(`/host/submissions/${encodeURIComponent(submission.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "approved" })
+    });
+
+    if (addToCapsule && eventRecord?.timeCapsule?.enabled && !isInCapsule(submission.id)) {
+      try {
+        await createCapsuleItem({ ...submission, status: "approved" });
+      } catch {
+        capsuleAddFailed = true;
+      }
+    }
+
+    await loadGallery();
+    setNotice(
+      qs("#hostNotice"),
+      capsuleAddFailed
+        ? "Submission approved, but could not add it to the Time Capsule. Add it later from the Approved tab."
+        : addToCapsule
+          ? "Submission approved and added to the Time Capsule."
+          : "Submission approved.",
+      capsuleAddFailed ? "error" : "success"
+    );
+  } catch (error) {
+    setNotice(qs("#hostNotice"), error.message || "Could not approve this submission.", "error");
+  }
+}
+
 async function updateSubmission(submissionId, status) {
   try {
     await hostRequest(`/host/submissions/${encodeURIComponent(submissionId)}`, {
@@ -512,6 +563,18 @@ function updateSubmissionTabs() {
 
 function isInCapsule(submissionId) {
   return capsuleItems.some((item) => item.submissionId === submissionId);
+}
+
+function shouldShowApproveCapsuleOption(submission) {
+  return Boolean(
+    eventRecord?.timeCapsule?.enabled &&
+    submission.status !== "approved" &&
+    !isInCapsule(submission.id)
+  );
+}
+
+function shouldAddToCapsuleOnApprove(submissionId) {
+  return Boolean(qs(`[data-approve-capsule="${cssEscape(submissionId)}"]`)?.checked);
 }
 
 function getEmptyMessage(status) {

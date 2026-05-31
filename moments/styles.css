@@ -870,6 +870,21 @@ textarea:focus-visible {
   gap: 0.5rem;
 }
 
+.approve-capsule-option {
+  align-items: flex-start;
+  padding: 0.8rem 0.85rem;
+  border: 1px solid rgba(222, 211, 200, 0.72);
+  border-radius: 8px;
+  background: rgba(255, 250, 245, 0.64);
+}
+
+.approve-capsule-option span {
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
 .host-page .row-actions .small-button {
   flex: 1 1 92px;
   text-align: center;
