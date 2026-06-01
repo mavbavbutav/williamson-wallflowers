@@ -129,9 +129,19 @@ function updateCastTvControls() {
 
   chromecastButton.hidden = !hasNativeCast;
   chromecastButton.disabled = !hasNativeCast;
-  status.textContent = hasNativeCast
-    ? "Chromecast is available in this browser. Start Chromecast to send the TV slideshow to the receiver."
-    : "Chromecast needs a registered receiver before the native Cast button appears. Fullscreen, AirPlay mirroring, and the TV display link are ready now.";
+  status.textContent = castTvStatusMessage(hasNativeCast);
+}
+
+function castTvStatusMessage(hasNativeCast) {
+  if (hasNativeCast) {
+    return "Chromecast is available in this browser. Start Chromecast to send the TV slideshow to the receiver.";
+  }
+
+  if (CAST_RECEIVER_APP_ID) {
+    return "Chromecast receiver is configured. Open this Time Capsule in desktop Chrome or Android Chrome on the same Wi-Fi as the Chromecast to show the native Cast button. On iPhone or iPad, use Start fullscreen, then Screen Mirroring from Control Center.";
+  }
+
+  return "Chromecast receiver setup is not configured yet. Fullscreen Screen Mirroring and the TV display link are ready now.";
 }
 
 async function copyTvDisplayLink() {
@@ -148,7 +158,7 @@ async function copyTvDisplayLink() {
 async function startChromecastSession() {
   updateCastTvControls();
   if (!configureCastContext()) {
-    setNotice(qs("#capsuleNotice"), "Chromecast receiver setup is not configured yet. Use fullscreen mirroring or the TV display link for this event.", "error");
+    setNotice(qs("#capsuleNotice"), castTvStatusMessage(false), "error");
     return;
   }
 
@@ -816,7 +826,17 @@ function createTvSlideForeground(item) {
   video.controls = true;
   video.playsInline = true;
   video.preload = "auto";
+  prepareTvVideoForMirroring(video);
   return { element: video, media: video };
+}
+
+function prepareTvVideoForMirroring(video) {
+  video.playsInline = true;
+  video.disableRemotePlayback = true;
+  video.setAttribute("playsinline", "");
+  video.setAttribute("webkit-playsinline", "");
+  video.setAttribute("disableRemotePlayback", "");
+  video.setAttribute("x-webkit-airplay", "deny");
 }
 
 function bindTvMediaOrientation(element, frame) {

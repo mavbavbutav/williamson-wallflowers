@@ -234,7 +234,7 @@ test('capsule swipe feed auto-plays centered videos and voice memos', async () =
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-cast-fix-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-cast-fix-2/);
   assert.match(capsuleJs, /scheduleFeedAutoplay/);
   assert.match(capsuleJs, /function syncFeedAutoplay/);
   assert.match(capsuleJs, /function getCenteredFeedMedia/);
@@ -285,7 +285,7 @@ test('capsule swipe feed preloads adjacent media before the next swipe', async (
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-cast-fix-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-cast-fix-2/);
   assert.match(capsuleJs, /const FEED_MEDIA_WARM_RADIUS = 2/);
   assert.match(capsuleJs, /const FEED_IMAGE_WARM_RADIUS = 2/);
   assert.match(capsuleJs, /function warmFeedAroundCard/);
@@ -311,7 +311,7 @@ test('capsule slideshow has TV mode with fullscreen, uncropped portrait media, a
   assert.match(capsuleHtml, /TV Slideshow/);
   assert.match(capsuleHtml, /id="slidePlayPause"/);
   assert.match(capsuleHtml, /class="media-modal tv-slideshow-modal"/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-cast-fix-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-cast-fix-2/);
   assert.match(capsuleJs, /const PHOTO_SLIDE_DURATION_MS = 20000/);
   assert.match(capsuleJs, /function requestSlideshowFullscreen/);
   assert.match(capsuleJs, /requestFullscreen/);
@@ -361,6 +361,9 @@ test('capsule viewer exposes Cast and TV display fallbacks', async () => {
   assert.match(capsuleHtml, /id="startChromecastButton"/);
   assert.match(capsuleHtml, /id="copyTvDisplayLinkButton"/);
   assert.match(capsuleJs, /const CAST_RECEIVER_APP_ID = "D4D06631"/);
+  assert.doesNotMatch(capsuleJs, /Chromecast needs a registered receiver before the native Cast button appears/);
+  assert.match(capsuleJs, /Chromecast receiver is configured/);
+  assert.match(capsuleJs, /Open this Time Capsule in desktop Chrome or Android Chrome/);
   assert.match(capsuleJs, /function initCastTvControls/);
   assert.match(capsuleJs, /function updateCastTvControls/);
   assert.match(capsuleJs, /function loadGoogleCastSender/);
@@ -381,6 +384,15 @@ test('capsule viewer exposes Cast and TV display fallbacks', async () => {
   assert.match(castJs, /function bindTvMediaOrientation/);
   assert.match(castJs, /item\.streamUrl \|\| item\.mediaUrl/);
   assert.match(castJs, /addEventListener\("ended", showNextCastSlide/);
+});
+
+test('TV slideshow videos favor fullscreen mirroring instead of direct video AirPlay', async () => {
+  const capsuleJs = await readText('../../moments/capsule/capsule.js');
+
+  assert.match(capsuleJs, /function prepareTvVideoForMirroring/);
+  assert.match(capsuleJs, /disableRemotePlayback/);
+  assert.match(capsuleJs, /x-webkit-airplay", "deny"/);
+  assert.match(capsuleJs, /prepareTvVideoForMirroring\(video\)/);
 });
 
 async function readText(path) {
