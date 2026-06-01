@@ -225,7 +225,7 @@ test('capsule swipe feed auto-plays centered videos and voice memos', async () =
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-stream-playback-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-swipe-smooth-1/);
   assert.match(capsuleJs, /scheduleFeedAutoplay/);
   assert.match(capsuleJs, /function syncFeedAutoplay/);
   assert.match(capsuleJs, /function getCenteredFeedMedia/);
@@ -236,6 +236,26 @@ test('capsule swipe feed auto-plays centered videos and voice memos', async () =
   assert.match(capsuleJs, /Tap to listen/);
   assert.match(capsuleJs, /pauseAllFeedMedia\(media\)/);
 });
+
+test('capsule swipe feed starts incoming videos during the swipe without showing a video play prompt', async () => {
+  const [capsuleJs, styles] = await Promise.all([
+    readText('../../moments/capsule/capsule.js'),
+    readText('../../moments/styles.css')
+  ]);
+
+  assert.match(capsuleJs, /requestAnimationFrame/);
+  assert.match(capsuleJs, /function getGestureFeedCard/);
+  assert.match(capsuleJs, /const FEED_EARLY_PLAY_VISIBILITY_RATIO = 0\.28/);
+  assert.match(capsuleJs, /feedScrollDirection/);
+  assert.match(capsuleJs, /getGestureFeedCard\(feed\) \|\| getCenteredFeedCard\(feed\)/);
+  assert.match(capsuleJs, /data-feed-prompt="video"/);
+  assert.match(capsuleJs, /media\.play\(\)\.catch\(async/);
+  assert.match(capsuleJs, /if \(isFeedVideo\(media\) && !media\.muted\)/);
+  assert.match(styles, /\.capsule-feed-card\.is-video:not\(\.is-autoplay-blocked\) \.capsule-feed-play/);
+  assert.match(styles, /pointer-events: none/);
+  assert.match(styles, /\.capsule-feed-card\.is-video\.is-autoplay-blocked \.capsule-feed-play/);
+}
+);
 
 test('capsule swipe feed keeps videos unmuted after one sound unlock', async () => {
   const capsuleJs = await readText('../../moments/capsule/capsule.js');
@@ -256,8 +276,8 @@ test('capsule swipe feed preloads adjacent media before the next swipe', async (
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-stream-playback-1/);
-  assert.match(capsuleJs, /const FEED_MEDIA_WARM_RADIUS = 1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-swipe-smooth-1/);
+  assert.match(capsuleJs, /const FEED_MEDIA_WARM_RADIUS = 2/);
   assert.match(capsuleJs, /const FEED_IMAGE_WARM_RADIUS = 2/);
   assert.match(capsuleJs, /function warmFeedAroundCard/);
   assert.match(capsuleJs, /function warmFeedMedia/);

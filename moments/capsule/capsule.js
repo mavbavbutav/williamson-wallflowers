@@ -8,14 +8,18 @@ let items = [];
 let slideIndex = 0;
 let lastFocusedElement = null;
 let currentCapsuleView = "timeline";
-let feedScrollTimer = 0;
+let feedAutoplayTimer = 0;
+let feedAutoplayFrame = 0;
+let feedScrollDirection = 0;
+let lastFeedScrollTop = 0;
 let feedSoundUnlocked = false;
 let nativeSwipeFullscreenActive = false;
 const videoPosterCache = new Map();
 const videoPosterPersistCache = new Set();
-const FEED_MEDIA_WARM_RADIUS = 1;
+const FEED_MEDIA_WARM_RADIUS = 2;
 const FEED_IMAGE_WARM_RADIUS = 2;
 const FEED_PLAYABLE_READY_STATE = 2;
+const FEED_EARLY_PLAY_VISIBILITY_RATIO = 0.28;
 
 init();
 
@@ -25,8 +29,13 @@ async function init() {
   qsaCapsuleViewButtons().forEach((button) => {
     button.addEventListener("click", () => setCapsuleView(button.dataset.capsuleView || "timeline", { userInitiated: true }));
   });
-  qs("#capsuleFeed").addEventListener("scroll", () => {
-    scheduleFeedAutoplay(120);
+  const capsuleFeed = qs("#capsuleFeed");
+  capsuleFeed.addEventListener("scroll", () => {
+    const nextScrollTop = Number(capsuleFeed.scrollTop || 0);
+    const delta = nextScrollTop - lastFeedScrollTop;
+    if (delta) feedScrollDirection = Math.sign(delta);
+    lastFeedScrollTop = nextScrollTop;
+    scheduleFeedAutoplay();
   }, { passive: true });
   qs("#slideClose").addEventListener("click", closeSlide);
   qs("#slidePrev").addEventListener("click", () => changeSlide(-1));
@@ -157,7 +166,7 @@ function renderFeedMedia(item, index) {
 
   return `
     <video data-feed-media="${index}" ${videoPosterAttributes(item)} ${videoSourceAttributes(item)} preload="metadata" playsinline muted></video>
-    <button class="capsule-feed-play" type="button" data-feed-play="${index}" aria-label="Play ${title}">
+    <button class="capsule-feed-play" type="button" data-feed-play="${index}" data-feed-prompt="video" aria-label="Play ${title}">
       <span>Tap to play</span>
     </button>
   `;
@@ -174,11 +183,15 @@ function setCapsuleView(view, options = {}) {
     pauseAllFeedMedia();
     if (!options.skipFullscreenExit) exitSwipeFullscreen();
   } else {
-    qs("#capsuleFeed").scrollTo({ top: 0, behavior: "smooth" });
+    const feed = qs("#capsuleFeed");
+    lastFeedScrollTop = 0;
+    feedScrollDirection = 0;
+    feed.scrollTo({ top: 0, behavior: "smooth" });
     if (options.userInitiated) {
       unlockFeedSound();
       requestSwipeFullscreen();
-      syncFeedAutoplay();
+      scheduleFeedAutoplay();
+      scheduleFeedAutoplay(90);
     } else {
       scheduleFeedAutoplay(320);
     }
@@ -282,9 +295,24 @@ function pauseOffscreenFeedMedia() {
   syncFeedAutoplay();
 }
 
-function scheduleFeedAutoplay(delay = 120) {
-  window.clearTimeout(feedScrollTimer);
-  feedScrollTimer = window.setTimeout(syncFeedAutoplay, delay);
+function scheduleFeedAutoplay(delay = 0) {
+  window.clearTimeout(feedAutoplayTimer);
+  if (delay > 0) {
+    feedAutoplayTimer = window.setTimeout(requestFeedAutoplayFrame, delay);
+    return;
+  }
+
+  requestFeedAutoplayFrame();
+}
+
+function requestFeedAutoplayFrame() {
+  if (feedAutoplayFrame) return;
+
+  const requestFrame = window.requestAnimationFrame || ((callback) => window.setTimeout(callback, 16));
+  feedAutoplayFrame = requestFrame(() => {
+    feedAutoplayFrame = 0;
+    syncFeedAutoplay();
+  });
 }
 
 function syncFeedAutoplay() {
@@ -295,7 +323,7 @@ function syncFeedAutoplay() {
     return;
   }
 
-  const activeCard = getCenteredFeedCard(feed);
+  const activeCard = getGestureFeedCard(feed) || getCenteredFeedCard(feed);
   const activeMedia = activeCard?.querySelector("[data-feed-media]");
   warmFeedAroundCard(feed, activeCard);
   qsaPlayableMedia(feed).forEach((media) => {
@@ -332,6 +360,35 @@ function getCenteredFeedCard(feed) {
   });
 
   return activeCard;
+}
+
+function getGestureFeedCard(feed) {
+  const visibleCards = getVisibleFeedCards(feed);
+  if (!visibleCards.length || !feedScrollDirection) return null;
+
+  const playableCards = visibleCards.filter((entry) => entry.ratio >= FEED_EARLY_PLAY_VISIBILITY_RATIO);
+  if (!playableCards.length) return null;
+
+  return feedScrollDirection > 0
+    ? playableCards[playableCards.length - 1].card
+    : playableCards[0].card;
+}
+
+function getVisibleFeedCards(feed) {
+  const feedRect = feed?.getBoundingClientRect?.();
+  if (!feedRect) return [];
+
+  return qsaFeedCards(feed)
+    .map((card, index) => {
+      const rect = card.getBoundingClientRect?.();
+      if (!rect || rect.bottom <= feedRect.top || rect.top >= feedRect.bottom) return null;
+
+      const visibleHeight = Math.min(rect.bottom, feedRect.bottom) - Math.max(rect.top, feedRect.top);
+      const ratio = Math.max(0, Math.min(1, visibleHeight / Math.max(1, rect.height)));
+      return { card, index, ratio };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.index - right.index);
 }
 
 function warmFeedAroundCard(feed, activeCard) {
@@ -411,12 +468,22 @@ function autoplayFeedMedia(media) {
   }
 
   warmFeedMedia(media);
-  media.play().then(() => {
-    setFeedAutoplayBlocked(card, false);
-    setFeedCardPlaying(card, true);
-  }).catch(() => {
-    setFeedAutoplayBlocked(card, true);
-    setFeedCardPlaying(card, false);
+  media.play().catch(async () => {
+    if (isFeedVideo(media) && !media.muted) {
+      media.muted = true;
+      try {
+        await media.play();
+        return "muted";
+      } catch {
+        return "blocked";
+      }
+    }
+
+    return "blocked";
+  }).then((result) => {
+    const isBlocked = result === "blocked";
+    setFeedAutoplayBlocked(card, isBlocked);
+    setFeedCardPlaying(card, !isBlocked);
   });
 }
 
@@ -444,6 +511,7 @@ function bindFeedMediaEvents(media) {
     setFeedAutoplayBlocked(card, false);
     setFeedCardPlaying(card, true);
   });
+  media.addEventListener("click", () => toggleFeedPlayback(Number(media.dataset.feedMedia || 0)));
   media.addEventListener("pause", () => setFeedCardPlaying(card, false));
   media.addEventListener("ended", () => setFeedCardPlaying(card, false));
   media.addEventListener("volumechange", () => {

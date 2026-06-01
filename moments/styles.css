@@ -1816,6 +1816,16 @@ textarea:focus-visible {
   cursor: pointer;
 }
 
+.capsule-feed-card.is-video:not(.is-autoplay-blocked) .capsule-feed-play {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.capsule-feed-card.is-video.is-autoplay-blocked .capsule-feed-play {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .capsule-feed-play span {
   display: inline-flex;
   align-items: center;
@@ -1831,6 +1841,11 @@ textarea:focus-visible {
 .capsule-feed-card.is-playing .capsule-feed-play span {
   opacity: 0;
   transform: scale(0.96);
+}
+
+.capsule-feed-card.is-video.is-autoplay-blocked .capsule-feed-play span {
+  opacity: 1;
+  transform: none;
 }
 
 .capsule-feed-card.is-playing .capsule-feed-play:focus-visible span,
