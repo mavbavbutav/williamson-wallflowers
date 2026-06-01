@@ -64,7 +64,7 @@ async function init() {
     state.event = payload.event;
     state.uploadToken = payload.uploadToken || "";
     qs("#eventTitle").textContent = `${state.event.name}`;
-    qs("#eventDetails").textContent = `${formatDate(state.event.eventDate)}. Add a photo, short video, or voice memo for the host.`;
+    qs("#eventDetails").textContent = formatDate(state.event.eventDate);
     showView("welcome");
     await loadHostPosts({ silent: true });
     startHostPostsPolling();
@@ -230,7 +230,6 @@ async function chooseMode(mode) {
   qs("#resetFlowButton").hidden = false;
   qs("#captureTitle").textContent = getCaptureTitle(mode);
   qs("#captureHelp").textContent = getCaptureHelp(mode);
-  qs("#guestEncouragement").textContent = getCaptureTip(mode);
   fileInput.accept = getAcceptTypes(mode);
   fileInput.removeAttribute("capture");
   qs("#photoCaptureButton").hidden = mode !== "photo";
@@ -724,33 +723,27 @@ function cameraLabel(facingMode) {
 }
 
 function getCaptureTitle(mode) {
-  if (mode === "photo") return "Take a photo.";
-  if (mode === "audio") return "Record a voice memo.";
-  return "Record a video.";
+  if (mode === "photo") return "Photo";
+  if (mode === "audio") return "Voice Memo";
+  return "Video";
 }
 
 function getCaptureHelp(mode) {
-  if (mode === "photo") return "Use the camera button or upload a photo from your phone.";
-  if (mode === "audio") return "Record up to 60 seconds or upload an audio file from your phone.";
-  return "Record up to 30 seconds or upload a short video from your phone.";
-}
-
-function getCaptureTip(mode) {
-  if (mode === "photo") return "One good frame is enough. Catch the feeling, not perfection.";
-  if (mode === "audio") return "A toast, a laugh, or a tiny hello works beautifully.";
-  return "Keep it short and lively, like a moving postcard from the party.";
+  if (mode === "photo") return "Take or upload a photo.";
+  if (mode === "audio") return "Record or upload up to 60 seconds.";
+  return "Record or upload up to 30 seconds.";
 }
 
 function getSendSummaryTitle(mediaType) {
-  if (mediaType === "photo") return "Your photo is ready.";
-  if (mediaType === "audio") return "Your voice memo is ready.";
-  return "Your video is ready.";
+  if (mediaType === "photo") return "Photo ready.";
+  if (mediaType === "audio") return "Voice memo ready.";
+  return "Video ready.";
 }
 
 function getSendSummaryDetail(mediaType) {
-  if (mediaType === "photo") return "Add a name or note so the host knows who caught this moment.";
-  if (mediaType === "audio") return "Give the host a little context, then send your voice memo their way.";
-  return "Add a name or note, then send this short scene to the host.";
+  if (mediaType === "photo") return "Add a name or note if you want.";
+  if (mediaType === "audio") return "Add a name or note if you want.";
+  return "Add a name or note if you want.";
 }
 
 function showGuestCelebration() {

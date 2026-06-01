@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20260601-video-thumbs-1" />
+  <link rel="stylesheet" href="styles.css?v=20260601-guest-minimal-1" />
 </head>
 <body class="guest-page">
   <main class="app-shell">
@@ -31,99 +31,47 @@
       </div>
     </header>
 
-    <div class="guest-flow-card" id="guestFlowCard" aria-label="Guest upload steps" hidden>
-      <span class="guest-flow-step is-active" data-guest-step="choose">
-        <span class="step-number">1</span>
-        <span>Choose</span>
-      </span>
-      <span class="guest-flow-step" data-guest-step="capture">
-        <span class="step-number">2</span>
-        <span>Capture</span>
-      </span>
-      <span class="guest-flow-step" data-guest-step="review">
-        <span class="step-number">3</span>
-        <span>Send</span>
-      </span>
-    </div>
-
     <section class="hero" id="loadingView">
       <div class="hero-main">
-        <h1 tabindex="-1">Opening your event moment.</h1>
-        <p>Hold tight while we connect this tag to the right celebration.</p>
+        <h1 tabindex="-1">Opening...</h1>
+        <p>Finding your event.</p>
       </div>
-      <aside class="hero-side">
-        <div class="moment-card">
-          <div class="moment-card-content">
-            <strong>Scan. Smile. Send.</strong>
-            <span>Your photo or message goes straight to the host's private gallery.</span>
-          </div>
-        </div>
-      </aside>
     </section>
 
     <section class="hero" id="errorView" hidden>
       <div class="hero-main">
         <h1 tabindex="-1">This moment link is not active.</h1>
-        <p id="errorMessage">The tag may not be assigned to an event yet. Please check with the host or Williamson Wallflowers.</p>
+        <p id="errorMessage">Please check with the host or scan again.</p>
       </div>
-      <aside class="hero-side">
-        <div class="capture-card">
-          <h2>Need help?</h2>
-          <p class="muted">Ask the event host for the current Wallflower Moments tag or try scanning again.</p>
-        </div>
-      </aside>
     </section>
 
     <section class="hero" id="welcomeView" hidden>
       <div class="hero-main">
         <h1 id="eventTitle" tabindex="-1">Leave a little love.</h1>
-        <p id="eventDetails">Send the host a photo, short video, or voice memo from tonight's celebration.</p>
+        <p id="eventDetails">Choose what to send.</p>
         <div class="memory-mode-grid" aria-label="Choose what to send">
           <button class="memory-mode-card is-photo" type="button" data-mode="photo">
-            <span class="mode-badge">PHOTO</span>
-            <span class="mode-kicker">Camera action</span>
-            <strong class="mode-title">Take Photo</strong>
-            <span class="mode-action">Opens your camera</span>
-            <span class="mode-copy">Best for flowers, tables, group shots, and quick smiles.</span>
+            <strong class="mode-title">Photo</strong>
+            <span class="mode-detail">Take or upload</span>
           </button>
           <button class="memory-mode-card is-video" type="button" data-mode="video">
-            <span class="mode-badge">VIDEO</span>
-            <span class="mode-kicker">Camera action</span>
-            <strong class="mode-title">Record Video</strong>
-            <span class="mode-action">Starts recording video</span>
-            <span class="mode-copy">30 sec max for toasts, dance moves, or a tiny scene.</span>
+            <strong class="mode-title">Video</strong>
+            <span class="mode-detail">30 sec max</span>
           </button>
           <button class="memory-mode-card is-audio" type="button" data-mode="audio">
-            <span class="mode-badge">AUDIO</span>
-            <span class="mode-kicker">Microphone action</span>
-            <strong class="mode-title">Record Voice Memo</strong>
-            <span class="mode-action">Starts your microphone</span>
-            <span class="mode-copy">60 sec max for a toast, hello, or sweet message.</span>
+            <strong class="mode-title">Voice Memo</strong>
+            <span class="mode-detail">60 sec max</span>
           </button>
         </div>
       </div>
-      <aside class="hero-side">
-        <div class="moment-card">
-          <div class="moment-card-content">
-            <strong>Private for the host</strong>
-            <span>Submissions are reviewed before they become part of the keepsake gallery.</span>
-          </div>
-        </div>
-        <div class="capture-card">
-          <strong>Message limits</strong>
-          <span class="muted">Videos are capped at 30 seconds. Voice memos are capped at 60 seconds.</span>
-        </div>
-      </aside>
     </section>
 
     <section class="dashboard host-posts-view" id="hostPostsView" hidden>
       <div class="toolbar host-post-feed-heading">
         <div>
-          <span class="host-eyebrow">Party View</span>
           <h2>Host Posts</h2>
-          <p class="muted">Fresh updates from the host show up here automatically.</p>
         </div>
-        <button class="small-button" type="button" id="refreshHostPostsButton">Refresh posts</button>
+        <button class="small-button" type="button" id="refreshHostPostsButton">Refresh</button>
       </div>
       <div id="hostPostsNotice" class="notice" role="status" aria-live="polite" hidden></div>
       <div class="party-feed" id="guestHostPostsGrid"></div>
@@ -134,7 +82,6 @@
         <div>
           <h1 class="section-title" id="captureTitle" tabindex="-1">Capture your moment.</h1>
           <p class="muted" id="captureHelp">Use your camera or upload a file from your phone.</p>
-          <p class="capture-tip" id="guestEncouragement">Make it quick, sweet, and very you.</p>
         </div>
         <input class="visually-hidden" id="fileInput" type="file" />
       </div>
@@ -165,20 +112,13 @@
     <section class="dashboard" id="reviewView" hidden>
       <div class="dashboard-header">
         <div>
-          <h1 class="section-title" tabindex="-1">Ready to send?</h1>
-          <p class="muted">Preview your moment, add your name if you want, and send it to the host.</p>
+          <h1 class="section-title" tabindex="-1">Send it?</h1>
         </div>
       </div>
 
       <div class="admin-grid">
         <div class="preview-frame" id="previewFrame"></div>
         <form class="panel" id="submissionForm">
-          <div class="send-summary" id="sendSummary" aria-live="polite">
-            <span class="mode-kicker">Almost there</span>
-            <strong>Your moment is ready.</strong>
-            <span>Add a name or note, then send it to the host.</span>
-          </div>
-
           <div class="form-grid">
             <div class="field">
               <label for="guestName">Name, optional</label>
@@ -192,7 +132,7 @@
 
           <label class="checkbox-row">
             <input id="consent" name="consent" type="checkbox" required />
-            <span>I agree that this photo, video, or voice memo can be shared privately with the event host and retained for up to 90 days.</span>
+            <span>I agree to private sharing with the host.</span>
           </label>
 
           <div class="progress-track" id="progressTrack" role="progressbar" aria-label="Upload progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
@@ -218,23 +158,15 @@
           <span></span>
           <span></span>
         </div>
-        <h1 tabindex="-1">Your moment is in bloom.</h1>
-        <p>Thanks for adding to the host's private keepsake gallery.</p>
+        <h1 tabindex="-1">Sent.</h1>
+        <p>Thank you.</p>
         <div class="button-row">
           <button class="button button-primary" type="button" id="addAnotherButton">Add another</button>
         </div>
       </div>
-      <aside class="hero-side">
-        <div class="moment-card">
-          <div class="moment-card-content">
-            <strong>Sent for review</strong>
-            <span>The host can approve, view, and download your submission from their private gallery.</span>
-          </div>
-        </div>
-      </aside>
     </section>
   </main>
 
-  <script type="module" src="app.js?v=20260601-video-thumbs-1"></script>
+  <script type="module" src="app.js?v=20260601-guest-minimal-1"></script>
 </body>
 </html>

@@ -242,6 +242,9 @@ a {
 }
 
 .guest-page .hero {
+  grid-template-columns: minmax(0, 1fr);
+  width: min(100%, 780px);
+  margin: 0 auto;
   min-height: min(720px, calc(100vh - 7rem));
 }
 
@@ -249,12 +252,13 @@ a {
   align-items: center;
 }
 
-.guest-page #welcomeView .hero-main {
-  min-height: min(560px, calc(100vh - 9rem));
+.guest-page .hero-main {
+  min-height: min(580px, calc(100vh - 8rem));
+  text-align: center;
 }
 
-.guest-page #welcomeView .moment-card {
-  min-height: 310px;
+.guest-page #welcomeView .hero-main {
+  min-height: min(520px, calc(100vh - 9rem));
 }
 
 .step-row {
@@ -450,6 +454,12 @@ a {
   line-height: 0.95;
 }
 
+.mode-detail {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
 .mode-action {
   display: inline-flex;
   align-items: center;
@@ -510,6 +520,53 @@ a {
 .send-summary span:last-child {
   color: var(--muted);
   font-weight: 700;
+}
+
+.guest-page .memory-mode-grid {
+  gap: 0.65rem;
+  margin-top: 1.25rem;
+}
+
+.guest-page .memory-mode-card {
+  justify-items: center;
+  align-content: center;
+  gap: 0.4rem;
+  min-height: 116px;
+  padding: 1rem 0.8rem;
+  border-radius: 16px;
+  text-align: center;
+  box-shadow: 0 12px 28px rgba(47, 43, 40, 0.08);
+}
+
+.guest-page .memory-mode-card::before {
+  height: 4px;
+}
+
+.guest-page .mode-title {
+  font-size: clamp(1.75rem, 3vw, 2.45rem);
+}
+
+.guest-page .dashboard {
+  width: min(100%, 920px);
+  margin: 0 auto;
+}
+
+.guest-page .host-posts-view {
+  margin-top: 0.75rem;
+}
+
+.guest-page .host-post-feed-heading {
+  padding: 0.7rem 0.85rem;
+}
+
+.guest-page .host-post-feed-heading h2 {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 1.7rem;
+  line-height: 1;
+}
+
+.guest-page #reviewView .admin-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.82fr);
 }
 
 .guest-celebration {
