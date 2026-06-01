@@ -1755,7 +1755,7 @@ async function getGuestVisibleSubmissions(env, eventId, request) {
     SELECT *
     FROM submissions
     WHERE event_id = ? AND status = 'approved' AND deleted_at IS NULL AND guest_visible_at IS NOT NULL
-    ORDER BY guest_visible_at DESC, created_at DESC
+    ORDER BY created_at DESC, guest_visible_at DESC
   `).bind(eventId).all();
 
   return Promise.all((result.results || []).map((row) => toPartyViewSubmissionClient(row, request, env)));
@@ -2343,7 +2343,7 @@ async function toPartyViewSubmissionClient(row, request, env) {
     title: submission.guestName ? `Moment from ${submission.guestName}` : 'Guest moment',
     caption: submission.guestNote || '',
     chapter: 'Guest moments',
-    capturedAt: submission.guestVisibleAt || submission.createdAt,
+    capturedAt: submission.createdAt,
     location: '',
     sortOrder: 0,
     isVisible: true,

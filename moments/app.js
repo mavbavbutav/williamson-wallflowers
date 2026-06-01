@@ -147,7 +147,7 @@ function renderHostPosts() {
 
 function renderHostPostCard(item) {
   const card = document.createElement("article");
-  card.className = "party-card";
+  card.className = `party-card is-${item.mediaType}`;
 
   const mediaUrl = `${item.mediaUrl}&disposition=inline`;
   const media = document.createElement("div");
@@ -187,6 +187,7 @@ function renderHostPostCard(item) {
     video.playsInline = true;
     video.preload = "metadata";
     media.append(video);
+    bindPartyVideoOverlay(card, video);
   }
 
   const body = document.createElement("div");
@@ -203,6 +204,30 @@ function renderHostPostCard(item) {
 
   card.append(media, body);
   return card;
+}
+
+function bindPartyVideoOverlay(card, video) {
+  let hideTimer = 0;
+
+  const showOverlay = () => {
+    window.clearTimeout(hideTimer);
+    card.classList.remove("is-overlay-muted");
+    if (!video.paused && !video.ended) {
+      hideTimer = window.setTimeout(() => card.classList.add("is-overlay-muted"), 2600);
+    }
+  };
+
+  const keepOverlayVisible = () => {
+    window.clearTimeout(hideTimer);
+    card.classList.remove("is-overlay-muted");
+  };
+
+  video.addEventListener("play", showOverlay);
+  video.addEventListener("pause", keepOverlayVisible);
+  video.addEventListener("ended", keepOverlayVisible);
+  card.addEventListener("pointermove", showOverlay);
+  card.addEventListener("touchstart", showOverlay, { passive: true });
+  card.addEventListener("focusin", showOverlay);
 }
 
 function openPhoneLibrary() {

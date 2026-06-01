@@ -122,6 +122,8 @@ test('host can push an approved guest submission to Party View', async () => {
   assert.equal(payload.items[0].source, 'guest');
   assert.equal(payload.items[0].chapter, 'Guest moments');
   assert.equal(payload.items[0].title, 'Moment from Avery');
+  assert.equal(payload.items[0].capturedAt, '2026-09-19T20:20:00.000Z');
+  assert.notEqual(payload.items[0].capturedAt, db.submissions[0].guestVisibleAt);
 });
 
 test('pending or rejected submissions cannot be pushed to Party View', async () => {
@@ -169,12 +171,19 @@ test('host and guest frontends expose Host Posts controls and party view', async
   assert.match(hostJs, /setSubmissionPartyView/);
   assert.match(hostJs, /\/host\/events\/\$\{encodeURIComponent\(eventId\)\}\/posts/);
   assert.match(hostJs, /\/host\/submissions\/\$\{encodeURIComponent\(submission\.id\)\}\/party-view/);
+  assert.match(hostJs, /capturedAt: submission\.createdAt/);
   assert.match(guestHtml, /id="hostPostsView"/);
   assert.match(guestHtml, /Party View/);
   assert.match(guestJs, /loadHostPosts/);
+  assert.match(guestJs, /party-card is-\$\{item\.mediaType\}/);
+  assert.match(guestJs, /bindPartyVideoOverlay\(card, video\)/);
+  assert.match(guestJs, /is-overlay-muted/);
   assert.match(guestJs, /\/events\/\$\{encodeURIComponent\(state\.event\.id\)\}\/host-posts/);
   assert.match(styles, /\.host-posts-panel/);
   assert.match(styles, /\.party-feed/);
+  assert.match(styles, /\.party-card\.is-video[\s\S]*?width: min\(100%, 420px\)/);
+  assert.match(styles, /\.party-card\.is-video \.party-card-media[\s\S]*?aspect-ratio: 9 \/ 16/);
+  assert.match(styles, /\.party-card\.is-video\.is-overlay-muted[\s\S]*?opacity: 0/);
   assert.match(styles, /\.party-card-media[\s\S]*?grid-area: 1 \/ 1/);
   assert.match(styles, /\.party-card-body[\s\S]*?grid-area: 1 \/ 1/);
   assert.match(styles, /\.party-card-body strong[\s\S]*?background: rgba\(23, 21, 20, 0\.68\)/);

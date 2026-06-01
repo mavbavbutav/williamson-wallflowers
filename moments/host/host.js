@@ -450,7 +450,7 @@ function getPartyViewItems() {
       title: submission.guestName ? `Moment from ${submission.guestName}` : "Guest moment",
       caption: submission.guestNote || "",
       chapter: "Guest moments",
-      capturedAt: submission.guestVisibleAt || submission.createdAt,
+      capturedAt: submission.createdAt,
       location: "",
       sortOrder: 0,
       isVisible: true,
