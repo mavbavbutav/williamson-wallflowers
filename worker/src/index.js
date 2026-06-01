@@ -138,8 +138,16 @@ async function handleMomentsApi(request, env, url, corsHeaders) {
       return createSubmission(request, env, corsHeaders, parts[1]);
     }
 
+    if (request.method === 'GET' && parts[0] === 'events' && parts[1] && parts[2] === 'host-posts') {
+      return listGuestHostPosts(request, env, url, corsHeaders, parts[1]);
+    }
+
     if (request.method === 'GET' && parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'submissions') {
       return listHostSubmissions(request, env, url, corsHeaders, parts[2]);
+    }
+
+    if (request.method === 'POST' && parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'posts') {
+      return createHostPost(request, env, url, corsHeaders, parts[2]);
     }
 
     if (parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'time-capsule') {
@@ -355,6 +363,178 @@ async function createSubmission(request, env, corsHeaders, eventId) {
       id,
       status: 'pending'
     }
+  }, 201, corsHeaders);
+}
+
+async function listGuestHostPosts(request, env, url, corsHeaders, eventId) {
+  const event = await getEventById(env, eventId);
+
+  if (!event || !isActiveEvent(event)) {
+    return json({ ok: false, message: 'This event is no longer accepting moments.' }, 410, corsHeaders);
+  }
+
+  const token = getAccessToken(request, url);
+  if (!await verifySignedToken(env, token, 'upload', eventId)) {
+    return json({ ok: false, message: 'This guest link is not valid.' }, 403, corsHeaders);
+  }
+
+  if (!event.timeCapsuleEnabled) {
+    return json({
+      ok: true,
+      event: {
+        id: event.id,
+        name: event.name,
+        eventDate: event.eventDate,
+        hostName: event.hostName
+      },
+      items: []
+    }, 200, corsHeaders);
+  }
+
+  const items = await getTimeCapsuleItems(env, event.id, request, { visibleOnly: true, hostOnly: true });
+
+  return json({
+    ok: true,
+    event: {
+      id: event.id,
+      name: event.name,
+      eventDate: event.eventDate,
+      hostName: event.hostName
+    },
+    items
+  }, 200, corsHeaders);
+}
+
+async function createHostPost(request, env, url, corsHeaders, eventId) {
+  const token = getAccessToken(request, url);
+  const event = await getHostEvent(env, eventId, token);
+
+  if (!event) {
+    return json({ ok: false, message: 'This host gallery link is not valid.' }, 403, corsHeaders);
+  }
+
+  if (!event.timeCapsuleEnabled) {
+    return json({ ok: false, message: 'Wallflower Time Capsule is not enabled for this event.' }, 404, corsHeaders);
+  }
+
+  if (!isActiveEvent(event)) {
+    return json({ ok: false, message: 'This event is no longer accepting moments.' }, 410, corsHeaders);
+  }
+
+  const contentLength = Number(request.headers.get('Content-Length') || 0);
+  if (contentLength > VIDEO_MAX_BYTES + 1024 * 1024) {
+    return json({ ok: false, message: 'Upload is too large.' }, 413, corsHeaders);
+  }
+
+  const contentType = request.headers.get('Content-Type') || '';
+  if (!contentType.includes('multipart/form-data')) {
+    return json({ ok: false, message: 'Upload must use multipart form data.' }, 415, corsHeaders);
+  }
+
+  const formData = await request.formData();
+  const media = formData.get('media');
+
+  if (!media || typeof media === 'string' || typeof media.stream !== 'function') {
+    return json({ ok: false, message: 'Please upload a photo, video, or voice memo.' }, 400, corsHeaders);
+  }
+
+  const mediaType = normalizeMediaType(formData.get('mediaType'), media.type, media.name);
+  const durationSeconds = Number(formData.get('durationSeconds') || 0);
+  const validationError = validateMedia(media, mediaType, durationSeconds);
+
+  if (validationError) {
+    return json({ ok: false, message: validationError }, 400, corsHeaders);
+  }
+
+  const quotaError = await validateEventQuota(env, eventId, media.size);
+  if (quotaError) {
+    return json({ ok: false, message: quotaError }, 429, corsHeaders);
+  }
+
+  const now = new Date().toISOString();
+  const submissionId = crypto.randomUUID();
+  const originalFilename = sanitizeFilename(media.name || `host-${mediaType}-${submissionId}`);
+  const storedMimeType = getStoredMimeType(media.type, originalFilename, mediaType);
+  const objectKey = `moments/${eventId}/${submissionId}.${extensionFor(storedMimeType, originalFilename)}`;
+  const title = cleanText(formData.get('title'), 120) || 'Host Post';
+  const caption = cleanText(formData.get('caption'), 600);
+  const sortOrder = await getNextTimeCapsuleSortOrder(env, eventId);
+
+  await env.MOMENTS_BUCKET.put(objectKey, media.stream(), {
+    httpMetadata: {
+      contentType: storedMimeType,
+      contentDisposition: `inline; filename="${originalFilename}"`
+    },
+    customMetadata: {
+      eventId,
+      submissionId,
+      mediaType,
+      source: 'host'
+    }
+  });
+
+  await env.MOMENTS_DB.prepare(`
+    INSERT INTO submissions (
+      id, event_id, media_type, source, object_key, original_filename, mime_type, size,
+      duration_seconds, guest_name, guest_note, consent_at, status, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    submissionId,
+    eventId,
+    mediaType,
+    'host',
+    objectKey,
+    originalFilename,
+    storedMimeType,
+    media.size,
+    Number.isFinite(durationSeconds) ? durationSeconds : 0,
+    'Host',
+    cleanText(caption, 220),
+    now,
+    'approved',
+    now,
+    now
+  ).run();
+
+  const itemId = crypto.randomUUID();
+  await env.MOMENTS_DB.prepare(`
+    INSERT INTO time_capsule_items (
+      id, event_id, submission_id, title, caption, chapter, captured_at, location,
+      sort_order, is_visible, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    itemId,
+    eventId,
+    submissionId,
+    title,
+    caption,
+    'Host Posts',
+    now,
+    '',
+    sortOrder,
+    1,
+    now,
+    now
+  ).run();
+
+  const item = await getTimeCapsuleItemById(env, itemId, request);
+
+  return json({
+    ok: true,
+    submission: {
+      id: submissionId,
+      eventId,
+      mediaType,
+      source: 'host',
+      status: 'approved',
+      guestName: 'Host',
+      guestNote: caption,
+      createdAt: now,
+      updatedAt: now
+    },
+    item: await toTimeCapsuleItemClient(item, request, env)
   }, 201, corsHeaders);
 }
 
@@ -1358,6 +1538,7 @@ async function getAuthorizedCapsuleEvent(request, env, url, eventId) {
 
 async function getTimeCapsuleItems(env, eventId, request, options = {}) {
   const visibilityFilter = options.visibleOnly ? 'AND i.is_visible = 1' : '';
+  const sourceFilter = options.hostOnly ? "AND s.source = 'host'" : '';
   const result = await env.MOMENTS_DB.prepare(`
     SELECT
       i.id,
@@ -1373,6 +1554,7 @@ async function getTimeCapsuleItems(env, eventId, request, options = {}) {
       i.created_at AS createdAt,
       i.updated_at AS updatedAt,
       s.media_type AS mediaType,
+      s.source AS source,
       s.mime_type AS mimeType,
       s.size,
       s.duration_seconds AS durationSeconds,
@@ -1384,7 +1566,7 @@ async function getTimeCapsuleItems(env, eventId, request, options = {}) {
       s.updated_at AS submissionUpdatedAt
     FROM time_capsule_items i
     INNER JOIN submissions s ON s.id = i.submission_id
-    WHERE i.event_id = ? AND s.status = 'approved' AND s.deleted_at IS NULL ${visibilityFilter}
+    WHERE i.event_id = ? AND s.status = 'approved' AND s.deleted_at IS NULL ${visibilityFilter} ${sourceFilter}
     ORDER BY i.sort_order ASC, i.created_at ASC
   `).bind(eventId).all();
 
@@ -1425,6 +1607,7 @@ async function getTimeCapsuleItemById(env, itemId) {
       i.created_at AS createdAt,
       i.updated_at AS updatedAt,
       s.media_type AS mediaType,
+      s.source AS source,
       s.mime_type AS mimeType,
       s.size,
       s.duration_seconds AS durationSeconds,
@@ -1466,6 +1649,7 @@ async function getSubmissionWithEvent(env, submissionId) {
       s.id,
       s.event_id AS eventId,
       s.media_type AS mediaType,
+      s.source AS source,
       s.object_key AS objectKey,
       s.original_filename AS originalFilename,
       s.mime_type AS mimeType,
@@ -1828,6 +2012,7 @@ async function toTimeCapsuleItemClient(row, request, env) {
     sortOrder: Number(row.sortOrder || 0),
     isVisible: row.isVisible !== 0,
     mediaType: row.mediaType,
+    source: row.source || 'guest',
     mimeType: row.mimeType,
     size: row.size,
     durationSeconds: row.durationSeconds,
@@ -1860,6 +2045,7 @@ async function toSubmissionClient(row, request, env) {
     id: row.id,
     eventId: row.event_id,
     mediaType: row.media_type,
+    source: row.source || 'guest',
     mimeType: row.mime_type,
     size: row.size,
     durationSeconds: row.duration_seconds,

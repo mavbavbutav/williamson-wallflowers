@@ -1,4 +1,4 @@
-import { apiBase, formatDate, getParam, qs, qsa, requestJson, setNotice } from "./shared.js?v=20260525-3";
+import { apiBase, formatDate, formatDateTime, getParam, qs, qsa, requestJson, setNotice } from "./shared.js?v=20260525-3";
 
 const MAX_VIDEO_SECONDS = 30;
 const MAX_AUDIO_SECONDS = 60;
@@ -23,7 +23,9 @@ const state = {
   previewUrl: "",
   durationSeconds: 0,
   recordStartedAt: 0,
-  timerId: 0
+  timerId: 0,
+  hostPosts: [],
+  hostPostsTimerId: 0
 };
 
 const views = {
@@ -62,6 +64,8 @@ async function init() {
     qs("#eventTitle").textContent = `${state.event.name}`;
     qs("#eventDetails").textContent = `${formatDate(state.event.eventDate)}. Add a photo, short video, or voice memo for the host.`;
     showView("welcome");
+    await loadHostPosts({ silent: true });
+    startHostPostsPolling();
   } catch (error) {
     const message = error.message === "Failed to fetch" || error.message === "Request timed out"
       ? "We could not reach the Wallflower Moments service. Please check your connection or ask the host for help."
@@ -84,6 +88,7 @@ function bindEvents() {
   qs("#retakeButton").addEventListener("click", () => chooseMode(state.mode));
   qs("#addAnotherButton").addEventListener("click", resetFlow);
   qs("#submissionForm").addEventListener("submit", submitMoment);
+  qs("#refreshHostPostsButton").addEventListener("click", () => loadHostPosts());
 
   fileInput.addEventListener("change", async () => {
     const file = fileInput.files && fileInput.files[0];
@@ -91,6 +96,110 @@ function bindEvents() {
     await acceptFile(file);
     fileInput.value = "";
   });
+}
+
+async function loadHostPosts({ silent = false } = {}) {
+  if (!state.event?.id || !state.uploadToken) return;
+
+  try {
+    const payload = await requestJson(`/events/${encodeURIComponent(state.event.id)}/host-posts`, {
+      headers: { Authorization: `Bearer ${state.uploadToken}` },
+      timeoutMs: 6000
+    });
+    state.hostPosts = payload.items || [];
+    renderHostPosts();
+    if (!silent && state.hostPosts.length === 0) {
+      setNotice(qs("#hostPostsNotice"), "No Host Posts yet. Check back soon.", "");
+    } else if (!silent) {
+      setNotice(qs("#hostPostsNotice"), "Host Posts refreshed.", "success");
+    }
+  } catch (error) {
+    if (!silent) {
+      setNotice(qs("#hostPostsNotice"), error.message || "Could not refresh Host Posts.", "error");
+    }
+    if (state.hostPosts.length === 0) {
+      qs("#hostPostsView").hidden = true;
+    }
+  }
+}
+
+function startHostPostsPolling() {
+  if (state.hostPostsTimerId) window.clearInterval(state.hostPostsTimerId);
+  state.hostPostsTimerId = window.setInterval(() => loadHostPosts({ silent: true }), 30000);
+}
+
+function renderHostPosts() {
+  const view = qs("#hostPostsView");
+  const grid = qs("#guestHostPostsGrid");
+  const posts = state.hostPosts
+    .slice()
+    .sort((a, b) => new Date(b.capturedAt || b.createdAt || 0) - new Date(a.capturedAt || a.createdAt || 0));
+
+  view.hidden = posts.length === 0;
+  grid.innerHTML = "";
+
+  posts.forEach((item) => {
+    grid.append(renderHostPostCard(item));
+  });
+}
+
+function renderHostPostCard(item) {
+  const card = document.createElement("article");
+  card.className = "party-card";
+
+  const mediaUrl = `${item.mediaUrl}&disposition=inline`;
+  const media = document.createElement("div");
+  media.className = `party-card-media is-${item.mediaType}`;
+
+  if (item.mediaType === "photo") {
+    const image = document.createElement("img");
+    image.src = mediaUrl;
+    image.alt = item.title || "Host Post photo";
+    image.loading = "lazy";
+    media.append(image);
+  } else if (item.mediaType === "audio") {
+    media.innerHTML = `
+      <div class="voice-memo-panel">
+        <div class="voice-memo-header">
+          <div class="voice-memo-copy">
+            <span class="voice-memo-kicker">Host voice memo</span>
+            <strong>${escapeHtml(item.title || "Host Post")}</strong>
+            <span class="voice-memo-detail">${escapeHtml(item.durationSeconds ? formatTimer(item.durationSeconds) : "Tap play to listen")}</span>
+          </div>
+        </div>
+        <div class="voice-waveform" aria-hidden="true">
+          ${[34, 62, 48, 78, 42, 90, 56, 70].map((height) => `<span style="--bar-height: ${height}%"></span>`).join("")}
+        </div>
+      </div>
+    `;
+    const audio = document.createElement("audio");
+    audio.src = mediaUrl;
+    audio.controls = true;
+    audio.preload = "metadata";
+    media.querySelector(".voice-memo-panel").append(audio);
+  } else {
+    const video = document.createElement("video");
+    video.src = mediaUrl;
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    media.append(video);
+  }
+
+  const body = document.createElement("div");
+  body.className = "party-card-body";
+  body.innerHTML = `
+    <div class="button-row">
+      <span class="status-pill">Host Post</span>
+      <span class="status-pill">${escapeHtml(getMediaTypeLabel(item.mediaType))}</span>
+    </div>
+    <strong>${escapeHtml(item.title || "Host Post")}</strong>
+    <p>${escapeHtml(item.caption || item.guestNote || "")}</p>
+    <span class="muted">${escapeHtml(formatDateTime(item.capturedAt || item.createdAt))}</span>
+  `;
+
+  card.append(media, body);
+  return card;
 }
 
 function openPhoneLibrary() {
@@ -580,6 +689,7 @@ function updateGuestFlow(viewName) {
 
 function showError(message) {
   qs("#errorMessage").textContent = message;
+  qs("#hostPostsView").hidden = true;
   showView("error");
 }
 
@@ -675,8 +785,24 @@ function getRecorderExtension(mimeType, mediaType) {
   return map[baseMimeType] || (mediaType === "audio" ? "webm" : "webm");
 }
 
+function getMediaTypeLabel(mediaType) {
+  if (mediaType === "audio") return "Voice memo";
+  if (mediaType === "video") return "Video";
+  return "Photo";
+}
+
 function formatTimer(seconds) {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function escapeHtml(value) {
+  return String(value || "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  })[char]);
 }

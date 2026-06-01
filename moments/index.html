@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20260531-mode-clarity-1" />
+  <link rel="stylesheet" href="styles.css?v=20260531-host-posts-1" />
 </head>
 <body class="guest-page">
   <main class="app-shell">
@@ -114,6 +114,19 @@
           <span class="muted">Videos are capped at 30 seconds. Voice memos are capped at 60 seconds.</span>
         </div>
       </aside>
+    </section>
+
+    <section class="dashboard host-posts-view" id="hostPostsView" hidden>
+      <div class="toolbar host-post-feed-heading">
+        <div>
+          <span class="host-eyebrow">Party View</span>
+          <h2>Host Posts</h2>
+          <p class="muted">Fresh updates from the host show up here automatically.</p>
+        </div>
+        <button class="small-button" type="button" id="refreshHostPostsButton">Refresh posts</button>
+      </div>
+      <div id="hostPostsNotice" class="notice" role="status" aria-live="polite" hidden></div>
+      <div class="party-feed" id="guestHostPostsGrid"></div>
     </section>
 
     <section class="dashboard" id="captureView" hidden>
@@ -222,6 +235,6 @@
     </section>
   </main>
 
-  <script type="module" src="app.js?v=20260531-mode-clarity-1"></script>
+  <script type="module" src="app.js?v=20260531-host-posts-1"></script>
 </body>
 </html>

@@ -9,8 +9,8 @@ test('guest link has a playful memory booth flow', async () => {
     readText('../../moments/styles.css')
   ]);
 
-  assert.match(guestHtml, /styles\.css\?v=20260531-mode-clarity-1/);
-  assert.match(guestHtml, /app\.js\?v=20260531-mode-clarity-1/);
+  assert.match(guestHtml, /styles\.css\?v=20260531-host-posts-1/);
+  assert.match(guestHtml, /app\.js\?v=20260531-host-posts-1/);
   assert.match(guestHtml, /class="guest-flow-card"/);
   assert.match(guestHtml, /class="memory-mode-card/);
   assert.match(guestHtml, /class="mode-badge">PHOTO</);

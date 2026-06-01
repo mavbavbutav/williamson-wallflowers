@@ -1,5 +1,10 @@
 import { copyText, formatBytes, formatDate, formatDateTime, getHostToken, getParam, qs, qsa, requestJson, setNotice } from "../shared.js?v=20260531-1";
 
+const MAX_VIDEO_SECONDS = 30;
+const MAX_AUDIO_SECONDS = 60;
+const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "webm", "3gp", "3gpp", "3g2"];
+const AUDIO_EXTENSIONS = ["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav", "weba", "webm"];
+
 const eventId = getParam("event");
 const token = getHostToken(eventId);
 let currentStatus = "pending";
@@ -9,6 +14,12 @@ let eventRecord = null;
 let timeCapsule = null;
 let capsuleItems = [];
 let lastFocusedElement = null;
+const hostPostState = {
+  mediaFile: null,
+  mediaType: "",
+  durationSeconds: 0,
+  previewUrl: ""
+};
 
 init();
 
@@ -36,6 +47,17 @@ function init() {
     const url = qs("#capsuleShareUrl").value;
     if (url) window.open(url, "_blank", "noopener,noreferrer");
   });
+  qsa("[data-host-post-mode]").forEach((button) => {
+    button.addEventListener("click", () => chooseHostPostMode(button.dataset.hostPostMode));
+  });
+  qs("#hostPostFileInput").addEventListener("change", async () => {
+    const file = qs("#hostPostFileInput").files && qs("#hostPostFileInput").files[0];
+    if (!file) return;
+    await acceptHostPostFile(file);
+    qs("#hostPostFileInput").value = "";
+  });
+  qs("#hostPostForm").addEventListener("submit", createHostPost);
+  qs("#clearHostPostButton").addEventListener("click", clearHostPostComposer);
   qs("#modalClose").addEventListener("click", closeMediaModal);
   qs("#mediaModal").addEventListener("click", (event) => {
     if (event.target === event.currentTarget) closeMediaModal();
@@ -94,6 +116,7 @@ function render() {
   renderHostPulse();
   renderWorkspaceTabs();
   renderSubmissions();
+  renderHostPosts();
   renderCapsule();
   renderShare();
 }
@@ -139,6 +162,7 @@ function setHostStat(name, value) {
 function renderWorkspaceTabs() {
   const capsuleEnabled = Boolean(eventRecord?.timeCapsule?.enabled);
   qs("#submissionsPanel").hidden = currentView !== "submissions";
+  qs("#hostPostsPanel").hidden = !capsuleEnabled || currentView !== "host-posts";
   qs("#capsulePanel").hidden = !capsuleEnabled || currentView !== "capsule";
   qs("#sharePanel").hidden = !capsuleEnabled || currentView !== "share";
 
@@ -177,6 +201,7 @@ function renderSubmissionCard(submission) {
     <div class="button-row">
       <span class="status-pill is-${submission.status}">${submission.status}</span>
       <span class="status-pill">${escapeHtml(getMediaTypeLabel(submission.mediaType))}</span>
+      ${submission.source === "host" ? `<span class="status-pill">Host Post</span>` : ""}
     </div>
     <strong>${escapeHtml(submission.guestName || "Anonymous guest")}</strong>
     <p class="muted">${escapeHtml(submission.guestNote || "No note added.")}</p>
@@ -338,6 +363,230 @@ function renderShare() {
   qs("#capsuleShareUrl").value = isPublished ? shareUrl : "";
   qs("#copyCapsuleLinkButton").disabled = !isPublished || !shareUrl;
   qs("#openCapsuleLinkButton").disabled = !isPublished || !shareUrl;
+}
+
+function renderHostPosts() {
+  if (!eventRecord?.timeCapsule?.enabled) return;
+
+  const posts = getHostPostItems();
+  const grid = qs("#hostPostsGrid");
+  grid.innerHTML = "";
+  qs("#hostPostCount").textContent = `${posts.length} ${posts.length === 1 ? "host post" : "host posts"}`;
+  qs("#hostPostsEmpty").hidden = posts.length > 0;
+
+  posts.forEach((item) => {
+    grid.append(renderHostPostCard(item));
+  });
+}
+
+function renderHostPostCard(item) {
+  const card = document.createElement("article");
+  card.className = "media-card host-post-card";
+
+  const mediaUrl = `${item.mediaUrl}&disposition=inline`;
+  const thumb = renderThumb(item, mediaUrl);
+  const body = document.createElement("div");
+  body.className = "media-body";
+  body.innerHTML = `
+    <div class="button-row">
+      <span class="status-pill">Host Post</span>
+      <span class="status-pill">${escapeHtml(getMediaTypeLabel(item.mediaType))}</span>
+    </div>
+    <strong>${escapeHtml(item.title || "Host Post")}</strong>
+    <p class="muted">${escapeHtml(item.caption || item.guestNote || "No caption added.")}</p>
+    <div class="media-meta">
+      <span>${formatDateTime(item.capturedAt || item.createdAt)}</span>
+      <span>${formatBytes(item.size)}</span>
+      ${item.mediaType === "audio" && item.durationSeconds ? `<span>${formatDuration(item.durationSeconds)}</span>` : ""}
+    </div>
+  `;
+
+  const actions = document.createElement("div");
+  actions.className = "row-actions card-actions";
+  actions.append(actionButton("View", "is-primary", () => openMediaModal(item, mediaUrl)));
+  actions.append(actionButton("Edit in Capsule", "is-success", () => {
+    currentView = "capsule";
+    render();
+  }));
+  body.append(actions);
+
+  card.append(thumb, body);
+  return card;
+}
+
+function getHostPostItems() {
+  return capsuleItems
+    .filter((item) => item.source === "host" || item.chapter === "Host Posts")
+    .slice()
+    .sort((a, b) => new Date(b.capturedAt || b.createdAt || 0) - new Date(a.capturedAt || a.createdAt || 0));
+}
+
+function chooseHostPostMode(mode) {
+  const fileInput = qs("#hostPostFileInput");
+  hostPostState.mediaType = mode;
+  fileInput.accept = getHostPostAcceptTypes(mode);
+  fileInput.removeAttribute("capture");
+  fileInput.click();
+}
+
+async function acceptHostPostFile(file) {
+  const mediaType = inferHostPostMediaType(file);
+
+  if (!mediaType) {
+    setNotice(qs("#hostPostNotice"), "Choose a photo, video, or voice memo file.", "error");
+    return;
+  }
+
+  hostPostState.mediaFile = file;
+  hostPostState.mediaType = mediaType;
+  hostPostState.durationSeconds = mediaType === "photo" ? 0 : Math.round(await readMediaDuration(file, mediaType));
+
+  if (mediaType === "video" && hostPostState.durationSeconds > MAX_VIDEO_SECONDS + 1) {
+    hostPostState.mediaFile = null;
+    setNotice(qs("#hostPostNotice"), "Host videos must be 30 seconds or shorter.", "error");
+    renderHostPostPreview();
+    return;
+  }
+
+  if (mediaType === "audio" && hostPostState.durationSeconds > MAX_AUDIO_SECONDS + 1) {
+    hostPostState.mediaFile = null;
+    setNotice(qs("#hostPostNotice"), "Host voice memos must be 60 seconds or shorter.", "error");
+    renderHostPostPreview();
+    return;
+  }
+
+  renderHostPostPreview();
+  setNotice(qs("#hostPostNotice"), `${getMediaTypeLabel(mediaType)} ready to post.`, "success");
+}
+
+function renderHostPostPreview() {
+  const frame = qs("#hostPostPreview");
+  revokeHostPostPreviewUrl();
+  frame.innerHTML = "";
+
+  if (!hostPostState.mediaFile) {
+    frame.innerHTML = `<span class="muted">Choose a photo, video, or voice memo to preview it here.</span>`;
+    return;
+  }
+
+  const url = URL.createObjectURL(hostPostState.mediaFile);
+  hostPostState.previewUrl = url;
+
+  if (hostPostState.mediaType === "photo") {
+    const image = document.createElement("img");
+    image.src = url;
+    image.alt = "Host post preview";
+    frame.append(image);
+  } else if (hostPostState.mediaType === "audio") {
+    const audio = document.createElement("audio");
+    audio.src = url;
+    audio.controls = true;
+    frame.append(audio);
+  } else {
+    const video = document.createElement("video");
+    video.src = url;
+    video.controls = true;
+    video.playsInline = true;
+    frame.append(video);
+  }
+}
+
+async function createHostPost(event) {
+  event.preventDefault();
+
+  if (!hostPostState.mediaFile) {
+    setNotice(qs("#hostPostNotice"), "Choose a photo, video, or voice memo before posting.", "error");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("media", hostPostState.mediaFile);
+  formData.append("mediaType", hostPostState.mediaType);
+  formData.append("durationSeconds", String(hostPostState.durationSeconds || 0));
+  formData.append("title", qs("#hostPostTitle").value.trim() || "Host Post");
+  formData.append("caption", qs("#hostPostCaption").value.trim());
+
+  qs("#createHostPostButton").disabled = true;
+  setNotice(qs("#hostPostNotice"), "Posting to the guest view...");
+
+  try {
+    await hostRequest(`/host/events/${encodeURIComponent(eventId)}/posts`, {
+      method: "POST",
+      body: formData,
+      timeoutMs: 120000
+    });
+    clearHostPostComposer();
+    currentView = "host-posts";
+    await loadGallery();
+    showHostCelebration("Host Post is live for guests and saved to the Time Capsule.", qs("#hostPostNotice"));
+  } catch (error) {
+    setNotice(qs("#hostPostNotice"), error.message || "Could not create this Host Post.", "error");
+  } finally {
+    qs("#createHostPostButton").disabled = false;
+  }
+}
+
+function clearHostPostComposer() {
+  hostPostState.mediaFile = null;
+  hostPostState.mediaType = "";
+  hostPostState.durationSeconds = 0;
+  revokeHostPostPreviewUrl();
+  qs("#hostPostForm").reset();
+  renderHostPostPreview();
+  setNotice(qs("#hostPostNotice"), "");
+}
+
+function revokeHostPostPreviewUrl() {
+  if (!hostPostState.previewUrl) return;
+  URL.revokeObjectURL(hostPostState.previewUrl);
+  hostPostState.previewUrl = "";
+}
+
+function inferHostPostMediaType(file) {
+  const baseMimeType = getBaseMimeType(file.type);
+  const extension = getFileExtension(file.name);
+
+  if (baseMimeType.startsWith("image/")) return "photo";
+  if (baseMimeType.startsWith("audio/") || AUDIO_EXTENSIONS.includes(extension)) return "audio";
+  if (baseMimeType.startsWith("video/") || VIDEO_EXTENSIONS.includes(extension)) return "video";
+  return "";
+}
+
+function getHostPostAcceptTypes(mode) {
+  if (mode === "photo") return "image/*";
+  if (mode === "audio") return "audio/*,.m4a,.mp3,.wav,.ogg,.oga,.opus,.aac,.webm,.weba";
+  return "video/*,.mp4,.mov,.m4v,.webm,.3gp,.3gpp,.3g2";
+}
+
+function getBaseMimeType(mimeType) {
+  return String(mimeType || "").split(";")[0].trim().toLowerCase();
+}
+
+function getFileExtension(filename) {
+  const clean = String(filename || "").split("?")[0].split("#")[0];
+  const index = clean.lastIndexOf(".");
+  return index >= 0 ? clean.slice(index + 1).toLowerCase() : "";
+}
+
+function readMediaDuration(file, mediaType) {
+  return new Promise((resolve) => {
+    if (mediaType === "photo") {
+      resolve(0);
+      return;
+    }
+
+    const element = document.createElement(mediaType === "audio" ? "audio" : "video");
+    element.preload = "metadata";
+    element.onloadedmetadata = () => {
+      URL.revokeObjectURL(element.src);
+      resolve(element.duration || 0);
+    };
+    element.onerror = () => {
+      URL.revokeObjectURL(element.src);
+      resolve(0);
+    };
+    element.src = URL.createObjectURL(file);
+  });
 }
 
 function renderThumb(item, mediaUrl) {

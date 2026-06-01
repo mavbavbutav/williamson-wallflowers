@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260531-host-fun-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260531-host-posts-1" />
 </head>
 <body class="host-page">
   <main class="app-shell">
@@ -70,6 +70,7 @@
       <div class="toolbar" id="workspaceToolbar" hidden>
         <div class="tabs" aria-label="Host workspace">
           <button class="tab-button is-active" type="button" data-view="submissions" aria-pressed="true">Submissions</button>
+          <button class="tab-button" type="button" data-view="host-posts" aria-pressed="false">Host Posts</button>
           <button class="tab-button" type="button" data-view="capsule" aria-pressed="false">Time Capsule</button>
           <button class="tab-button" type="button" data-view="share" aria-pressed="false">Share</button>
         </div>
@@ -96,6 +97,73 @@
 
         <div class="media-grid" id="mediaGrid"></div>
         <div class="empty-state" id="emptyState" hidden>No submissions in this view yet.</div>
+      </section>
+
+      <section class="dashboard" id="hostPostsPanel" hidden>
+        <div class="host-posts-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>Host Posts</h2>
+              <p class="muted">Add party updates that guests can see right away. These are approved and added to the Time Capsule automatically.</p>
+            </div>
+            <span class="status-pill">Live to guests</span>
+          </div>
+
+          <form id="hostPostForm" class="host-post-composer">
+            <input class="visually-hidden" id="hostPostFileInput" type="file" />
+            <div class="memory-mode-grid host-post-mode-grid" aria-label="Choose host post media">
+              <button class="memory-mode-card is-photo" type="button" data-host-post-mode="photo">
+                <span class="mode-badge">PHOTO</span>
+                <span class="mode-kicker">Host update</span>
+                <strong class="mode-title">Add Photo</strong>
+                <span class="mode-action">Choose or take photo</span>
+              </button>
+              <button class="memory-mode-card is-video" type="button" data-host-post-mode="video">
+                <span class="mode-badge">VIDEO</span>
+                <span class="mode-kicker">Host update</span>
+                <strong class="mode-title">Add Video</strong>
+                <span class="mode-action">Choose or record video</span>
+              </button>
+              <button class="memory-mode-card is-audio" type="button" data-host-post-mode="audio">
+                <span class="mode-badge">AUDIO</span>
+                <span class="mode-kicker">Host update</span>
+                <strong class="mode-title">Add Voice Memo</strong>
+                <span class="mode-action">Choose audio file</span>
+              </button>
+            </div>
+
+            <div class="admin-grid host-post-editor">
+              <div class="preview-frame host-post-preview" id="hostPostPreview">
+                <span class="muted">Choose a photo, video, or voice memo to preview it here.</span>
+              </div>
+              <div class="panel host-post-fields">
+                <div class="field">
+                  <label for="hostPostTitle">Post title</label>
+                  <input id="hostPostTitle" maxlength="120" placeholder="Host Post" />
+                </div>
+                <div class="field">
+                  <label for="hostPostCaption">Caption</label>
+                  <textarea id="hostPostCaption" rows="3" maxlength="600" placeholder="Add a quick party update."></textarea>
+                </div>
+                <div id="hostPostNotice" class="notice" role="status" aria-live="polite" hidden></div>
+                <div class="row-actions">
+                  <button class="small-button is-success" type="submit" id="createHostPostButton">Post to guest view</button>
+                  <button class="small-button" type="button" id="clearHostPostButton">Clear</button>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <div class="toolbar host-post-feed-heading">
+          <div>
+            <h2>Party View</h2>
+            <p class="muted">What guests can see from the QR link.</p>
+          </div>
+          <span class="muted" id="hostPostCount">0 host posts</span>
+        </div>
+        <div class="party-feed" id="hostPostsGrid"></div>
+        <div class="empty-state" id="hostPostsEmpty" hidden>No Host Posts yet. Add one above to start the party feed.</div>
       </section>
 
       <section class="dashboard" id="capsulePanel" hidden>
@@ -160,6 +228,6 @@
     <div class="media-modal-stage" id="modalStage"></div>
   </div>
 
-  <script type="module" src="host.js?v=20260531-host-fun-1"></script>
+  <script type="module" src="host.js?v=20260531-host-posts-1"></script>
 </body>
 </html>
