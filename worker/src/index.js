@@ -19,6 +19,7 @@ const AUDIO_MAX_SECONDS = 60;
 const UPLOAD_TOKEN_TTL_SECONDS = 12 * 60 * 60;
 const MEDIA_TOKEN_TTL_SECONDS = 6 * 60 * 60;
 const THUMBNAIL_TOKEN_TTL_SECONDS = 6 * 60 * 60;
+const STREAM_TOKEN_TTL_SECONDS = 6 * 60 * 60;
 const UPLOAD_RATE_LIMIT = 12;
 const UPLOAD_RATE_WINDOW_SECONDS = 60 * 60;
 const TAG_RATE_LIMIT = 120;
@@ -57,9 +58,12 @@ const AUDIO_TYPES = new Set([
 ]);
 const AUDIO_EXTENSIONS = new Set(['aac', 'flac', 'm4a', 'mp3', 'oga', 'ogg', 'opus', 'wav', 'weba', 'webm']);
 const PUBLIC_SITE_URL = 'https://williamsonwallflowers.com';
+const STREAM_API_BASE_URL = 'https://api.cloudflare.com/client/v4';
+const STREAM_DELIVERY_BASE_URL = 'https://videodelivery.net';
+const streamPlaybackTokenCache = new Map();
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const origin = request.headers.get('Origin') || '';
     const corsHeaders = getCorsHeaders(origin, env);
@@ -73,7 +77,7 @@ export default {
     }
 
     if (url.pathname.startsWith('/moments-api')) {
-      return handleMomentsApi(request, env, url, corsHeaders);
+      return handleMomentsApi(request, env, url, corsHeaders, ctx);
     }
 
     return handleInquiry(request, env, corsHeaders);
@@ -125,7 +129,7 @@ async function handleInquiry(request, env, corsHeaders) {
   }
 }
 
-async function handleMomentsApi(request, env, url, corsHeaders) {
+async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
   if (!env.MOMENTS_DB || !env.MOMENTS_BUCKET) {
     return json({ ok: false, message: 'Wallflower Moments storage is not configured yet.' }, 503, corsHeaders);
   }
@@ -150,7 +154,7 @@ async function handleMomentsApi(request, env, url, corsHeaders) {
     }
 
     if (request.method === 'POST' && parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'posts') {
-      return createHostPost(request, env, url, corsHeaders, parts[2]);
+      return createHostPost(request, env, url, corsHeaders, parts[2], ctx);
     }
 
     if (parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'time-capsule') {
@@ -163,7 +167,7 @@ async function handleMomentsApi(request, env, url, corsHeaders) {
       }
 
       if (request.method === 'POST' && parts[4] === 'items') {
-        return createTimeCapsuleItem(request, env, url, corsHeaders, parts[2]);
+        return createTimeCapsuleItem(request, env, url, corsHeaders, parts[2], ctx);
       }
     }
 
@@ -183,11 +187,11 @@ async function handleMomentsApi(request, env, url, corsHeaders) {
 
     if (parts[0] === 'host' && parts[1] === 'submissions' && parts[2]) {
       if (request.method === 'PATCH' && parts[3] === 'party-view') {
-        return updateSubmissionPartyView(request, env, url, corsHeaders, parts[2]);
+        return updateSubmissionPartyView(request, env, url, corsHeaders, parts[2], ctx);
       }
 
       if (request.method === 'PATCH') {
-        return updateHostSubmission(request, env, url, corsHeaders, parts[2]);
+        return updateHostSubmission(request, env, url, corsHeaders, parts[2], ctx);
       }
 
       if (request.method === 'DELETE') {
@@ -441,7 +445,7 @@ async function listGuestHostPosts(request, env, url, corsHeaders, eventId) {
   }, 200, corsHeaders);
 }
 
-async function createHostPost(request, env, url, corsHeaders, eventId) {
+async function createHostPost(request, env, url, corsHeaders, eventId, ctx) {
   const token = getAccessToken(request, url);
   const event = await getHostEvent(env, eventId, token);
 
@@ -547,6 +551,8 @@ async function createHostPost(request, env, url, corsHeaders, eventId) {
     now
   ).run();
 
+  await queueStreamOptimization(env, request, await getSubmissionWithEvent(env, submissionId), ctx);
+
   const itemId = crypto.randomUUID();
   await env.MOMENTS_DB.prepare(`
     INSERT INTO time_capsule_items (
@@ -648,7 +654,7 @@ async function updateHostTimeCapsule(request, env, url, corsHeaders, eventId) {
   }, 200, corsHeaders);
 }
 
-async function createTimeCapsuleItem(request, env, url, corsHeaders, eventId) {
+async function createTimeCapsuleItem(request, env, url, corsHeaders, eventId, ctx) {
   const event = await getAuthorizedCapsuleEvent(request, env, url, eventId);
   if (event.response) return event.response;
 
@@ -695,6 +701,8 @@ async function createTimeCapsuleItem(request, env, url, corsHeaders, eventId) {
     now,
     now
   ).run();
+
+  await queueStreamOptimization(env, request, submission, ctx);
 
   const item = await getTimeCapsuleItemById(env, id, request);
   return json({ ok: true, item: await toTimeCapsuleItemClient(item, request, env) }, 201, corsHeaders);
@@ -785,7 +793,7 @@ async function getPublishedTimeCapsule(request, env, url, corsHeaders, eventId) 
   }, 200, corsHeaders);
 }
 
-async function updateHostSubmission(request, env, url, corsHeaders, submissionId) {
+async function updateHostSubmission(request, env, url, corsHeaders, submissionId, ctx) {
   const token = getAccessToken(request, url);
   const submission = await getSubmissionWithEvent(env, submissionId);
 
@@ -807,10 +815,14 @@ async function updateHostSubmission(request, env, url, corsHeaders, submissionId
     WHERE id = ? AND deleted_at IS NULL
   `).bind(status, status, now, submissionId).run();
 
+  if (status === 'approved') {
+    await queueStreamOptimization(env, request, { ...submission, status }, ctx);
+  }
+
   return json({ ok: true, status }, 200, corsHeaders);
 }
 
-async function updateSubmissionPartyView(request, env, url, corsHeaders, submissionId) {
+async function updateSubmissionPartyView(request, env, url, corsHeaders, submissionId, ctx) {
   const token = getAccessToken(request, url);
   const submission = await getSubmissionWithEvent(env, submissionId);
 
@@ -836,6 +848,10 @@ async function updateSubmissionPartyView(request, env, url, corsHeaders, submiss
     SET guest_visible_at = ?, updated_at = ?
     WHERE id = ? AND deleted_at IS NULL
   `).bind(guestVisibleAt, now, submissionId).run();
+
+  if (visible) {
+    await queueStreamOptimization(env, request, submission, ctx);
+  }
 
   return json({
     ok: true,
@@ -864,6 +880,7 @@ async function deleteHostSubmission(request, env, url, corsHeaders, submissionId
   try {
     await env.MOMENTS_BUCKET.delete(submission.objectKey);
     if (submission.thumbnailObjectKey) await env.MOMENTS_BUCKET.delete(submission.thumbnailObjectKey);
+    if (submission.streamUid) await deleteStreamVideo(env, submission.streamUid);
   } catch (error) {
     console.error('R2 delete failed for host-deleted submission', submissionId, error);
   }
@@ -911,6 +928,9 @@ async function streamMedia(request, env, url, corsHeaders, submissionId) {
   headers.set('Cache-Control', 'private, max-age=60');
   headers.set('ETag', object.httpEtag || object.etag);
   headers.set('Content-Disposition', `${getDisposition(url)}; filename="${downloadFilename(submission)}"`);
+  if (isHeadRequest && totalSize) {
+    headers.set('Content-Range', `bytes 0-${Math.max(totalSize - 1, 0)}/${totalSize}`);
+  }
 
   if (parsedRange) {
     headers.set('Content-Range', `bytes ${parsedRange.start}-${parsedRange.end}/${totalSize}`);
@@ -1001,6 +1021,266 @@ async function saveGeneratedThumbnail(request, env, url, corsHeaders, submission
     ok: true,
     thumbnailUrl: await buildThumbnailAccessUrl(request, env, submission.id)
   }, 200, corsHeaders);
+}
+
+async function queueStreamOptimization(env, request, submission, ctx) {
+  const work = optimizeSubmissionForStream(env, request, submission).catch((error) => {
+    console.error('Cloudflare Stream optimization failed', submission?.id || 'unknown-submission', String(error.message || error));
+  });
+
+  if (ctx && typeof ctx.waitUntil === 'function') {
+    ctx.waitUntil(work);
+    return;
+  }
+
+  await work;
+}
+
+async function optimizeSubmissionForStream(env, request, submission) {
+  if (!submission || submission.mediaType !== 'video' || submission.deletedAt || submission.status === 'deleted') return;
+  if (!isStreamConfigured(env)) return;
+
+  const existingUid = submission.streamUid || submission.stream_uid || '';
+  const existingStatus = submission.streamStatus || submission.stream_status || '';
+  if (existingUid && existingStatus !== 'error') {
+    await refreshStreamStatusIfNeeded(env, submission.id, existingUid, existingStatus);
+    return;
+  }
+
+  const now = new Date().toISOString();
+  await storeStreamState(env, submission.id, {
+    uid: '',
+    status: 'queued',
+    error: '',
+    readyAt: '',
+    createdAt: now,
+    updatedAt: now
+  });
+
+  try {
+    const mediaUrl = await buildMediaAccessUrl(request, env, submission.id);
+    const video = await createStreamCopy(env, submission, mediaUrl);
+    await storeStreamState(env, submission.id, streamRecordFromVideo(video, 'queued'));
+  } catch (error) {
+    await storeStreamState(env, submission.id, {
+      uid: '',
+      status: 'error',
+      error: cleanText(error.message || error, 500),
+      readyAt: '',
+      updatedAt: new Date().toISOString()
+    });
+  }
+}
+
+async function createStreamCopy(env, submission, inputUrl) {
+  const accountId = getCloudflareAccountId(env);
+  const body = {
+    allowedOrigins: getStreamAllowedOrigins(env),
+    creator: cleanText(submission.eventId || submission.event_id || 'wallflower-moments', 64),
+    input: inputUrl,
+    url: inputUrl,
+    name: submission.originalFilename || submission.original_filename || `wallflower-${submission.id}.mp4`,
+    requireSignedURLs: true,
+    thumbnailTimestampPct: 0.08,
+    meta: {
+      eventId: submission.eventId || submission.event_id || '',
+      submissionId: submission.id,
+      source: 'wallflower-moments'
+    }
+  };
+
+  return cloudflareApiFetch(env, `/accounts/${encodeURIComponent(accountId)}/stream/copy`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Upload-Creator': body.creator },
+    body: JSON.stringify(body)
+  });
+}
+
+async function refreshStreamStatusIfNeeded(env, submissionId, streamUid, currentStatus) {
+  if (!streamUid || currentStatus === 'ready' || !isStreamConfigured(env)) return null;
+
+  const accountId = getCloudflareAccountId(env);
+  const video = await cloudflareApiFetch(env, `/accounts/${encodeURIComponent(accountId)}/stream/${encodeURIComponent(streamUid)}`);
+  const record = streamRecordFromVideo(video, currentStatus || 'processing');
+  await storeStreamState(env, submissionId, record);
+  return record;
+}
+
+async function storeStreamState(env, submissionId, state) {
+  const now = new Date().toISOString();
+  const uid = state.uid || '';
+  const status = state.status || 'queued';
+  const error = cleanText(state.error, 500);
+  const readyAt = state.readyAt || null;
+  const createdAt = state.createdAt || now;
+  const updatedAt = state.updatedAt || now;
+
+  await env.MOMENTS_DB.prepare(`
+    UPDATE submissions
+    SET stream_uid = ?, stream_status = ?, stream_error = ?, stream_ready_at = ?,
+      stream_created_at = COALESCE(stream_created_at, ?), stream_updated_at = ?, updated_at = ?
+    WHERE id = ?
+  `).bind(uid || null, status, error || null, readyAt, createdAt, updatedAt, now, submissionId).run();
+}
+
+async function buildStreamPlaybackClient(row, request, env, submissionId, mediaType) {
+  const streamUid = row.stream_uid || row.streamUid || '';
+  if ((row.media_type || row.mediaType || mediaType) !== 'video' || !streamUid) {
+    return emptyStreamPlayback(row);
+  }
+
+  let status = row.stream_status || row.streamStatus || 'processing';
+  let readyAt = row.stream_ready_at || row.streamReadyAt || '';
+  let error = row.stream_error || row.streamError || '';
+
+  if (status !== 'ready' && status !== 'error') {
+    const refreshed = await refreshStreamStatusIfNeeded(env, submissionId, streamUid, status).catch(() => null);
+    if (refreshed) {
+      status = refreshed.status;
+      readyAt = refreshed.readyAt;
+      error = refreshed.error;
+    }
+  }
+
+  if (status !== 'ready') {
+    return { status, url: '', readyAt: readyAt || '', error: error || '' };
+  }
+
+  const token = await createStreamPlaybackToken(env, streamUid).catch(() => '');
+  return {
+    status,
+    url: token ? `${STREAM_DELIVERY_BASE_URL}/${encodeURIComponent(token)}/manifest/video.m3u8` : '',
+    readyAt: readyAt || '',
+    error: ''
+  };
+}
+
+function emptyStreamPlayback(row = {}) {
+  return {
+    status: row.stream_status || row.streamStatus || 'none',
+    url: '',
+    readyAt: row.stream_ready_at || row.streamReadyAt || '',
+    error: row.stream_error || row.streamError || ''
+  };
+}
+
+async function createStreamPlaybackToken(env, streamUid) {
+  if (!streamUid || !isStreamConfigured(env)) return '';
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const cached = streamPlaybackTokenCache.get(streamUid);
+  if (cached && cached.expiresAt > nowSeconds + 60) return cached.token;
+
+  const accountId = getCloudflareAccountId(env);
+  const exp = nowSeconds + STREAM_TOKEN_TTL_SECONDS;
+  const result = await cloudflareApiFetch(env, `/accounts/${encodeURIComponent(accountId)}/stream/${encodeURIComponent(streamUid)}/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ exp })
+  });
+  const token = result?.token || '';
+  if (token) streamPlaybackTokenCache.set(streamUid, { token, expiresAt: exp });
+  return token;
+}
+
+async function deleteStreamVideo(env, streamUid) {
+  if (!streamUid || !isStreamConfigured(env)) return;
+  const accountId = getCloudflareAccountId(env);
+  await cloudflareApiFetch(env, `/accounts/${encodeURIComponent(accountId)}/stream/${encodeURIComponent(streamUid)}`, {
+    method: 'DELETE'
+  }).catch((error) => {
+    console.error('Cloudflare Stream delete failed', streamUid, String(error.message || error));
+  });
+}
+
+function streamRecordFromVideo(video, fallbackStatus = 'queued') {
+  const status = normalizeStreamStatus(video, fallbackStatus);
+  return {
+    uid: video?.uid || '',
+    status,
+    error: status === 'error' ? cleanText(video?.status?.errorReasonText || 'Cloudflare Stream processing failed.', 500) : '',
+    readyAt: video?.readyToStreamAt || (status === 'ready' ? new Date().toISOString() : ''),
+    createdAt: video?.created || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function normalizeStreamStatus(video, fallbackStatus = 'queued') {
+  const state = String(video?.status?.state || '').toLowerCase();
+  if (video?.readyToStream || video?.readyToStreamAt || state === 'ready') return 'ready';
+  if (state === 'error') return 'error';
+  if (state === 'inprogress') return 'processing';
+  return fallbackStatus;
+}
+
+async function buildMediaAccessUrl(request, env, submissionId) {
+  const mediaToken = await createSignedToken(env, 'media', submissionId, MEDIA_TOKEN_TTL_SECONDS);
+  return `${getApiOrigin(request, env)}/moments-api/media/${encodeURIComponent(submissionId)}?mediaToken=${encodeURIComponent(mediaToken)}&disposition=inline`;
+}
+
+function isStreamConfigured(env) {
+  return Boolean(getCloudflareAccountId(env) && getCloudflareAuthHeaders(env));
+}
+
+function getCloudflareAccountId(env) {
+  return cleanText(env.CLOUDFLARE_ACCOUNT_ID || env.CF_ACCOUNT_ID, 80);
+}
+
+function getCloudflareAuthHeaders(env) {
+  const email = cleanText(env.CLOUDFLARE_EMAIL || env.CF_API_EMAIL, 200);
+  const globalKey = cleanText(env.CLOUDFLARE_GLOBAL_API_KEY || env.CLOUDFLARE_API, 300);
+  if (email && globalKey) {
+    return {
+      'X-Auth-Email': email,
+      'X-Auth-Key': globalKey
+    };
+  }
+
+  const apiToken = cleanText(env.CLOUDFLARE_STREAM_API_TOKEN || env.CLOUDFLARE_API_TOKEN || env.CF_API_TOKEN || env.CLOUDFLARE_API, 300);
+  if (!apiToken) return null;
+  return { Authorization: `Bearer ${apiToken}` };
+}
+
+async function cloudflareApiFetch(env, path, init = {}) {
+  const authHeaders = getCloudflareAuthHeaders(env);
+  if (!authHeaders) throw new Error('Cloudflare Stream API credentials are not configured.');
+
+  const response = await fetch(`${STREAM_API_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      Accept: 'application/json',
+      ...authHeaders,
+      ...(init.headers || {})
+    }
+  });
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : {};
+
+  if (!response.ok || payload.success === false) {
+    const message = payload.errors?.[0]?.message || `Cloudflare Stream API returned ${response.status}.`;
+    throw new Error(message);
+  }
+
+  return payload.result || payload;
+}
+
+function getStreamAllowedOrigins(env) {
+  const values = (env.STREAM_ALLOWED_ORIGINS || `${getSiteUrl(env)},https://www.williamsonwallflowers.com`)
+    .split(',')
+    .map((value) => hostnameForOrigin(value))
+    .filter(Boolean);
+  return [...new Set(values)];
+}
+
+function hostnameForOrigin(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+
+  try {
+    return new URL(trimmed).hostname;
+  } catch {
+    return trimmed.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  }
 }
 
 async function handleAdminApi(request, env, url, corsHeaders, parts) {
@@ -1118,7 +1398,7 @@ async function runRetentionCleanup(request, env, corsHeaders) {
 async function cleanExpiredMedia(env, limit = RETENTION_CLEANUP_LIMIT) {
   const now = new Date().toISOString();
   const result = await env.MOMENTS_DB.prepare(`
-    SELECT s.id, s.object_key AS objectKey, s.thumbnail_object_key AS thumbnailObjectKey
+    SELECT s.id, s.object_key AS objectKey, s.thumbnail_object_key AS thumbnailObjectKey, s.stream_uid AS streamUid
     FROM submissions s
     INNER JOIN events e ON e.id = s.event_id
     WHERE e.retention_expires_at <= ? AND s.deleted_at IS NULL
@@ -1134,6 +1414,7 @@ async function cleanExpiredMedia(env, limit = RETENTION_CLEANUP_LIMIT) {
     try {
       await env.MOMENTS_BUCKET.delete(candidate.objectKey);
       if (candidate.thumbnailObjectKey) await env.MOMENTS_BUCKET.delete(candidate.thumbnailObjectKey);
+      if (candidate.streamUid) await deleteStreamVideo(env, candidate.streamUid);
       await env.MOMENTS_DB.prepare(`
         UPDATE submissions
         SET status = 'deleted', deleted_at = ?, updated_at = ?
@@ -1291,7 +1572,7 @@ async function deleteAdminEvent(request, env, corsHeaders, eventId) {
   if (!current) return json({ ok: false, message: 'Event not found.' }, 404, corsHeaders);
 
   const mediaResult = await env.MOMENTS_DB.prepare(`
-    SELECT id, object_key AS objectKey, thumbnail_object_key AS thumbnailObjectKey
+    SELECT id, object_key AS objectKey, thumbnail_object_key AS thumbnailObjectKey, stream_uid AS streamUid
     FROM submissions
     WHERE event_id = ?
   `).bind(eventId).all();
@@ -1310,7 +1591,7 @@ async function deleteAdminEvent(request, env, corsHeaders, eventId) {
   let deletedMedia = 0;
   const mediaErrors = [];
   for (const row of mediaRows) {
-    if (!row.objectKey && !row.thumbnailObjectKey) continue;
+    if (!row.objectKey && !row.thumbnailObjectKey && !row.streamUid) continue;
     try {
       if (row.objectKey) {
         await env.MOMENTS_BUCKET.delete(row.objectKey);
@@ -1318,6 +1599,10 @@ async function deleteAdminEvent(request, env, corsHeaders, eventId) {
       }
       if (row.thumbnailObjectKey) {
         await env.MOMENTS_BUCKET.delete(row.thumbnailObjectKey);
+        deletedMedia += 1;
+      }
+      if (row.streamUid) {
+        await deleteStreamVideo(env, row.streamUid);
         deletedMedia += 1;
       }
     } catch (error) {
@@ -1734,6 +2019,12 @@ async function getTimeCapsuleItems(env, eventId, request, options = {}) {
       s.thumbnail_mime_type AS thumbnailMimeType,
       s.thumbnail_size AS thumbnailSize,
       s.thumbnail_created_at AS thumbnailCreatedAt,
+      s.stream_uid AS streamUid,
+      s.stream_status AS streamStatus,
+      s.stream_error AS streamError,
+      s.stream_ready_at AS streamReadyAt,
+      s.stream_created_at AS streamCreatedAt,
+      s.stream_updated_at AS streamUpdatedAt,
       s.duration_seconds AS durationSeconds,
       s.guest_name AS guestName,
       s.guest_note AS guestNote,
@@ -1802,6 +2093,12 @@ async function getTimeCapsuleItemById(env, itemId) {
       s.thumbnail_mime_type AS thumbnailMimeType,
       s.thumbnail_size AS thumbnailSize,
       s.thumbnail_created_at AS thumbnailCreatedAt,
+      s.stream_uid AS streamUid,
+      s.stream_status AS streamStatus,
+      s.stream_error AS streamError,
+      s.stream_ready_at AS streamReadyAt,
+      s.stream_created_at AS streamCreatedAt,
+      s.stream_updated_at AS streamUpdatedAt,
       s.duration_seconds AS durationSeconds,
       s.guest_name AS guestName,
       s.guest_note AS guestNote,
@@ -1850,6 +2147,12 @@ async function getSubmissionWithEvent(env, submissionId) {
       s.thumbnail_mime_type AS thumbnailMimeType,
       s.thumbnail_size AS thumbnailSize,
       s.thumbnail_created_at AS thumbnailCreatedAt,
+      s.stream_uid AS streamUid,
+      s.stream_status AS streamStatus,
+      s.stream_error AS streamError,
+      s.stream_ready_at AS streamReadyAt,
+      s.stream_created_at AS streamCreatedAt,
+      s.stream_updated_at AS streamUpdatedAt,
       s.duration_seconds AS durationSeconds,
       s.guest_name AS guestName,
       s.guest_note AS guestNote,
@@ -2266,6 +2569,7 @@ async function toTimeCapsuleItemClient(row, request, env) {
   const mediaToken = await createSignedToken(env, 'media', row.submissionId, MEDIA_TOKEN_TTL_SECONDS);
   const mediaUrl = `${getApiOrigin(request, env)}/moments-api/media/${encodeURIComponent(row.submissionId)}?mediaToken=${encodeURIComponent(mediaToken)}`;
   const thumbnail = await buildThumbnailClient(row, request, env, row.submissionId, row.mediaType, row.thumbnailObjectKey);
+  const stream = await buildStreamPlaybackClient(row, request, env, row.submissionId, row.mediaType);
 
   return {
     id: row.id,
@@ -2287,6 +2591,9 @@ async function toTimeCapsuleItemClient(row, request, env) {
     guestNote: row.guestNote || '',
     mediaUrl,
     downloadUrl: mediaUrl,
+    streamUrl: stream.url,
+    streamStatus: stream.status,
+    streamReadyAt: stream.readyAt,
     thumbnailUrl: thumbnail.url,
     thumbnailUploadUrl: thumbnail.uploadUrl,
     createdAt: row.createdAt,
@@ -2310,6 +2617,7 @@ async function toSubmissionClient(row, request, env) {
   const mediaToken = await createSignedToken(env, 'media', row.id, MEDIA_TOKEN_TTL_SECONDS);
   const mediaUrl = `${getApiOrigin(request, env)}/moments-api/media/${encodeURIComponent(row.id)}?mediaToken=${encodeURIComponent(mediaToken)}`;
   const thumbnail = await buildThumbnailClient(row, request, env, row.id, row.media_type || row.mediaType, row.thumbnail_object_key || row.thumbnailObjectKey);
+  const stream = await buildStreamPlaybackClient(row, request, env, row.id, row.media_type || row.mediaType);
   const guestVisibleAt = row.guest_visible_at || row.guestVisibleAt || '';
 
   return {
@@ -2329,6 +2637,9 @@ async function toSubmissionClient(row, request, env) {
     updatedAt: row.updated_at || row.updatedAt,
     mediaUrl,
     downloadUrl: mediaUrl,
+    streamUrl: stream.url,
+    streamStatus: stream.status,
+    streamReadyAt: stream.readyAt,
     thumbnailUrl: thumbnail.url,
     thumbnailUploadUrl: thumbnail.uploadUrl
   };
@@ -2356,6 +2667,9 @@ async function toPartyViewSubmissionClient(row, request, env) {
     guestNote: submission.guestNote,
     mediaUrl: submission.mediaUrl,
     downloadUrl: submission.downloadUrl,
+    streamUrl: submission.streamUrl,
+    streamStatus: submission.streamStatus,
+    streamReadyAt: submission.streamReadyAt,
     thumbnailUrl: submission.thumbnailUrl,
     thumbnailUploadUrl: submission.thumbnailUploadUrl,
     createdAt: submission.createdAt,

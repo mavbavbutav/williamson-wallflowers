@@ -69,6 +69,7 @@ function render() {
   renderSwipeFeed();
   setCapsuleView(items.length ? currentCapsuleView : "timeline");
   hydrateVideoPosters();
+  hydrateStreamVideos();
 }
 
 function renderTimeline() {
@@ -80,7 +81,7 @@ function renderTimeline() {
             ? `<img src="${escapeAttribute(item.mediaUrl)}&disposition=inline" alt="${escapeAttribute(item.title)}" loading="lazy" />`
             : item.mediaType === "audio"
               ? `<audio src="${escapeAttribute(item.mediaUrl)}&disposition=inline" preload="metadata" controls></audio>`
-              : `<video ${videoPosterAttributes(item)} src="${escapeAttribute(inlineMediaUrl(item.mediaUrl))}" preload="metadata" muted playsinline></video>`}
+              : `<video ${videoPosterAttributes(item)} ${videoSourceAttributes(item)} preload="metadata" muted playsinline></video>`}
         </span>
         <span class="media-body">
           <span class="status-pill">${escapeHtml(item.chapter || "Guest moments")}</span>
@@ -155,7 +156,7 @@ function renderFeedMedia(item, index) {
   }
 
   return `
-    <video data-feed-media="${index}" ${videoPosterAttributes(item)} src="${mediaUrl}" preload="metadata" playsinline muted></video>
+    <video data-feed-media="${index}" ${videoPosterAttributes(item)} ${videoSourceAttributes(item)} preload="metadata" playsinline muted></video>
     <button class="capsule-feed-play" type="button" data-feed-play="${index}" aria-label="Play ${title}">
       <span>Tap to play</span>
     </button>
@@ -542,6 +543,7 @@ function renderSlide() {
     video.preload = "metadata";
     stage.append(video);
     hydrateVideoPosters(stage);
+    hydrateStreamVideos(stage);
   }
 }
 
@@ -637,6 +639,35 @@ function hydrateVideoPosters(root = document) {
 
 function qsaVideoPosterTargets(root = document) {
   return Array.from(root.querySelectorAll("video[data-video-poster-url]"));
+}
+
+function hydrateStreamVideos(root = document) {
+  Array.from(root.querySelectorAll("video[data-stream-url]")).forEach((video) => {
+    const streamUrl = video.dataset.streamUrl;
+    if (!streamUrl || video.dataset.streamState) return;
+
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = streamUrl;
+      video.dataset.streamState = "native";
+      video.load?.();
+      return;
+    }
+
+    if (window.Hls && window.Hls.isSupported()) {
+      const hls = new window.Hls({
+        maxBufferLength: 16,
+        maxMaxBufferLength: 28,
+        startFragPrefetch: true
+      });
+      hls.loadSource(streamUrl);
+      hls.attachMedia(video);
+      video.dataset.streamState = "hls";
+      video.wallflowerHls = hls;
+      return;
+    }
+
+    video.dataset.streamState = "fallback";
+  });
 }
 
 function getGeneratedVideoPoster(sourceUrl) {
@@ -867,6 +898,15 @@ function videoPosterAttributes(item) {
     ? ` data-thumbnail-upload-url="${escapeAttribute(item.thumbnailUploadUrl)}"`
     : "";
   return `poster="${escapeAttribute(videoPosterUrl(item))}" data-video-poster-url="${escapeAttribute(sourceUrl)}"${uploadAttribute} crossorigin="anonymous"`;
+}
+
+function videoSourceAttributes(item) {
+  const preferredUrl = item.streamUrl || item.mediaUrl;
+  const fallbackUrl = preferredUrl === item.streamUrl ? item.mediaUrl : preferredUrl;
+  const streamAttribute = item.streamUrl
+    ? ` data-stream-url="${escapeAttribute(item.streamUrl)}"`
+    : "";
+  return `src="${escapeAttribute(inlineMediaUrl(fallbackUrl))}"${streamAttribute}`;
 }
 
 function inlineMediaUrl(url) {

@@ -225,7 +225,7 @@ test('capsule swipe feed auto-plays centered videos and voice memos', async () =
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-feed-preload-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-stream-playback-1/);
   assert.match(capsuleJs, /scheduleFeedAutoplay/);
   assert.match(capsuleJs, /function syncFeedAutoplay/);
   assert.match(capsuleJs, /function getCenteredFeedMedia/);
@@ -256,7 +256,7 @@ test('capsule swipe feed preloads adjacent media before the next swipe', async (
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-feed-preload-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-stream-playback-1/);
   assert.match(capsuleJs, /const FEED_MEDIA_WARM_RADIUS = 1/);
   assert.match(capsuleJs, /const FEED_IMAGE_WARM_RADIUS = 2/);
   assert.match(capsuleJs, /function warmFeedAroundCard/);
