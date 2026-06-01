@@ -9,6 +9,7 @@ let lastFocusedElement = null;
 let currentCapsuleView = "timeline";
 let feedScrollTimer = 0;
 let nativeSwipeFullscreenActive = false;
+const videoPosterCache = new Map();
 
 init();
 
@@ -62,6 +63,7 @@ function render() {
   renderTimeline();
   renderSwipeFeed();
   setCapsuleView(items.length ? currentCapsuleView : "timeline");
+  hydrateVideoPosters();
 }
 
 function renderTimeline() {
@@ -73,7 +75,7 @@ function renderTimeline() {
             ? `<img src="${escapeAttribute(item.mediaUrl)}&disposition=inline" alt="${escapeAttribute(item.title)}" loading="lazy" />`
             : item.mediaType === "audio"
               ? `<audio src="${escapeAttribute(item.mediaUrl)}&disposition=inline" preload="metadata" controls></audio>`
-              : `<video poster="${escapeAttribute(videoPosterUrl(item))}" src="${escapeAttribute(item.mediaUrl)}&disposition=inline" preload="metadata" muted playsinline></video>`}
+              : `<video ${videoPosterAttributes(item)} src="${escapeAttribute(inlineMediaUrl(item.mediaUrl))}" preload="metadata" muted playsinline></video>`}
         </span>
         <span class="media-body">
           <span class="status-pill">${escapeHtml(item.chapter || "Guest moments")}</span>
@@ -115,7 +117,8 @@ function renderSwipeFeed() {
 }
 
 function renderFeedMedia(item, index) {
-  const mediaUrl = `${escapeAttribute(item.mediaUrl)}&disposition=inline`;
+  const rawMediaUrl = inlineMediaUrl(item.mediaUrl);
+  const mediaUrl = escapeAttribute(rawMediaUrl);
   const title = escapeAttribute(item.title || "Time Capsule moment");
 
   if (item.mediaType === "photo") {
@@ -146,7 +149,7 @@ function renderFeedMedia(item, index) {
   }
 
   return `
-    <video data-feed-media="${index}" poster="${escapeAttribute(videoPosterUrl(item))}" src="${mediaUrl}" preload="metadata" playsinline></video>
+    <video data-feed-media="${index}" ${videoPosterAttributes(item)} src="${mediaUrl}" preload="metadata" playsinline></video>
     <button class="capsule-feed-play" type="button" data-feed-play="${index}" aria-label="Play ${title}">
       <span>Tap to play</span>
     </button>
@@ -313,12 +316,15 @@ function renderSlide() {
     stage.append(audio);
   } else {
     const video = document.createElement("video");
-    video.src = `${item.mediaUrl}&disposition=inline`;
+    video.src = inlineMediaUrl(item.mediaUrl);
     video.poster = videoPosterUrl(item);
+    video.crossOrigin = "anonymous";
+    video.dataset.videoPosterUrl = inlineMediaUrl(item.mediaUrl);
     video.controls = true;
     video.playsInline = true;
     video.preload = "metadata";
     stage.append(video);
+    hydrateVideoPosters(stage);
   }
 }
 
@@ -383,6 +389,236 @@ function formatDuration(seconds) {
   const minutes = Math.floor(value / 60);
   const remainder = value % 60;
   return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function hydrateVideoPosters(root = document) {
+  qsaVideoPosterTargets(root).forEach((video) => {
+    const sourceUrl = video.dataset.videoPosterUrl;
+    if (!sourceUrl || video.dataset.videoPosterState === "loading") return;
+
+    video.dataset.videoPosterState = "loading";
+    getGeneratedVideoPoster(sourceUrl).then((poster) => {
+      if (poster && video.isConnected !== false) {
+        video.poster = poster;
+        video.dataset.videoPosterState = "ready";
+      } else {
+        video.dataset.videoPosterState = "fallback";
+      }
+    });
+  });
+}
+
+function qsaVideoPosterTargets(root = document) {
+  return Array.from(root.querySelectorAll("video[data-video-poster-url]"));
+}
+
+function getGeneratedVideoPoster(sourceUrl) {
+  if (!videoPosterCache.has(sourceUrl)) {
+    videoPosterCache.set(sourceUrl, captureVideoPoster(sourceUrl).catch(() => ""));
+  }
+  return videoPosterCache.get(sourceUrl);
+}
+
+async function captureVideoPoster(sourceUrl) {
+  const video = document.createElement("video");
+  video.crossOrigin = "anonymous";
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.src = sourceUrl;
+
+  try {
+    await waitForMediaEvent(video, "loadedmetadata", 5000);
+    await waitForMediaEvent(video, "loadeddata", 5000).catch(() => undefined);
+
+    let bestFrame = null;
+    for (const time of posterSampleTimes(video.duration)) {
+      await seekVideo(video, time);
+      const frame = captureVideoFrame(video);
+      if (!frame) continue;
+
+      if (!bestFrame || frame.score > bestFrame.score) {
+        bestFrame = frame;
+      }
+      if (frame.score >= 34) break;
+    }
+
+    return bestFrame && bestFrame.score >= 14 ? bestFrame.dataUrl : "";
+  } finally {
+    video.removeAttribute("src");
+    video.load();
+  }
+}
+
+function posterSampleTimes(duration) {
+  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 3;
+  const latestSample = Math.max(0.08, Math.min(safeDuration - 0.08, 8));
+  const relativeSamples = [0.08, 0.18, 0.32, 0.48].map((ratio) => safeDuration * ratio);
+  return [0.12, 0.35, 0.75, 1.25, 2, 3.5, 5, latestSample, ...relativeSamples]
+    .map((time) => Math.min(Math.max(0.08, time), latestSample))
+    .sort((left, right) => left - right)
+    .filter((time, index, times) => index === 0 || Math.abs(time - times[index - 1]) > 0.04);
+}
+
+async function seekVideo(video, time) {
+  const targetTime = Math.max(0, Number(time) || 0);
+  if (video.readyState >= 2 && Math.abs(video.currentTime - targetTime) < 0.04) {
+    await waitForVideoFrame(video);
+    return;
+  }
+
+  const seeked = waitForMediaEvent(video, "seeked", 1800);
+  video.currentTime = targetTime;
+  await seeked.catch(() => undefined);
+  if (video.readyState < 2) {
+    await waitForMediaEvent(video, "loadeddata", 1200).catch(() => undefined);
+  }
+  if (targetTime > 0.08 && Math.abs(video.currentTime - targetTime) > 0.12) {
+    await playVideoUntil(video, targetTime);
+  }
+  await waitForVideoFrame(video);
+}
+
+function captureVideoFrame(video) {
+  const sourceWidth = video.videoWidth;
+  const sourceHeight = video.videoHeight;
+  if (!sourceWidth || !sourceHeight) return null;
+
+  const canvas = document.createElement("canvas");
+  const width = Math.min(720, sourceWidth);
+  const height = Math.max(1, Math.round(sourceHeight * (width / sourceWidth)));
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return null;
+
+  context.drawImage(video, 0, 0, width, height);
+  const imageData = context.getImageData(0, 0, width, height);
+  const score = scoreVideoFrame(imageData.data);
+  return {
+    dataUrl: canvas.toDataURL("image/jpeg", 0.82),
+    score
+  };
+}
+
+function scoreVideoFrame(data) {
+  let luminanceTotal = 0;
+  let brightPixels = 0;
+  let saturatedPixels = 0;
+  const pixelCount = Math.max(1, data.length / 4);
+
+  for (let index = 0; index < data.length; index += 4) {
+    const red = data[index];
+    const green = data[index + 1];
+    const blue = data[index + 2];
+    const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    luminanceTotal += luminance;
+    if (luminance > 42) brightPixels += 1;
+    if (Math.max(red, green, blue) - Math.min(red, green, blue) > 28) saturatedPixels += 1;
+  }
+
+  const averageLuminance = luminanceTotal / pixelCount;
+  const brightRatio = brightPixels / pixelCount;
+  const saturatedRatio = saturatedPixels / pixelCount;
+  return averageLuminance + brightRatio * 38 + saturatedRatio * 24;
+}
+
+function waitForMediaEvent(element, eventName, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error(`${eventName} timed out`));
+    }, timeoutMs);
+    const onEvent = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error(`${eventName} failed`));
+    };
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      element.removeEventListener(eventName, onEvent);
+      element.removeEventListener("error", onError);
+    };
+
+    element.addEventListener(eventName, onEvent, { once: true });
+    element.addEventListener("error", onError, { once: true });
+  });
+}
+
+function waitForVideoFrame(video, timeoutMs = 1200) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      resolve();
+    };
+    const timeout = window.setTimeout(finish, timeoutMs);
+
+    if (typeof video.requestVideoFrameCallback === "function") {
+      video.requestVideoFrameCallback(finish);
+      return;
+    }
+
+    window.requestAnimationFrame(() => window.requestAnimationFrame(finish));
+  });
+}
+
+async function playVideoUntil(video, targetTime, timeoutMs = 2800) {
+  if (typeof video.play !== "function") return;
+
+  try {
+    await video.play();
+    await waitForVideoTime(video, targetTime, timeoutMs);
+  } catch {
+    // Muted autoplay can still be blocked by some browsers; the generic poster stays as a safe fallback.
+  } finally {
+    if (typeof video.pause === "function") video.pause();
+  }
+}
+
+function waitForVideoTime(video, targetTime, timeoutMs) {
+  const target = Math.max(0, Number(targetTime) || 0);
+  return new Promise((resolve) => {
+    let frameRequest = 0;
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      window.cancelAnimationFrame(frameRequest);
+      video.removeEventListener("timeupdate", check);
+      video.removeEventListener("ended", finish);
+      resolve();
+    };
+    const check = () => {
+      if (video.currentTime + 0.05 >= target || video.ended) {
+        finish();
+        return;
+      }
+      frameRequest = window.requestAnimationFrame(check);
+    };
+    const timeout = window.setTimeout(finish, timeoutMs);
+
+    video.addEventListener("timeupdate", check);
+    video.addEventListener("ended", finish, { once: true });
+    check();
+  });
+}
+
+function videoPosterAttributes(item) {
+  const sourceUrl = inlineMediaUrl(item.mediaUrl);
+  return `poster="${escapeAttribute(videoPosterUrl(item))}" data-video-poster-url="${escapeAttribute(sourceUrl)}" crossorigin="anonymous"`;
+}
+
+function inlineMediaUrl(url) {
+  const value = String(url || "");
+  return `${value}${value.includes("?") ? "&" : "?"}disposition=inline`;
 }
 
 function videoPosterUrl(item) {

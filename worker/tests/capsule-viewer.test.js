@@ -198,6 +198,24 @@ test('capsule swipe feed tries native fullscreen and provides an exit control', 
   assert.match(styles, /\.capsule-viewer\.is-swipe-feed-active \.capsule-feed-exit/);
 });
 
+test('capsule videos replace generic poster art with captured video frames', async () => {
+  const capsuleJs = await readText('../../moments/capsule/capsule.js');
+
+  assert.match(capsuleJs, /data-video-poster-url/);
+  assert.match(capsuleJs, /crossorigin="anonymous"/);
+  assert.match(capsuleJs, /function hydrateVideoPosters/);
+  assert.match(capsuleJs, /function captureVideoPoster/);
+  assert.match(capsuleJs, /function captureVideoFrame/);
+  assert.match(capsuleJs, /getImageData/);
+  assert.match(capsuleJs, /toDataURL\("image\/jpeg"/);
+  assert.match(capsuleJs, /posterSampleTimes/);
+  assert.match(capsuleJs, /function waitForVideoFrame/);
+  assert.match(capsuleJs, /requestVideoFrameCallback/);
+  assert.match(capsuleJs, /function playVideoUntil/);
+  assert.match(capsuleJs, /function waitForVideoTime/);
+  assert.match(capsuleJs, /videoPosterCache/);
+});
+
 async function readText(path) {
   return readFile(new URL(path, import.meta.url), 'utf8');
 }
