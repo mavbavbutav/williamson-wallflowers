@@ -1,4 +1,5 @@
 import { formatDate, formatDateTime, getParam, qs, requestJson, setNotice } from "../shared.js?v=20260531-2";
+import { dataUrlToBlob } from "../video-thumbnails.js?v=20260601-video-thumbs-1";
 
 const eventId = getParam("event");
 const token = readShareToken();
@@ -10,6 +11,7 @@ let currentCapsuleView = "timeline";
 let feedScrollTimer = 0;
 let nativeSwipeFullscreenActive = false;
 const videoPosterCache = new Map();
+const videoPosterPersistCache = new Set();
 
 init();
 
@@ -317,9 +319,12 @@ function renderSlide() {
   } else {
     const video = document.createElement("video");
     video.src = inlineMediaUrl(item.mediaUrl);
-    video.poster = videoPosterUrl(item);
-    video.crossOrigin = "anonymous";
-    video.dataset.videoPosterUrl = inlineMediaUrl(item.mediaUrl);
+    video.poster = item.thumbnailUrl || videoPosterUrl(item);
+    if (!item.thumbnailUrl) {
+      video.crossOrigin = "anonymous";
+      video.dataset.videoPosterUrl = inlineMediaUrl(item.mediaUrl);
+      if (item.thumbnailUploadUrl) video.dataset.thumbnailUploadUrl = item.thumbnailUploadUrl;
+    }
     video.controls = true;
     video.playsInline = true;
     video.preload = "metadata";
@@ -401,6 +406,7 @@ function hydrateVideoPosters(root = document) {
       if (poster && video.isConnected !== false) {
         video.poster = poster;
         video.dataset.videoPosterState = "ready";
+        persistGeneratedVideoPoster(video, poster);
       } else {
         video.dataset.videoPosterState = "fallback";
       }
@@ -611,9 +617,35 @@ function waitForVideoTime(video, targetTime, timeoutMs) {
   });
 }
 
+function persistGeneratedVideoPoster(video, poster) {
+  const uploadUrl = video.dataset.thumbnailUploadUrl;
+  if (!uploadUrl || !poster || !poster.startsWith("data:image/") || videoPosterPersistCache.has(uploadUrl)) return;
+
+  videoPosterPersistCache.add(uploadUrl);
+
+  try {
+    const formData = new FormData();
+    formData.append("thumbnail", dataUrlToBlob(poster), "wallflower-video-thumbnail.jpg");
+    window.fetch(uploadUrl, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      body: formData
+    }).catch(() => undefined);
+  } catch {
+    videoPosterPersistCache.delete(uploadUrl);
+  }
+}
+
 function videoPosterAttributes(item) {
+  if (item.thumbnailUrl) {
+    return `poster="${escapeAttribute(item.thumbnailUrl)}"`;
+  }
+
   const sourceUrl = inlineMediaUrl(item.mediaUrl);
-  return `poster="${escapeAttribute(videoPosterUrl(item))}" data-video-poster-url="${escapeAttribute(sourceUrl)}" crossorigin="anonymous"`;
+  const uploadAttribute = item.thumbnailUploadUrl
+    ? ` data-thumbnail-upload-url="${escapeAttribute(item.thumbnailUploadUrl)}"`
+    : "";
+  return `poster="${escapeAttribute(videoPosterUrl(item))}" data-video-poster-url="${escapeAttribute(sourceUrl)}"${uploadAttribute} crossorigin="anonymous"`;
 }
 
 function inlineMediaUrl(url) {

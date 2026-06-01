@@ -213,6 +213,9 @@ test('capsule videos replace generic poster art with captured video frames', asy
   assert.match(capsuleJs, /requestVideoFrameCallback/);
   assert.match(capsuleJs, /function playVideoUntil/);
   assert.match(capsuleJs, /function waitForVideoTime/);
+  assert.match(capsuleJs, /thumbnailUrl/);
+  assert.match(capsuleJs, /data-thumbnail-upload-url/);
+  assert.match(capsuleJs, /function persistGeneratedVideoPoster/);
   assert.match(capsuleJs, /videoPosterCache/);
 });
 

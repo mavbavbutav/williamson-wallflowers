@@ -13,10 +13,12 @@ const REQUIRED_FIELDS = ['name', 'email'];
 const PHOTO_MAX_BYTES = 8 * 1024 * 1024;
 const VIDEO_MAX_BYTES = 50 * 1024 * 1024;
 const AUDIO_MAX_BYTES = 20 * 1024 * 1024;
+const THUMBNAIL_MAX_BYTES = 768 * 1024;
 const VIDEO_MAX_SECONDS = 30;
 const AUDIO_MAX_SECONDS = 60;
 const UPLOAD_TOKEN_TTL_SECONDS = 12 * 60 * 60;
 const MEDIA_TOKEN_TTL_SECONDS = 6 * 60 * 60;
+const THUMBNAIL_TOKEN_TTL_SECONDS = 6 * 60 * 60;
 const UPLOAD_RATE_LIMIT = 12;
 const UPLOAD_RATE_WINDOW_SECONDS = 60 * 60;
 const TAG_RATE_LIMIT = 120;
@@ -27,6 +29,7 @@ const RETENTION_CLEANUP_LIMIT = 100;
 const STANDARD_RETENTION_DAYS = 90;
 const TIME_CAPSULE_RETENTION_DAYS = 365;
 const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
+const THUMBNAIL_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const VIDEO_TYPES = new Set([
   'video/mp4',
   'video/quicktime',
@@ -188,6 +191,16 @@ async function handleMomentsApi(request, env, url, corsHeaders) {
       }
     }
 
+    if (parts[0] === 'media' && parts[1] && parts[2] === 'thumbnail') {
+      if (request.method === 'POST') {
+        return saveGeneratedThumbnail(request, env, url, corsHeaders, parts[1]);
+      }
+
+      if (request.method === 'GET' || request.method === 'HEAD') {
+        return streamThumbnail(request, env, url, corsHeaders, parts[1]);
+      }
+    }
+
     if ((request.method === 'GET' || request.method === 'HEAD') && parts[0] === 'media' && parts[1]) {
       return streamMedia(request, env, url, corsHeaders, parts[1]);
     }
@@ -312,6 +325,11 @@ async function createSubmission(request, env, corsHeaders, eventId) {
     return json({ ok: false, message: validationError }, 400, corsHeaders);
   }
 
+  const thumbnail = validateVideoThumbnail(formData.get('thumbnail'), mediaType);
+  if (thumbnail.error) {
+    return json({ ok: false, message: thumbnail.error }, 400, corsHeaders);
+  }
+
   const quotaError = await validateEventQuota(env, eventId, media.size);
   if (quotaError) {
     return json({ ok: false, message: quotaError }, 429, corsHeaders);
@@ -335,12 +353,17 @@ async function createSubmission(request, env, corsHeaders, eventId) {
     }
   });
 
+  const thumbnailRecord = thumbnail.file
+    ? await storeVideoThumbnail(env, eventId, id, thumbnail.file, now)
+    : emptyThumbnailRecord();
+
   await env.MOMENTS_DB.prepare(`
     INSERT INTO submissions (
       id, event_id, media_type, object_key, original_filename, mime_type, size,
+      thumbnail_object_key, thumbnail_mime_type, thumbnail_size, thumbnail_created_at,
       duration_seconds, guest_name, guest_note, consent_at, status, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
   `).bind(
     id,
     eventId,
@@ -349,6 +372,10 @@ async function createSubmission(request, env, corsHeaders, eventId) {
     originalFilename,
     storedMimeType,
     media.size,
+    thumbnailRecord.objectKey,
+    thumbnailRecord.mimeType,
+    thumbnailRecord.size,
+    thumbnailRecord.createdAt,
     Number.isFinite(durationSeconds) ? durationSeconds : 0,
     cleanText(formData.get('guestName'), 90),
     cleanText(formData.get('guestNote'), 220),
@@ -446,6 +473,11 @@ async function createHostPost(request, env, url, corsHeaders, eventId) {
     return json({ ok: false, message: validationError }, 400, corsHeaders);
   }
 
+  const thumbnail = validateVideoThumbnail(formData.get('thumbnail'), mediaType);
+  if (thumbnail.error) {
+    return json({ ok: false, message: thumbnail.error }, 400, corsHeaders);
+  }
+
   const quotaError = await validateEventQuota(env, eventId, media.size);
   if (quotaError) {
     return json({ ok: false, message: quotaError }, 429, corsHeaders);
@@ -473,12 +505,17 @@ async function createHostPost(request, env, url, corsHeaders, eventId) {
     }
   });
 
+  const thumbnailRecord = thumbnail.file
+    ? await storeVideoThumbnail(env, eventId, submissionId, thumbnail.file, now)
+    : emptyThumbnailRecord();
+
   await env.MOMENTS_DB.prepare(`
     INSERT INTO submissions (
       id, event_id, media_type, source, object_key, original_filename, mime_type, size,
+      thumbnail_object_key, thumbnail_mime_type, thumbnail_size, thumbnail_created_at,
       duration_seconds, guest_name, guest_note, consent_at, status, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     submissionId,
     eventId,
@@ -488,6 +525,10 @@ async function createHostPost(request, env, url, corsHeaders, eventId) {
     originalFilename,
     storedMimeType,
     media.size,
+    thumbnailRecord.objectKey,
+    thumbnailRecord.mimeType,
+    thumbnailRecord.size,
+    thumbnailRecord.createdAt,
     Number.isFinite(durationSeconds) ? durationSeconds : 0,
     'Host',
     cleanText(caption, 220),
@@ -779,6 +820,7 @@ async function deleteHostSubmission(request, env, url, corsHeaders, submissionId
 
   try {
     await env.MOMENTS_BUCKET.delete(submission.objectKey);
+    if (submission.thumbnailObjectKey) await env.MOMENTS_BUCKET.delete(submission.thumbnailObjectKey);
   } catch (error) {
     console.error('R2 delete failed for host-deleted submission', submissionId, error);
   }
@@ -835,6 +877,87 @@ async function streamMedia(request, env, url, corsHeaders, submissionId) {
 
   headers.set('Content-Length', String(totalSize || object.size || 0));
   return new Response(isHeadRequest ? null : object.body, { status: 200, headers });
+}
+
+async function streamThumbnail(request, env, url, corsHeaders, submissionId) {
+  const token = getAccessToken(request, url);
+  const thumbnailToken = url.searchParams.get('thumbnailToken') || '';
+  const submission = await getSubmissionWithEvent(env, submissionId);
+
+  if (!submission || submission.deletedAt || submission.status === 'deleted' || !submission.thumbnailObjectKey) {
+    return json({ ok: false, message: 'Thumbnail not found.' }, 404, corsHeaders);
+  }
+
+  const isAuthorized = thumbnailToken
+    ? await verifySignedToken(env, thumbnailToken, 'thumbnail', submissionId)
+    : isAuthorizedForSubmission(submission, token, env);
+
+  if (!isAuthorized) {
+    return json({ ok: false, message: 'This thumbnail link is not valid.' }, 403, corsHeaders);
+  }
+
+  const isHeadRequest = request.method === 'HEAD';
+  const object = isHeadRequest
+    ? await env.MOMENTS_BUCKET.head(submission.thumbnailObjectKey)
+    : await env.MOMENTS_BUCKET.get(submission.thumbnailObjectKey);
+
+  if (!object) {
+    return json({ ok: false, message: 'Thumbnail file is missing from storage.' }, 404, corsHeaders);
+  }
+
+  const headers = new Headers(corsHeaders);
+  if (typeof object.writeHttpMetadata === 'function') {
+    object.writeHttpMetadata(headers);
+  }
+  headers.set('Content-Type', submission.thumbnailMimeType || 'image/jpeg');
+  headers.set('Cache-Control', 'private, max-age=3600');
+  headers.set('ETag', object.httpEtag || object.etag);
+  headers.set('Content-Disposition', `inline; filename="thumbnail-${submission.id}.jpg"`);
+  headers.set('Content-Length', String(submission.thumbnailSize || object.size || 0));
+
+  return new Response(isHeadRequest ? null : object.body, { status: 200, headers });
+}
+
+async function saveGeneratedThumbnail(request, env, url, corsHeaders, submissionId) {
+  const thumbnailToken = url.searchParams.get('thumbnailToken') || '';
+  const submission = await getSubmissionWithEvent(env, submissionId);
+
+  if (!submission || submission.deletedAt || submission.status === 'deleted') {
+    return json({ ok: false, message: 'Submission not found.' }, 404, corsHeaders);
+  }
+
+  if (submission.mediaType !== 'video') {
+    return json({ ok: false, message: 'Only videos can store thumbnails.' }, 400, corsHeaders);
+  }
+
+  if (!await verifySignedToken(env, thumbnailToken, 'thumbnail', submissionId)) {
+    return json({ ok: false, message: 'This thumbnail upload link is not valid.' }, 403, corsHeaders);
+  }
+
+  const contentType = request.headers.get('Content-Type') || '';
+  if (!contentType.includes('multipart/form-data')) {
+    return json({ ok: false, message: 'Thumbnail upload must use multipart form data.' }, 415, corsHeaders);
+  }
+
+  const formData = await request.formData();
+  const thumbnail = validateVideoThumbnail(formData.get('thumbnail'), 'video');
+  if (!thumbnail.file || thumbnail.error) {
+    return json({ ok: false, message: thumbnail.error || 'Please upload a video thumbnail image.' }, 400, corsHeaders);
+  }
+
+  const now = new Date().toISOString();
+  const record = await storeVideoThumbnail(env, submission.eventId, submission.id, thumbnail.file, now, submission.thumbnailObjectKey);
+
+  await env.MOMENTS_DB.prepare(`
+    UPDATE submissions
+    SET thumbnail_object_key = ?, thumbnail_mime_type = ?, thumbnail_size = ?, thumbnail_created_at = ?, updated_at = ?
+    WHERE id = ?
+  `).bind(record.objectKey, record.mimeType, record.size, record.createdAt, now, submission.id).run();
+
+  return json({
+    ok: true,
+    thumbnailUrl: await buildThumbnailAccessUrl(request, env, submission.id)
+  }, 200, corsHeaders);
 }
 
 async function handleAdminApi(request, env, url, corsHeaders, parts) {
@@ -952,7 +1075,7 @@ async function runRetentionCleanup(request, env, corsHeaders) {
 async function cleanExpiredMedia(env, limit = RETENTION_CLEANUP_LIMIT) {
   const now = new Date().toISOString();
   const result = await env.MOMENTS_DB.prepare(`
-    SELECT s.id, s.object_key AS objectKey
+    SELECT s.id, s.object_key AS objectKey, s.thumbnail_object_key AS thumbnailObjectKey
     FROM submissions s
     INNER JOIN events e ON e.id = s.event_id
     WHERE e.retention_expires_at <= ? AND s.deleted_at IS NULL
@@ -967,6 +1090,7 @@ async function cleanExpiredMedia(env, limit = RETENTION_CLEANUP_LIMIT) {
   for (const candidate of candidates) {
     try {
       await env.MOMENTS_BUCKET.delete(candidate.objectKey);
+      if (candidate.thumbnailObjectKey) await env.MOMENTS_BUCKET.delete(candidate.thumbnailObjectKey);
       await env.MOMENTS_DB.prepare(`
         UPDATE submissions
         SET status = 'deleted', deleted_at = ?, updated_at = ?
@@ -1124,7 +1248,7 @@ async function deleteAdminEvent(request, env, corsHeaders, eventId) {
   if (!current) return json({ ok: false, message: 'Event not found.' }, 404, corsHeaders);
 
   const mediaResult = await env.MOMENTS_DB.prepare(`
-    SELECT id, object_key AS objectKey
+    SELECT id, object_key AS objectKey, thumbnail_object_key AS thumbnailObjectKey
     FROM submissions
     WHERE event_id = ?
   `).bind(eventId).all();
@@ -1143,10 +1267,16 @@ async function deleteAdminEvent(request, env, corsHeaders, eventId) {
   let deletedMedia = 0;
   const mediaErrors = [];
   for (const row of mediaRows) {
-    if (!row.objectKey) continue;
+    if (!row.objectKey && !row.thumbnailObjectKey) continue;
     try {
-      await env.MOMENTS_BUCKET.delete(row.objectKey);
-      deletedMedia += 1;
+      if (row.objectKey) {
+        await env.MOMENTS_BUCKET.delete(row.objectKey);
+        deletedMedia += 1;
+      }
+      if (row.thumbnailObjectKey) {
+        await env.MOMENTS_BUCKET.delete(row.thumbnailObjectKey);
+        deletedMedia += 1;
+      }
     } catch (error) {
       console.error('R2 delete failed for admin-deleted event media', eventId, row.id, error);
       mediaErrors.push({ id: row.id, message: String(error.message || error) });
@@ -1557,6 +1687,10 @@ async function getTimeCapsuleItems(env, eventId, request, options = {}) {
       s.source AS source,
       s.mime_type AS mimeType,
       s.size,
+      s.thumbnail_object_key AS thumbnailObjectKey,
+      s.thumbnail_mime_type AS thumbnailMimeType,
+      s.thumbnail_size AS thumbnailSize,
+      s.thumbnail_created_at AS thumbnailCreatedAt,
       s.duration_seconds AS durationSeconds,
       s.guest_name AS guestName,
       s.guest_note AS guestNote,
@@ -1610,6 +1744,10 @@ async function getTimeCapsuleItemById(env, itemId) {
       s.source AS source,
       s.mime_type AS mimeType,
       s.size,
+      s.thumbnail_object_key AS thumbnailObjectKey,
+      s.thumbnail_mime_type AS thumbnailMimeType,
+      s.thumbnail_size AS thumbnailSize,
+      s.thumbnail_created_at AS thumbnailCreatedAt,
       s.duration_seconds AS durationSeconds,
       s.guest_name AS guestName,
       s.guest_note AS guestNote,
@@ -1654,6 +1792,10 @@ async function getSubmissionWithEvent(env, submissionId) {
       s.original_filename AS originalFilename,
       s.mime_type AS mimeType,
       s.size,
+      s.thumbnail_object_key AS thumbnailObjectKey,
+      s.thumbnail_mime_type AS thumbnailMimeType,
+      s.thumbnail_size AS thumbnailSize,
+      s.thumbnail_created_at AS thumbnailCreatedAt,
       s.duration_seconds AS durationSeconds,
       s.guest_name AS guestName,
       s.guest_note AS guestNote,
@@ -1734,6 +1876,65 @@ function validateMedia(media, mediaType, durationSeconds) {
   }
 
   return 'Please upload a photo, video, or voice memo.';
+}
+
+function validateVideoThumbnail(thumbnail, mediaType) {
+  if (mediaType !== 'video' || !thumbnail) return { file: null, error: '' };
+  if (typeof thumbnail === 'string' || typeof thumbnail.stream !== 'function') return { file: null, error: '' };
+
+  if (!isAllowedVideoThumbnail(thumbnail)) {
+    return { file: null, error: 'Video thumbnails must be JPEG, PNG, or WEBP images.' };
+  }
+
+  if (thumbnail.size > THUMBNAIL_MAX_BYTES) {
+    return { file: null, error: 'Video thumbnails must be 768 KB or smaller.' };
+  }
+
+  return { file: thumbnail, error: '' };
+}
+
+function isAllowedVideoThumbnail(thumbnail) {
+  const baseMimeType = getBaseMimeType(thumbnail.type);
+  const extension = getFileExtension(thumbnail.name);
+
+  if (THUMBNAIL_TYPES.has(baseMimeType)) return true;
+  if ((!baseMimeType || baseMimeType === 'application/octet-stream') && ['jpg', 'jpeg', 'png', 'webp'].includes(extension)) return true;
+
+  return false;
+}
+
+async function storeVideoThumbnail(env, eventId, submissionId, thumbnail, now = new Date().toISOString(), existingObjectKey = '') {
+  const originalFilename = sanitizeFilename(thumbnail.name || `thumbnail-${submissionId}.jpg`);
+  const mimeType = getStoredThumbnailMimeType(thumbnail.type, originalFilename);
+  const objectKey = existingObjectKey || `moments/${eventId}/thumbnails/${submissionId}.${extensionFor(mimeType, originalFilename)}`;
+
+  await env.MOMENTS_BUCKET.put(objectKey, thumbnail.stream(), {
+    httpMetadata: {
+      contentType: mimeType,
+      contentDisposition: `inline; filename="${originalFilename}"`
+    },
+    customMetadata: {
+      eventId,
+      submissionId,
+      mediaType: 'thumbnail'
+    }
+  });
+
+  return {
+    objectKey,
+    mimeType,
+    size: thumbnail.size || 0,
+    createdAt: now
+  };
+}
+
+function emptyThumbnailRecord() {
+  return {
+    objectKey: null,
+    mimeType: null,
+    size: 0,
+    createdAt: null
+  };
 }
 
 function isAllowedMobileVideo(media) {
@@ -1873,6 +2074,16 @@ function getStoredMimeType(mimeType, filename, mediaType) {
   return 'application/octet-stream';
 }
 
+function getStoredThumbnailMimeType(mimeType, filename) {
+  const baseMimeType = getBaseMimeType(mimeType);
+  if (THUMBNAIL_TYPES.has(baseMimeType)) return baseMimeType;
+
+  const extension = getFileExtension(filename);
+  if (extension === 'png') return 'image/png';
+  if (extension === 'webp') return 'image/webp';
+  return 'image/jpeg';
+}
+
 async function createSignedToken(env, scope, subject, ttlSeconds) {
   const expiresAt = Math.floor(Date.now() / 1000) + ttlSeconds;
   const payload = `${scope}.${subject}.${expiresAt}`;
@@ -1999,6 +2210,7 @@ function toAdminEventClient(row, env) {
 async function toTimeCapsuleItemClient(row, request, env) {
   const mediaToken = await createSignedToken(env, 'media', row.submissionId, MEDIA_TOKEN_TTL_SECONDS);
   const mediaUrl = `${getApiOrigin(request, env)}/moments-api/media/${encodeURIComponent(row.submissionId)}?mediaToken=${encodeURIComponent(mediaToken)}`;
+  const thumbnail = await buildThumbnailClient(row, request, env, row.submissionId, row.mediaType, row.thumbnailObjectKey);
 
   return {
     id: row.id,
@@ -2020,6 +2232,8 @@ async function toTimeCapsuleItemClient(row, request, env) {
     guestNote: row.guestNote || '',
     mediaUrl,
     downloadUrl: mediaUrl,
+    thumbnailUrl: thumbnail.url,
+    thumbnailUploadUrl: thumbnail.uploadUrl,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -2040,6 +2254,7 @@ function toAdminTagClient(row) {
 async function toSubmissionClient(row, request, env) {
   const mediaToken = await createSignedToken(env, 'media', row.id, MEDIA_TOKEN_TTL_SECONDS);
   const mediaUrl = `${getApiOrigin(request, env)}/moments-api/media/${encodeURIComponent(row.id)}?mediaToken=${encodeURIComponent(mediaToken)}`;
+  const thumbnail = await buildThumbnailClient(row, request, env, row.id, row.media_type || row.mediaType, row.thumbnail_object_key || row.thumbnailObjectKey);
 
   return {
     id: row.id,
@@ -2055,8 +2270,25 @@ async function toSubmissionClient(row, request, env) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     mediaUrl,
-    downloadUrl: mediaUrl
+    downloadUrl: mediaUrl,
+    thumbnailUrl: thumbnail.url,
+    thumbnailUploadUrl: thumbnail.uploadUrl
   };
+}
+
+async function buildThumbnailClient(row, request, env, submissionId, mediaType, thumbnailObjectKey) {
+  if (mediaType !== 'video') return { url: '', uploadUrl: '' };
+
+  const accessUrl = await buildThumbnailAccessUrl(request, env, submissionId);
+  return {
+    url: thumbnailObjectKey ? accessUrl : '',
+    uploadUrl: thumbnailObjectKey ? '' : accessUrl
+  };
+}
+
+async function buildThumbnailAccessUrl(request, env, submissionId) {
+  const thumbnailToken = await createSignedToken(env, 'thumbnail', submissionId, THUMBNAIL_TOKEN_TTL_SECONDS);
+  return `${getApiOrigin(request, env)}/moments-api/media/${encodeURIComponent(submissionId)}/thumbnail?thumbnailToken=${encodeURIComponent(thumbnailToken)}`;
 }
 
 function getApiOrigin(request, env) {

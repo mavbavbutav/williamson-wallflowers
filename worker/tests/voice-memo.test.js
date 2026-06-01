@@ -49,6 +49,104 @@ test('guest upload accepts an audio-only voice memo', async () => {
   assert.equal(bucket.puts[0].metadata.customMetadata.mediaType, 'audio');
 });
 
+test('guest video upload stores a reusable thumbnail and returns a thumbnail URL', async () => {
+  const db = new UploadFakeDb();
+  const bucket = new FakeBucket();
+  const env = envWithDb(db, bucket);
+
+  const tokenResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/tags/voice-tag', {
+    headers: { Origin: 'https://williamsonwallflowers.com' }
+  }), env);
+  const { uploadToken } = await tokenResponse.json();
+
+  const formData = new FormData();
+  formData.set('media', new File(['video-bytes'], 'dance.mp4', { type: 'video/mp4' }));
+  formData.set('thumbnail', new File(['jpeg-bytes'], 'dance-thumb.jpg', { type: 'image/jpeg' }));
+  formData.set('mediaType', 'video');
+  formData.set('durationSeconds', '12');
+  formData.set('guestName', 'Jordan');
+  formData.set('guestNote', 'Dance floor');
+  formData.set('consent', 'true');
+  formData.set('uploadToken', uploadToken);
+
+  const uploadResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/events/event-voice/submissions', {
+    method: 'POST',
+    headers: { Origin: 'https://williamsonwallflowers.com' },
+    body: formData
+  }), env);
+
+  assert.equal(uploadResponse.status, 201);
+  assert.equal(bucket.puts.length, 2);
+  assert.match(bucket.puts[1].key, /\/thumbnails\//);
+  assert.equal(bucket.puts[1].metadata.httpMetadata.contentType, 'image/jpeg');
+  assert.equal(bucket.puts[1].metadata.customMetadata.mediaType, 'thumbnail');
+  assert.match(db.submissions[0].thumbnail_object_key, /\/thumbnails\//);
+  assert.equal(db.submissions[0].thumbnail_mime_type, 'image/jpeg');
+
+  const hostResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-voice/submissions', {
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      Authorization: 'Bearer host-token'
+    }
+  }), env);
+  const payload = await hostResponse.json();
+
+  assert.equal(hostResponse.status, 200);
+  assert.match(payload.submissions[0].thumbnailUrl, /\/moments-api\/media\/.+\/thumbnail\?thumbnailToken=/);
+  assert.equal(payload.submissions[0].thumbnailUrl.includes('host-token'), false);
+});
+
+test('viewer-generated video thumbnails can be saved once for older videos', async () => {
+  const db = new UploadFakeDb();
+  const bucket = new FakeBucket();
+  const env = envWithDb(db, bucket);
+
+  const tokenResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/tags/voice-tag', {
+    headers: { Origin: 'https://williamsonwallflowers.com' }
+  }), env);
+  const { uploadToken } = await tokenResponse.json();
+
+  const formData = new FormData();
+  formData.set('media', new File(['video-bytes'], 'toast.mp4', { type: 'video/mp4' }));
+  formData.set('mediaType', 'video');
+  formData.set('durationSeconds', '10');
+  formData.set('consent', 'true');
+  formData.set('uploadToken', uploadToken);
+
+  await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/events/event-voice/submissions', {
+    method: 'POST',
+    headers: { Origin: 'https://williamsonwallflowers.com' },
+    body: formData
+  }), env);
+
+  const hostResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-voice/submissions', {
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      Authorization: 'Bearer host-token'
+    }
+  }), env);
+  const payload = await hostResponse.json();
+  const uploadUrl = payload.submissions[0].thumbnailUploadUrl;
+
+  assert.equal(payload.submissions[0].thumbnailUrl, '');
+  assert.match(uploadUrl, /\/moments-api\/media\/.+\/thumbnail\?thumbnailToken=/);
+
+  const thumbnailForm = new FormData();
+  thumbnailForm.set('thumbnail', new File(['jpeg-bytes'], 'generated.jpg', { type: 'image/jpeg' }));
+
+  const saveResponse = await worker.fetch(new Request(uploadUrl, {
+    method: 'POST',
+    headers: { Origin: 'https://williamsonwallflowers.com' },
+    body: thumbnailForm
+  }), env);
+  const saved = await saveResponse.json();
+
+  assert.equal(saveResponse.status, 200);
+  assert.match(saved.thumbnailUrl, /\/moments-api\/media\/.+\/thumbnail\?thumbnailToken=/);
+  assert.match(db.submissions[0].thumbnail_object_key, /\/thumbnails\//);
+  assert.equal(bucket.puts.length, 2);
+});
+
 test('guest upload rejects voice memos longer than 60 seconds', async () => {
   const db = new UploadFakeDb();
   const env = envWithDb(db, new FakeBucket());
@@ -86,6 +184,15 @@ test('voice memo migration widens the submissions media_type constraint', async 
   assert.match(migration, /ALTER TABLE submissions_new RENAME TO submissions/);
 });
 
+test('video thumbnail migration adds reusable thumbnail metadata', async () => {
+  const migration = await readText('../../worker/migrations/0006_wallflower_video_thumbnails.sql');
+
+  assert.match(migration, /thumbnail_object_key TEXT/);
+  assert.match(migration, /thumbnail_mime_type TEXT/);
+  assert.match(migration, /thumbnail_size INTEGER/);
+  assert.match(migration, /thumbnail_created_at TEXT/);
+});
+
 test('guest, host, and capsule frontends expose audio-only moments', async () => {
   const [guestHtml, guestJs, hostJs, capsuleJs] = await Promise.all([
     readText('../../moments/index.html'),
@@ -101,6 +208,18 @@ test('guest, host, and capsule frontends expose audio-only moments', async () =>
   assert.match(hostJs, /createElement\("audio"\)/);
   assert.match(capsuleJs, /createElement\("audio"\)/);
   assert.match(capsuleJs, /<audio /);
+});
+
+test('guest and host uploads generate video thumbnails before posting', async () => {
+  const [guestJs, hostJs] = await Promise.all([
+    readText('../../moments/app.js'),
+    readText('../../moments/host/host.js')
+  ]);
+
+  assert.match(guestJs, /createVideoThumbnailFile/);
+  assert.match(guestJs, /formData\.append\("thumbnail"/);
+  assert.match(hostJs, /createVideoThumbnailFile/);
+  assert.match(hostJs, /formData\.append\("thumbnail"/);
 });
 
 async function readText(path) {
@@ -207,6 +326,37 @@ class UploadFakeStatement {
       return this.db.events.find((event) => event.id === this.params[0]) || null;
     }
 
+    if (this.sql.includes('FROM submissions s') && this.sql.includes('WHERE s.id = ?')) {
+      const submission = this.db.submissions.find((item) => item.id === this.params[0]);
+      const event = submission && this.db.events.find((item) => item.id === submission.event_id);
+      return submission && event
+        ? {
+          id: submission.id,
+          eventId: submission.event_id,
+          mediaType: submission.media_type,
+          source: submission.source || 'guest',
+          objectKey: submission.object_key,
+          originalFilename: submission.original_filename,
+          mimeType: submission.mime_type,
+          size: submission.size,
+          thumbnailObjectKey: submission.thumbnail_object_key,
+          thumbnailMimeType: submission.thumbnail_mime_type,
+          thumbnailSize: submission.thumbnail_size,
+          thumbnailCreatedAt: submission.thumbnail_created_at,
+          durationSeconds: submission.duration_seconds,
+          guestName: submission.guest_name,
+          guestNote: submission.guest_note,
+          consentAt: submission.consent_at,
+          status: submission.status,
+          deletedAt: submission.deleted_at,
+          createdAt: submission.created_at,
+          updatedAt: submission.updated_at,
+          hostToken: event.hostToken,
+          eventAdminToken: event.adminToken
+        }
+        : null;
+    }
+
     if (this.sql.includes('FROM rate_limits')) {
       return this.db.rateLimits.get(this.params[0]) || null;
     }
@@ -219,6 +369,12 @@ class UploadFakeStatement {
   }
 
   async all() {
+    if (this.sql.includes('FROM submissions') && this.sql.includes('WHERE event_id = ?')) {
+      return {
+        results: this.db.submissions.filter((item) => item.event_id === this.params[0] && item.status !== 'deleted')
+      };
+    }
+
     return { results: [] };
   }
 
@@ -237,6 +393,17 @@ class UploadFakeStatement {
       this.db.rateLimits.set(key, { ...current, count: current.count + 1, updatedAt: this.params[0] });
     }
 
+    if (this.sql.includes('UPDATE submissions') && this.sql.includes('thumbnail_object_key')) {
+      const submission = this.db.submissions.find((item) => item.id === this.params[5]);
+      if (submission) {
+        submission.thumbnail_object_key = this.params[0];
+        submission.thumbnail_mime_type = this.params[1];
+        submission.thumbnail_size = this.params[2];
+        submission.thumbnail_created_at = this.params[3];
+        submission.updated_at = this.params[4];
+      }
+    }
+
     if (this.sql.includes('INSERT INTO submissions')) {
       const [
         id,
@@ -246,6 +413,10 @@ class UploadFakeStatement {
         originalFilename,
         mimeType,
         size,
+        thumbnailObjectKey,
+        thumbnailMimeType,
+        thumbnailSize,
+        thumbnailCreatedAt,
         durationSeconds,
         guestName,
         guestNote,
@@ -261,6 +432,10 @@ class UploadFakeStatement {
         original_filename: originalFilename,
         mime_type: mimeType,
         size,
+        thumbnail_object_key: thumbnailObjectKey,
+        thumbnail_mime_type: thumbnailMimeType,
+        thumbnail_size: thumbnailSize,
+        thumbnail_created_at: thumbnailCreatedAt,
         duration_seconds: durationSeconds,
         guest_name: guestName,
         guest_note: guestNote,

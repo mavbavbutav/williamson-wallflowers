@@ -1,4 +1,5 @@
 import { copyText, formatBytes, formatDate, formatDateTime, getHostToken, getParam, qs, qsa, requestJson, setNotice } from "../shared.js?v=20260531-1";
+import { createVideoThumbnailFile } from "../video-thumbnails.js?v=20260601-video-thumbs-1";
 
 const MAX_VIDEO_SECONDS = 30;
 const MAX_AUDIO_SECONDS = 60;
@@ -16,6 +17,7 @@ let capsuleItems = [];
 let lastFocusedElement = null;
 const hostPostState = {
   mediaFile: null,
+  thumbnailFile: null,
   mediaType: "",
   durationSeconds: 0,
   previewUrl: ""
@@ -438,6 +440,7 @@ async function acceptHostPostFile(file) {
   }
 
   hostPostState.mediaFile = file;
+  hostPostState.thumbnailFile = null;
   hostPostState.mediaType = mediaType;
   hostPostState.durationSeconds = mediaType === "photo" ? 0 : Math.round(await readMediaDuration(file, mediaType));
 
@@ -453,6 +456,10 @@ async function acceptHostPostFile(file) {
     setNotice(qs("#hostPostNotice"), "Host voice memos must be 60 seconds or shorter.", "error");
     renderHostPostPreview();
     return;
+  }
+
+  if (mediaType === "video") {
+    hostPostState.thumbnailFile = await createVideoThumbnailFile(file, `wallflower-host-video-thumbnail-${Date.now()}.jpg`);
   }
 
   renderHostPostPreview();
@@ -505,6 +512,9 @@ async function createHostPost(event) {
   formData.append("durationSeconds", String(hostPostState.durationSeconds || 0));
   formData.append("title", qs("#hostPostTitle").value.trim() || "Host Post");
   formData.append("caption", qs("#hostPostCaption").value.trim());
+  if (hostPostState.mediaType === "video" && hostPostState.thumbnailFile) {
+    formData.append("thumbnail", hostPostState.thumbnailFile);
+  }
 
   qs("#createHostPostButton").disabled = true;
   setNotice(qs("#hostPostNotice"), "Posting to the guest view...");
@@ -528,6 +538,7 @@ async function createHostPost(event) {
 
 function clearHostPostComposer() {
   hostPostState.mediaFile = null;
+  hostPostState.thumbnailFile = null;
   hostPostState.mediaType = "";
   hostPostState.durationSeconds = 0;
   revokeHostPostPreviewUrl();
@@ -603,6 +614,7 @@ function renderThumb(item, mediaUrl) {
   } else {
     const video = document.createElement("video");
     video.src = mediaUrl;
+    if (item.thumbnailUrl) video.poster = item.thumbnailUrl;
     video.controls = true;
     video.playsInline = true;
     video.preload = "metadata";
@@ -765,6 +777,7 @@ function openMediaModal(submission, mediaUrl) {
   } else {
     const video = document.createElement("video");
     video.src = mediaUrl;
+    if (submission.thumbnailUrl) video.poster = submission.thumbnailUrl;
     video.controls = true;
     video.playsInline = true;
     video.preload = "metadata";

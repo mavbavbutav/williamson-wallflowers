@@ -1,4 +1,5 @@
 import { apiBase, formatDate, formatDateTime, getParam, qs, qsa, requestJson, setNotice } from "./shared.js?v=20260525-3";
+import { createVideoThumbnailFile } from "./video-thumbnails.js?v=20260601-video-thumbs-1";
 
 const MAX_VIDEO_SECONDS = 30;
 const MAX_AUDIO_SECONDS = 60;
@@ -19,6 +20,7 @@ const state = {
   facingMode: "environment",
   mediaBlob: null,
   mediaFile: null,
+  thumbnailFile: null,
   mediaType: "",
   previewUrl: "",
   durationSeconds: 0,
@@ -180,6 +182,7 @@ function renderHostPostCard(item) {
   } else {
     const video = document.createElement("video");
     video.src = mediaUrl;
+    if (item.thumbnailUrl) video.poster = item.thumbnailUrl;
     video.controls = true;
     video.playsInline = true;
     video.preload = "metadata";
@@ -212,6 +215,7 @@ async function chooseMode(mode) {
   state.mediaType = mode;
   state.mediaBlob = null;
   state.mediaFile = null;
+  state.thumbnailFile = null;
   state.durationSeconds = 0;
   state.facingMode = mode === "photo" ? "environment" : "user";
   cameraStage.classList.toggle("is-audio", mode === "audio");
@@ -351,13 +355,14 @@ function startRecording() {
     if (event.data && event.data.size) state.chunks.push(event.data);
   });
 
-  state.recorder.addEventListener("stop", () => {
+  state.recorder.addEventListener("stop", async () => {
     const type = state.recorder.mimeType || mimeType || (isAudio ? "audio/webm" : "video/webm");
     const blob = new Blob(state.chunks, { type });
     state.durationSeconds = Math.min(maxSeconds, Math.round((Date.now() - state.recordStartedAt) / 1000));
     state.mediaBlob = blob;
     state.mediaFile = new File([blob], `${isAudio ? "wallflower-voice-memo" : "wallflower-message"}-${Date.now()}.${getRecorderExtension(type, mediaType)}`, { type });
     state.mediaType = mediaType;
+    state.thumbnailFile = mediaType === "video" ? await createVideoThumbnailFile(state.mediaFile, `wallflower-video-thumbnail-${Date.now()}.jpg`) : null;
     stopTimer();
     stopStream();
     renderPreview();
@@ -454,6 +459,7 @@ async function acceptFile(file) {
       return;
     }
     state.durationSeconds = Math.round(duration);
+    state.thumbnailFile = await createVideoThumbnailFile(file, `wallflower-video-thumbnail-${Date.now()}.jpg`);
   }
 
   if (isAudio) {
@@ -468,6 +474,7 @@ async function acceptFile(file) {
   state.mediaFile = file;
   state.mediaBlob = file;
   state.mediaType = isPhoto ? "photo" : (isAudio ? "audio" : "video");
+  if (!isVideo) state.thumbnailFile = null;
   stopStream();
   renderPreview();
 }
@@ -560,6 +567,9 @@ async function submitMoment(event) {
   formData.append("consent", "true");
   formData.append("durationSeconds", String(state.durationSeconds || 0));
   formData.append("uploadToken", state.uploadToken);
+  if (state.mediaType === "video" && state.thumbnailFile) {
+    formData.append("thumbnail", state.thumbnailFile);
+  }
 
   qs("#submitButton").disabled = true;
   progressTrack.hidden = false;
@@ -630,6 +640,7 @@ function resetFlow() {
   if (voiceMemoCue) voiceMemoCue.hidden = true;
   state.mediaBlob = null;
   state.mediaFile = null;
+  state.thumbnailFile = null;
   state.mediaType = "";
   state.durationSeconds = 0;
   revokePreviewUrl();
