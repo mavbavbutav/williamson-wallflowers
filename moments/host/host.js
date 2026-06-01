@@ -163,6 +163,14 @@ function setHostStat(name, value) {
 
 function renderWorkspaceTabs() {
   const capsuleEnabled = Boolean(eventRecord?.timeCapsule?.enabled);
+  const counts = getSubmissionCounts();
+  const workspaceCounts = {
+    submissions: counts.pending || submissions.length || 0,
+    "host-posts": getHostPostItems().length,
+    capsule: capsuleItems.length,
+    share: timeCapsule?.status === "published" ? "Live" : "Draft"
+  };
+
   qs("#submissionsPanel").hidden = currentView !== "submissions";
   qs("#hostPostsPanel").hidden = !capsuleEnabled || currentView !== "host-posts";
   qs("#capsulePanel").hidden = !capsuleEnabled || currentView !== "capsule";
@@ -172,6 +180,10 @@ function renderWorkspaceTabs() {
     const isActive = tab.dataset.view === currentView;
     tab.classList.toggle("is-active", isActive);
     tab.setAttribute("aria-pressed", String(isActive));
+  });
+
+  qsa("[data-workspace-count]").forEach((count) => {
+    count.textContent = String(workspaceCounts[count.dataset.workspaceCount] ?? 0);
   });
 }
 
@@ -191,19 +203,21 @@ function renderSubmissions() {
 
 function renderSubmissionCard(submission) {
   const card = document.createElement("article");
-  card.className = "media-card";
+  card.className = `media-card is-status-${submission.status} is-media-${submission.mediaType}`;
 
   const mediaUrl = `${submission.mediaUrl}&disposition=inline`;
   const downloadUrl = `${submission.downloadUrl}&disposition=attachment`;
   const thumb = renderThumb(submission, mediaUrl);
+  const inCapsule = isInCapsule(submission.id);
 
   const body = document.createElement("div");
   body.className = "media-body";
   body.innerHTML = `
-    <div class="button-row">
+    <div class="button-row card-status-row">
       <span class="status-pill is-${submission.status}">${submission.status}</span>
       <span class="status-pill">${escapeHtml(getMediaTypeLabel(submission.mediaType))}</span>
       ${submission.source === "host" ? `<span class="status-pill">Host Post</span>` : ""}
+      ${inCapsule ? `<span class="status-pill is-approved">In Time Capsule</span>` : ""}
     </div>
     <strong>${escapeHtml(submission.guestName || "Anonymous guest")}</strong>
     <p class="muted">${escapeHtml(submission.guestNote || "No note added.")}</p>
@@ -214,31 +228,35 @@ function renderSubmissionCard(submission) {
     </div>
   `;
 
-  if (shouldShowApproveCapsuleOption(submission)) {
-    body.append(renderApproveCapsuleOption(submission.id));
-  }
-
   const actions = document.createElement("div");
-  actions.className = "row-actions card-actions";
+  actions.className = "host-decision-actions";
 
   if (submission.status !== "approved") {
     actions.append(actionButton("Approve", "is-success is-featured", () => approveSubmission(submission)));
+    if (eventRecord?.timeCapsule?.enabled && !inCapsule) {
+      actions.append(actionButton("Approve + Time Capsule", "is-primary is-featured", () => approveSubmission(submission, { addToCapsule: true })));
+    }
+  } else if (eventRecord?.timeCapsule?.enabled && !inCapsule) {
+    actions.append(actionButton("Add to Time Capsule", "is-success is-featured", () => addSubmissionToCapsule(submission)));
+  } else if (inCapsule) {
+    const saved = document.createElement("span");
+    saved.className = "decision-status";
+    saved.textContent = "Already in Time Capsule";
+    actions.append(saved);
   }
 
-  actions.append(actionButton("View", "is-primary", () => openMediaModal(submission, mediaUrl)));
-
-  if (eventRecord?.timeCapsule?.enabled && submission.status === "approved" && !isInCapsule(submission.id)) {
-    actions.append(actionButton("Add to Capsule", "is-success", () => addSubmissionToCapsule(submission)));
+  if (submission.status !== "rejected") {
+    actions.append(actionButton("Reject", "is-danger", () => updateSubmission(submission.id, "rejected")));
   }
 
-  actions.append(renderCardMoreActions(submission, downloadUrl));
+  actions.append(renderCardMoreActions(submission, downloadUrl, submission, mediaUrl));
   body.append(actions);
 
   card.append(thumb, body);
   return card;
 }
 
-function renderCardMoreActions(submission, downloadUrl) {
+function renderCardMoreActions(submission, downloadUrl, mediaItem = submission, mediaUrl = "") {
   const details = document.createElement("details");
   details.className = "card-more-actions";
 
@@ -257,23 +275,11 @@ function renderCardMoreActions(submission, downloadUrl) {
   download.download = "";
   menu.append(download);
 
-  if (submission.status !== "rejected") {
-    menu.append(actionButton("Deny", "is-danger", () => updateSubmission(submission.id, "rejected")));
-  }
+  menu.append(actionButton("View larger", "is-primary", () => openMediaModal(mediaItem, mediaUrl || `${submission.mediaUrl}&disposition=inline`)));
 
   menu.append(actionButton("Delete", "is-danger", () => deleteSubmission(submission.id)));
   details.append(menu);
   return details;
-}
-
-function renderApproveCapsuleOption(submissionId) {
-  const label = document.createElement("label");
-  label.className = "checkbox-row approve-capsule-option";
-  label.innerHTML = `
-    <input type="checkbox" data-approve-capsule="${escapeAttribute(submissionId)}" />
-    <span>Add to Time Capsule when approved</span>
-  `;
-  return label;
 }
 
 function renderCapsule() {
@@ -297,7 +303,7 @@ function renderCapsule() {
 
 function renderCapsuleCard(item) {
   const card = document.createElement("article");
-  card.className = "media-card capsule-item";
+  card.className = `media-card capsule-item is-media-${item.mediaType}`;
   card.dataset.itemId = item.id;
 
   const mediaUrl = `${item.mediaUrl}&disposition=inline`;
@@ -383,7 +389,7 @@ function renderHostPosts() {
 
 function renderHostPostCard(item) {
   const card = document.createElement("article");
-  card.className = "media-card host-post-card";
+  card.className = `media-card host-post-card is-status-approved is-media-${item.mediaType}`;
 
   const mediaUrl = `${item.mediaUrl}&disposition=inline`;
   const thumb = renderThumb(item, mediaUrl);
@@ -812,8 +818,7 @@ function actionButton(label, className, onClick) {
   return button;
 }
 
-async function approveSubmission(submission) {
-  const addToCapsule = shouldAddToCapsuleOnApprove(submission.id);
+async function approveSubmission(submission, { addToCapsule = false } = {}) {
   let capsuleAddFailed = false;
 
   try {
@@ -904,18 +909,6 @@ function getSubmissionCounts() {
 
 function isInCapsule(submissionId) {
   return capsuleItems.some((item) => item.submissionId === submissionId);
-}
-
-function shouldShowApproveCapsuleOption(submission) {
-  return Boolean(
-    eventRecord?.timeCapsule?.enabled &&
-    submission.status !== "approved" &&
-    !isInCapsule(submission.id)
-  );
-}
-
-function shouldAddToCapsuleOnApprove(submissionId) {
-  return Boolean(qs(`[data-approve-capsule="${cssEscape(submissionId)}"]`)?.checked);
 }
 
 function getEmptyMessage(status) {

@@ -10,15 +10,18 @@ test('host can opt into adding a submission to Time Capsule while approving it',
   ]);
 
   assert.match(hostJs, /approveSubmission\(submission\)/);
-  assert.match(hostJs, /data-approve-capsule/);
-  assert.match(hostJs, /Add to Time Capsule when approved/);
-  assert.match(hostJs, /shouldAddToCapsuleOnApprove/);
+  assert.match(hostJs, /Approve \+ Time Capsule/);
+  assert.match(hostJs, /approveSubmission\(submission, \{ addToCapsule: true \}\)/);
   assert.match(hostJs, /createCapsuleItem/);
   assert.match(hostJs, /Submission approved and added to the Time Capsule/);
-  assert.match(hostJs, /Add to Capsule/);
-  assert.match(styles, /\.approve-capsule-option/);
-  assert.match(hostHtml, /host\.js\?v=20260601-video-thumbs-1/);
-  assert.match(hostHtml, /styles\.css\?v=20260601-video-thumbs-1/);
+  assert.match(hostJs, /Add to Time Capsule/);
+  assert.match(hostJs, /Already in Time Capsule/);
+  assert.doesNotMatch(hostJs, /data-approve-capsule/);
+  assert.doesNotMatch(hostJs, /shouldAddToCapsuleOnApprove/);
+  assert.match(styles, /\.host-decision-actions/);
+  assert.match(styles, /\.decision-status/);
+  assert.match(hostHtml, /host\.js\?v=20260601-host-streamline-1/);
+  assert.match(hostHtml, /styles\.css\?v=20260601-host-streamline-1/);
 });
 
 async function readText(path) {

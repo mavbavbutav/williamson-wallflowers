@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260601-video-thumbs-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260601-host-streamline-1" />
 </head>
 <body class="host-page">
   <main class="app-shell">
@@ -69,10 +69,22 @@
 
       <div class="toolbar" id="workspaceToolbar" hidden>
         <div class="tabs" aria-label="Host workspace">
-          <button class="tab-button is-active" type="button" data-view="submissions" aria-pressed="true">Submissions</button>
-          <button class="tab-button" type="button" data-view="host-posts" aria-pressed="false">Host Posts</button>
-          <button class="tab-button" type="button" data-view="capsule" aria-pressed="false">Time Capsule</button>
-          <button class="tab-button" type="button" data-view="share" aria-pressed="false">Share</button>
+          <button class="tab-button is-active" type="button" data-view="submissions" aria-pressed="true">
+            <span>Submissions</span>
+            <span class="tab-count" data-workspace-count="submissions">0</span>
+          </button>
+          <button class="tab-button" type="button" data-view="host-posts" aria-pressed="false">
+            <span>Host Posts</span>
+            <span class="tab-count" data-workspace-count="host-posts">0</span>
+          </button>
+          <button class="tab-button" type="button" data-view="capsule" aria-pressed="false">
+            <span>Time Capsule</span>
+            <span class="tab-count" data-workspace-count="capsule">0</span>
+          </button>
+          <button class="tab-button" type="button" data-view="share" aria-pressed="false">
+            <span>Share</span>
+            <span class="tab-count" data-workspace-count="share">Draft</span>
+          </button>
         </div>
       </div>
 
@@ -228,6 +240,6 @@
     <div class="media-modal-stage" id="modalStage"></div>
   </div>
 
-  <script type="module" src="host.js?v=20260601-video-thumbs-1"></script>
+  <script type="module" src="host.js?v=20260601-host-streamline-1"></script>
 </body>
 </html>

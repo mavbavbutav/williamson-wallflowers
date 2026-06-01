@@ -1222,14 +1222,29 @@ textarea:focus-visible {
   min-width: 0;
 }
 
+.host-page .media-card {
+  border: 1px solid rgba(222, 211, 200, 0.86);
+  background: rgba(255, 250, 245, 0.82);
+}
+
+.host-page .media-card.is-status-pending {
+  border-color: rgba(155, 116, 69, 0.34);
+}
+
+.host-page .media-card.is-status-approved {
+  border-color: rgba(63, 109, 88, 0.28);
+}
+
 .host-page .media-thumb {
   height: clamp(190px, 22vw, 260px);
   aspect-ratio: auto;
 }
 
 .host-page .media-thumb.is-video {
-  height: clamp(190px, 22vw, 260px);
-  aspect-ratio: auto;
+  height: auto;
+  min-height: clamp(360px, 52vw, 680px);
+  max-height: 72vh;
+  aspect-ratio: 9 / 16;
 }
 
 .host-page .media-thumb.is-audio {
@@ -1243,6 +1258,24 @@ textarea:focus-visible {
 .host-page .media-thumb video {
   object-fit: contain;
   background: #2f2b28;
+}
+
+.host-page .media-thumb.is-video video {
+  width: 100%;
+  height: 100%;
+  max-height: 72vh;
+  object-fit: contain;
+}
+
+@media (min-width: 900px) {
+  .host-page #mediaGrid .media-card.is-media-video {
+    grid-template-columns: minmax(360px, 0.66fr) minmax(300px, 0.34fr);
+    align-items: stretch;
+  }
+
+  .host-page #mediaGrid .media-card.is-media-video .media-body {
+    align-content: start;
+  }
 }
 
 .voice-memo-panel {
@@ -1316,8 +1349,41 @@ textarea:focus-visible {
   gap: 0.5rem;
 }
 
+.card-status-row {
+  gap: 0.4rem;
+}
+
 .card-actions {
   align-items: stretch;
+}
+
+.host-decision-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 0.5rem;
+  padding-top: 0.15rem;
+}
+
+.host-decision-actions .small-button,
+.host-decision-actions .decision-status {
+  display: grid;
+  place-items: center;
+  min-height: 44px;
+  text-align: center;
+  line-height: 1.15;
+}
+
+.host-decision-actions .small-button.is-featured {
+  font-size: 0.82rem;
+}
+
+.decision-status {
+  border: 1px solid rgba(63, 109, 88, 0.22);
+  border-radius: 999px;
+  color: var(--success);
+  background: rgba(63, 109, 88, 0.09);
+  font-size: 0.78rem;
+  font-weight: 900;
 }
 
 .card-more-actions {
