@@ -13,6 +13,9 @@ let feedSoundUnlocked = false;
 let nativeSwipeFullscreenActive = false;
 const videoPosterCache = new Map();
 const videoPosterPersistCache = new Set();
+const FEED_MEDIA_WARM_RADIUS = 1;
+const FEED_IMAGE_WARM_RADIUS = 2;
+const FEED_PLAYABLE_READY_STATE = 2;
 
 init();
 
@@ -97,7 +100,7 @@ function renderTimeline() {
 function renderSwipeFeed() {
   const feed = qs("#capsuleFeed");
   feed.innerHTML = items.map((item, index) => `
-    <article class="capsule-feed-card is-${escapeAttribute(item.mediaType)}" data-feed-index="${index}">
+    <article class="capsule-feed-card is-${escapeAttribute(item.mediaType)}${item.mediaType === "photo" ? " is-media-ready" : ""}" data-feed-index="${index}">
       <div class="capsule-feed-media">
         ${renderFeedMedia(item, index)}
       </div>
@@ -246,6 +249,7 @@ function toggleFeedPlayback(index) {
   const shouldUnmuteVideo = isFeedVideo(media) && !media.paused && media.muted;
   const shouldPlay = media.paused || shouldUnmuteVideo;
   if (shouldPlay) unlockFeedSound();
+  warmFeedAroundCard(qs("#capsuleFeed"), card);
   pauseAllFeedMedia(media);
   setFeedCardPlaying(card, !media.paused);
   setFeedAutoplayBlocked(card, false);
@@ -290,7 +294,9 @@ function syncFeedAutoplay() {
     return;
   }
 
-  const activeMedia = getCenteredFeedMedia(feed);
+  const activeCard = getCenteredFeedCard(feed);
+  const activeMedia = activeCard?.querySelector("[data-feed-media]");
+  warmFeedAroundCard(feed, activeCard);
   qsaPlayableMedia(feed).forEach((media) => {
     if (media !== activeMedia) {
       media.pause();
@@ -302,26 +308,94 @@ function syncFeedAutoplay() {
 }
 
 function getCenteredFeedMedia(feed) {
+  return getCenteredFeedCard(feed)?.querySelector("[data-feed-media]") || null;
+}
+
+function getCenteredFeedCard(feed) {
   const feedRect = feed?.getBoundingClientRect?.();
   if (!feedRect) return null;
 
   const feedCenter = feedRect.top + feedRect.height / 2;
-  let activeMedia = null;
+  let activeCard = null;
   let activeDistance = Number.POSITIVE_INFINITY;
 
-  Array.from(feed.querySelectorAll(".capsule-feed-card")).forEach((card) => {
-    const media = card.querySelector("[data-feed-media]");
+  qsaFeedCards(feed).forEach((card) => {
     const rect = card.getBoundingClientRect?.();
-    if (!media || !rect || rect.bottom <= feedRect.top || rect.top >= feedRect.bottom) return;
+    if (!rect || rect.bottom <= feedRect.top || rect.top >= feedRect.bottom) return;
 
     const distance = Math.abs(rect.top + rect.height / 2 - feedCenter);
     if (distance < activeDistance) {
-      activeMedia = media;
+      activeCard = card;
       activeDistance = distance;
     }
   });
 
-  return activeMedia;
+  return activeCard;
+}
+
+function warmFeedAroundCard(feed, activeCard) {
+  const cards = qsaFeedCards(feed);
+  if (!cards.length) return;
+
+  const activeIndex = Math.max(0, cards.indexOf(activeCard));
+  cards.forEach((card, index) => {
+    const distance = Math.abs(index - activeIndex);
+    if (distance <= FEED_IMAGE_WARM_RADIUS) primeFeedImage(card);
+
+    const media = card.querySelector("[data-feed-media]");
+    if (!media) {
+      setFeedCardReady(card, true);
+      return;
+    }
+
+    if (distance <= FEED_MEDIA_WARM_RADIUS) {
+      warmFeedMedia(media);
+    } else {
+      coolFeedMedia(media);
+    }
+  });
+}
+
+function warmFeedMedia(media) {
+  if (!media) return;
+  const card = media.closest?.(".capsule-feed-card");
+
+  media.preload = "auto";
+  if (isFeedMediaReady(media)) {
+    setFeedCardReady(card, true);
+    return;
+  }
+
+  setFeedCardReady(card, false);
+  if (media.dataset.feedWarmState !== "warming") {
+    media.dataset.feedWarmState = "warming";
+    media.load?.();
+  }
+}
+
+function coolFeedMedia(media) {
+  if (!media) return;
+  media.preload = "metadata";
+  delete media.dataset.feedWarmState;
+}
+
+function primeFeedImage(card) {
+  const image = card?.querySelector("img");
+  if (!image) return;
+
+  image.loading = "eager";
+  image.decoding = "async";
+  if (image.complete) {
+    setFeedCardReady(card, true);
+    return;
+  }
+
+  if (typeof image.decode === "function" && image.dataset.feedImageDecode !== "warming") {
+    image.dataset.feedImageDecode = "warming";
+    image.decode().then(() => setFeedCardReady(card, true)).catch(() => {
+      image.dataset.feedImageDecode = "fallback";
+    });
+  }
 }
 
 function autoplayFeedMedia(media) {
@@ -335,6 +409,7 @@ function autoplayFeedMedia(media) {
     media.muted = !feedSoundUnlocked;
   }
 
+  warmFeedMedia(media);
   media.play().then(() => {
     setFeedAutoplayBlocked(card, false);
     setFeedCardPlaying(card, true);
@@ -348,6 +423,22 @@ function bindFeedMediaEvents(media) {
   const card = media.closest?.(".capsule-feed-card");
   if (!card) return;
 
+  const markReady = () => {
+    delete media.dataset.feedWarmState;
+    setFeedCardReady(card, true);
+  };
+  const markLoading = () => {
+    if (!isFeedMediaReady(media)) setFeedCardReady(card, false);
+  };
+
+  if (isFeedMediaReady(media)) markReady();
+  else markLoading();
+
+  media.addEventListener("loadeddata", markReady);
+  media.addEventListener("canplay", markReady);
+  media.addEventListener("playing", markReady);
+  media.addEventListener("loadstart", markLoading);
+  media.addEventListener("waiting", markLoading);
   media.addEventListener("play", () => {
     setFeedAutoplayBlocked(card, false);
     setFeedCardPlaying(card, true);
@@ -376,6 +467,17 @@ function setFeedCardPlaying(card, isPlaying) {
 function setFeedAutoplayBlocked(card, isBlocked) {
   if (!card) return;
   card.classList.toggle("is-autoplay-blocked", isBlocked);
+}
+
+function setFeedCardReady(card, isReady) {
+  if (!card) return;
+  const hasMedia = Boolean(card.querySelector("[data-feed-media]"));
+  card.classList.toggle("is-media-ready", isReady);
+  card.classList.toggle("is-media-loading", hasMedia && !isReady);
+}
+
+function isFeedMediaReady(media) {
+  return Number(media?.readyState || 0) >= FEED_PLAYABLE_READY_STATE;
 }
 
 function feedPlayButtonLabel(card, isPlaying) {
@@ -490,12 +592,16 @@ function qsaFeedPlayButtons() {
 }
 
 function qsaPlayableMedia(root) {
-  return Array.from(root.querySelectorAll("video, audio"));
+  return Array.from(root?.querySelectorAll("video, audio") || []);
 }
 
 function qsaFeedVideos() {
   const feed = qs("#capsuleFeed");
   return feed ? Array.from(feed.querySelectorAll("video[data-feed-media]")) : [];
+}
+
+function qsaFeedCards(feed) {
+  return Array.from(feed?.querySelectorAll(".capsule-feed-card") || []);
 }
 
 function getMediaTypeLabel(mediaType) {

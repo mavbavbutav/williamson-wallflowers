@@ -225,7 +225,7 @@ test('capsule swipe feed auto-plays centered videos and voice memos', async () =
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-feed-sound-unlock-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-feed-preload-1/);
   assert.match(capsuleJs, /scheduleFeedAutoplay/);
   assert.match(capsuleJs, /function syncFeedAutoplay/);
   assert.match(capsuleJs, /function getCenteredFeedMedia/);
@@ -248,6 +248,28 @@ test('capsule swipe feed keeps videos unmuted after one sound unlock', async () 
   assert.match(capsuleJs, /video\.muted = false/);
   assert.match(capsuleJs, /volumechange/);
   assert.match(capsuleJs, /media\.muted = !feedSoundUnlocked/);
+});
+
+test('capsule swipe feed preloads adjacent media before the next swipe', async () => {
+  const [capsuleHtml, capsuleJs] = await Promise.all([
+    readText('../../moments/capsule/index.html'),
+    readText('../../moments/capsule/capsule.js')
+  ]);
+
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-feed-preload-1/);
+  assert.match(capsuleJs, /const FEED_MEDIA_WARM_RADIUS = 1/);
+  assert.match(capsuleJs, /const FEED_IMAGE_WARM_RADIUS = 2/);
+  assert.match(capsuleJs, /function warmFeedAroundCard/);
+  assert.match(capsuleJs, /function warmFeedMedia/);
+  assert.match(capsuleJs, /media\.preload = "auto"/);
+  assert.match(capsuleJs, /media\.load\?\.\(\)/);
+  assert.match(capsuleJs, /media\.preload = "metadata"/);
+  assert.match(capsuleJs, /function primeFeedImage/);
+  assert.match(capsuleJs, /image\.loading = "eager"/);
+  assert.match(capsuleJs, /image\.decode\(\)/);
+  assert.match(capsuleJs, /function setFeedCardReady/);
+  assert.match(capsuleJs, /"canplay"/);
+  assert.match(capsuleJs, /"loadeddata"/);
 });
 
 async function readText(path) {
