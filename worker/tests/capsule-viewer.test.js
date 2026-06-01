@@ -31,6 +31,13 @@ function installCapsuleDom() {
   const elements = new Map();
   const selectors = [
     '#playSlideshowButton',
+    '#castTvButton',
+    '#castTvPanel',
+    '#startAirplayFullscreenButton',
+    '#startChromecastButton',
+    '#copyTvDisplayLinkButton',
+    '#openTvDisplayLinkButton',
+    '#castTvStatus',
     '#exitSwipeFeedButton',
     '#slideClose',
     '#slidePrev',
@@ -226,7 +233,7 @@ test('capsule swipe feed auto-plays centered videos and voice memos', async () =
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-slideshow-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-cast-fix-1/);
   assert.match(capsuleJs, /scheduleFeedAutoplay/);
   assert.match(capsuleJs, /function syncFeedAutoplay/);
   assert.match(capsuleJs, /function getCenteredFeedMedia/);
@@ -277,7 +284,7 @@ test('capsule swipe feed preloads adjacent media before the next swipe', async (
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-slideshow-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-cast-fix-1/);
   assert.match(capsuleJs, /const FEED_MEDIA_WARM_RADIUS = 2/);
   assert.match(capsuleJs, /const FEED_IMAGE_WARM_RADIUS = 2/);
   assert.match(capsuleJs, /function warmFeedAroundCard/);
@@ -293,7 +300,7 @@ test('capsule swipe feed preloads adjacent media before the next swipe', async (
   assert.match(capsuleJs, /"loadeddata"/);
 });
 
-test('capsule slideshow has TV mode with fullscreen, 16:9 framing, and auto advance', async () => {
+test('capsule slideshow has TV mode with fullscreen, uncropped portrait media, and auto advance', async () => {
   const [capsuleHtml, capsuleJs, styles] = await Promise.all([
     readText('../../moments/capsule/index.html'),
     readText('../../moments/capsule/capsule.js'),
@@ -303,7 +310,7 @@ test('capsule slideshow has TV mode with fullscreen, 16:9 framing, and auto adva
   assert.match(capsuleHtml, /TV Slideshow/);
   assert.match(capsuleHtml, /id="slidePlayPause"/);
   assert.match(capsuleHtml, /class="media-modal tv-slideshow-modal"/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-slideshow-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-cast-fix-1/);
   assert.match(capsuleJs, /const PHOTO_SLIDE_DURATION_MS = 20000/);
   assert.match(capsuleJs, /function requestSlideshowFullscreen/);
   assert.match(capsuleJs, /requestFullscreen/);
@@ -313,14 +320,66 @@ test('capsule slideshow has TV mode with fullscreen, 16:9 framing, and auto adva
   assert.match(capsuleJs, /video\.addEventListener\("ended", advanceSlideAfterPlayback/);
   assert.match(capsuleJs, /audio\.addEventListener\("ended", advanceSlideAfterPlayback/);
   assert.match(capsuleJs, /videoSourceAttributes\(item\)/);
+  assert.match(capsuleJs, /function bindTvMediaOrientation/);
+  assert.match(capsuleJs, /function applyTvMediaOrientation/);
+  assert.match(capsuleJs, /function sizeTvForeground/);
+  assert.match(capsuleJs, /media\.style\.width = `\$\{Math\.round\(width\)\}px`/);
+  assert.match(capsuleJs, /media\.style\.height = `\$\{Math\.round\(height\)\}px`/);
+  assert.match(capsuleJs, /--media-aspect/);
+  assert.match(capsuleJs, /is-portrait/);
   assert.match(capsuleJs, /className = "tv-slide-frame/);
   assert.match(capsuleJs, /className = "tv-slide-backdrop/);
   assert.match(capsuleJs, /className = "tv-audio-stage/);
   assert.match(styles, /\.tv-slideshow-modal/);
+  assert.match(styles, /\.tv-slideshow-modal[\s\S]*?height: 100dvh/);
+  assert.match(styles, /\.tv-slideshow-modal \.media-modal-bar[\s\S]*?position: absolute/);
+  assert.match(styles, /\.tv-slideshow-modal \.capsule-slide-copy[\s\S]*?position: absolute/);
   assert.match(styles, /\.tv-slide-frame[\s\S]*?aspect-ratio: 16 \/ 9/);
   assert.match(styles, /\.tv-slide-backdrop[\s\S]*?filter: blur/);
+  assert.match(styles, /\.media-modal-stage \.tv-slide-frame \.tv-slide-backdrop-media[\s\S]*?object-fit: cover/);
+  assert.doesNotMatch(styles, /\.tv-slide-foreground\s*\{[^}]*object-fit:\s*cover/);
   assert.match(styles, /\.tv-slide-foreground[\s\S]*?object-fit: contain/);
+  assert.match(styles, /\.media-modal-stage \.tv-slide-frame \.tv-slide-foreground\.is-portrait[\s\S]*?height: 100%/);
+  assert.match(styles, /\.tv-slide-foreground\.is-portrait[\s\S]*?height: 100%/);
+  assert.match(styles, /\.tv-slide-foreground\.is-landscape[\s\S]*?width: 100%/);
   assert.match(styles, /\.tv-audio-stage/);
+});
+
+test('capsule viewer exposes Cast and TV display fallbacks', async () => {
+  const [capsuleHtml, capsuleJs, styles, castHtml, castJs] = await Promise.all([
+    readText('../../moments/capsule/index.html'),
+    readText('../../moments/capsule/capsule.js'),
+    readText('../../moments/styles.css'),
+    readText('../../moments/capsule/cast/index.html'),
+    readText('../../moments/capsule/cast/cast.js')
+  ]);
+
+  assert.match(capsuleHtml, /id="castTvButton"/);
+  assert.match(capsuleHtml, /id="castTvPanel"/);
+  assert.match(capsuleHtml, /id="startAirplayFullscreenButton"/);
+  assert.match(capsuleHtml, /id="startChromecastButton"/);
+  assert.match(capsuleHtml, /id="copyTvDisplayLinkButton"/);
+  assert.match(capsuleJs, /const CAST_RECEIVER_APP_ID =/);
+  assert.match(capsuleJs, /function initCastTvControls/);
+  assert.match(capsuleJs, /function updateCastTvControls/);
+  assert.match(capsuleJs, /function loadGoogleCastSender/);
+  assert.match(capsuleJs, /cast_sender\.js\?loadCastFramework=1/);
+  assert.match(capsuleJs, /function configureCastContext/);
+  assert.match(capsuleJs, /function startChromecastSession/);
+  assert.match(capsuleJs, /!CAST_RECEIVER_APP_ID \|\| !window\.chrome/);
+  assert.match(capsuleJs, /function buildTvDisplayUrl/);
+  assert.match(styles, /\.cast-tv-panel/);
+  assert.match(styles, /\.cast-tv-panel\[hidden\]/);
+
+  assert.match(castHtml, /Wallflower Time Capsule TV/);
+  assert.match(castHtml, /id="castStage"/);
+  assert.match(castHtml, /cast\.js\?v=20260601-tv-cast-fix-1/);
+  assert.match(castJs, /const PHOTO_SLIDE_DURATION_MS = 20000/);
+  assert.match(castJs, /\/capsules\/\$\{encodeURIComponent\(eventId\)\}/);
+  assert.match(castJs, /function renderCastSlide/);
+  assert.match(castJs, /function bindTvMediaOrientation/);
+  assert.match(castJs, /item\.streamUrl \|\| item\.mediaUrl/);
+  assert.match(castJs, /addEventListener\("ended", showNextCastSlide/);
 });
 
 async function readText(path) {

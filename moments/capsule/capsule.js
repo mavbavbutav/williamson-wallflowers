@@ -17,6 +17,8 @@ let nativeSwipeFullscreenActive = false;
 let nativeSlideshowFullscreenActive = false;
 let slideAutoPlaying = true;
 let slideAdvanceTimer = 0;
+let slideshowControlsTimer = 0;
+let castTvPanelOpen = false;
 const videoPosterCache = new Map();
 const videoPosterPersistCache = new Set();
 const FEED_MEDIA_WARM_RADIUS = 2;
@@ -25,10 +27,12 @@ const FEED_PLAYABLE_READY_STATE = 2;
 const FEED_EARLY_PLAY_VISIBILITY_RATIO = 0.28;
 const PHOTO_SLIDE_DURATION_MS = 20000;
 const SLIDE_ERROR_ADVANCE_MS = 6000;
+const CAST_RECEIVER_APP_ID = "";
 
 init();
 
 async function init() {
+  initCastTvControls();
   qs("#playSlideshowButton").addEventListener("click", () => openSlide(0, { autoPlay: true, requestFullscreen: true }));
   qs("#exitSwipeFeedButton").addEventListener("click", () => setCapsuleView("timeline", { userInitiated: true }));
   qsaCapsuleViewButtons().forEach((button) => {
@@ -49,7 +53,11 @@ async function init() {
   qs("#slideshowModal").addEventListener("click", (event) => {
     if (event.target === event.currentTarget) closeSlide();
   });
+  qs("#slideshowModal").addEventListener("pointermove", revealSlideshowControls);
+  qs("#slideshowModal").addEventListener("pointerdown", revealSlideshowControls);
+  qs("#slideshowModal").addEventListener("touchstart", revealSlideshowControls, { passive: true });
   document.addEventListener("keydown", (event) => {
+    if (!qs("#slideshowModal").hidden) revealSlideshowControls();
     if (event.key === "Escape" && currentCapsuleView === "feed") setCapsuleView("timeline", { userInitiated: true });
     if (event.key === "Escape" && !qs("#slideshowModal").hidden) closeSlide();
     if (event.key === "ArrowRight" && !qs("#slideshowModal").hidden) changeSlide(1);
@@ -80,12 +88,122 @@ function render() {
   qs("#capsuleTitle").textContent = capsule.title || capsule.name || "Wallflower Time Capsule";
   qs("#capsuleMeta").textContent = `${formatDate(capsule.eventDate)}${capsule.publishedAt ? ` | Published ${formatDateTime(capsule.publishedAt)}` : ""}`;
   qs("#playSlideshowButton").hidden = items.length === 0;
+  qs("#castTvButton").hidden = items.length === 0;
+  if (!items.length) {
+    qs("#castTvPanel").hidden = true;
+    castTvPanelOpen = false;
+  }
   qs("#capsuleEmpty").hidden = items.length > 0;
   renderTimeline();
   renderSwipeFeed();
   setCapsuleView(items.length ? currentCapsuleView : "timeline");
+  updateCastTvControls();
   hydrateVideoPosters();
   hydrateStreamVideos();
+}
+
+function initCastTvControls() {
+  loadGoogleCastSender();
+  qs("#castTvButton").addEventListener("click", () => {
+    castTvPanelOpen = !castTvPanelOpen;
+    updateCastTvControls();
+  });
+  qs("#startAirplayFullscreenButton").addEventListener("click", () => openSlide(slideIndex || 0, { autoPlay: true, requestFullscreen: true }));
+  qs("#copyTvDisplayLinkButton").addEventListener("click", copyTvDisplayLink);
+  qs("#startChromecastButton").addEventListener("click", startChromecastSession);
+  updateCastTvControls();
+}
+
+function updateCastTvControls() {
+  const panel = qs("#castTvPanel");
+  const castButton = qs("#castTvButton");
+  const chromecastButton = qs("#startChromecastButton");
+  const openLink = qs("#openTvDisplayLinkButton");
+  const status = qs("#castTvStatus");
+  const tvDisplayUrl = buildTvDisplayUrl();
+  const hasNativeCast = configureCastContext();
+
+  panel.hidden = !castTvPanelOpen || !items.length;
+  castButton?.setAttribute("aria-expanded", String(!panel.hidden));
+  if (openLink) openLink.href = tvDisplayUrl;
+
+  chromecastButton.hidden = !hasNativeCast;
+  chromecastButton.disabled = !hasNativeCast;
+  status.textContent = hasNativeCast
+    ? "Chromecast is available in this browser. Start Chromecast to send the TV slideshow to the receiver."
+    : "Chromecast needs a registered receiver before the native Cast button appears. Fullscreen, AirPlay mirroring, and the TV display link are ready now.";
+}
+
+async function copyTvDisplayLink() {
+  const link = buildTvDisplayUrl();
+
+  try {
+    await navigator.clipboard.writeText(link);
+    setNotice(qs("#capsuleNotice"), "TV display link copied.", "success");
+  } catch {
+    setNotice(qs("#capsuleNotice"), link, "success");
+  }
+}
+
+async function startChromecastSession() {
+  updateCastTvControls();
+  if (!configureCastContext()) {
+    setNotice(qs("#capsuleNotice"), "Chromecast receiver setup is not configured yet. Use fullscreen mirroring or the TV display link for this event.", "error");
+    return;
+  }
+
+  try {
+    const castContext = window.cast.framework.CastContext.getInstance();
+    await castContext.requestSession();
+    const session = castContext.getCurrentSession();
+    await session?.sendMessage?.("urn:x-cast:com.wallflower.timecapsule", {
+      eventId,
+      token,
+      url: buildTvDisplayUrl()
+    });
+  } catch (error) {
+    setNotice(qs("#capsuleNotice"), error.message || "Chromecast could not start from this browser.", "error");
+  }
+}
+
+function loadGoogleCastSender() {
+  if (!CAST_RECEIVER_APP_ID || document.querySelector("[data-google-cast-sender]")) return;
+
+  const previousCallback = window.__onGCastApiAvailable;
+  window.__onGCastApiAvailable = (isAvailable) => {
+    if (typeof previousCallback === "function") previousCallback(isAvailable);
+    if (isAvailable) configureCastContext();
+    updateCastTvControls();
+  };
+
+  const script = document.createElement("script");
+  script.src = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1";
+  script.async = true;
+  script.dataset.googleCastSender = "true";
+  document.head.append(script);
+}
+
+function configureCastContext() {
+  if (!CAST_RECEIVER_APP_ID || !window.chrome || !window.cast?.framework) return false;
+
+  const castContext = window.cast.framework.CastContext.getInstance();
+  castContext.setOptions({
+    receiverApplicationId: CAST_RECEIVER_APP_ID,
+    autoJoinPolicy: window.chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+  });
+  return true;
+}
+
+function buildTvDisplayUrl() {
+  const url = new URL("cast/", window.location.href);
+  const currentParams = new URLSearchParams(window.location.search);
+  url.searchParams.set("event", eventId || "");
+  ["api", "site"].forEach((name) => {
+    const value = currentParams.get(name);
+    if (value) url.searchParams.set(name, value);
+  });
+  url.hash = token ? `token=${encodeURIComponent(token)}` : "";
+  return url.href;
 }
 
 function renderTimeline() {
@@ -598,6 +716,7 @@ function openSlide(index, options = {}) {
   lastFocusedElement = document.activeElement;
   document.body.classList.add("modal-open", "is-tv-slideshow-active");
   qs("#slideshowModal").hidden = false;
+  revealSlideshowControls();
   updateSlidePlayPauseButton();
   if (options.requestFullscreen) requestSlideshowFullscreen();
   renderSlide();
@@ -640,6 +759,7 @@ function createTvSlideFrame(item) {
   const foreground = document.createElement("div");
   foreground.className = "tv-slide-foreground-wrap";
   const content = createTvSlideForeground(item);
+  bindTvMediaOrientation(content.element, frame);
   foreground.append(content.element);
   frame.append(backdrop, foreground);
   return { frame, media: content.media };
@@ -699,6 +819,51 @@ function createTvSlideForeground(item) {
   return { element: video, media: video };
 }
 
+function bindTvMediaOrientation(element, frame) {
+  if (!element || element.tagName?.toLowerCase() === "div") return;
+
+  const update = () => applyTvMediaOrientation(element, frame);
+  element.classList.add("is-orientation-pending");
+  if (element.tagName?.toLowerCase() === "video") {
+    element.addEventListener("loadedmetadata", update);
+  } else {
+    element.addEventListener("load", update);
+  }
+  update();
+}
+
+function applyTvMediaOrientation(element, frame = element?.closest?.(".tv-slide-frame")) {
+  const size = getTvMediaIntrinsicSize(element);
+  if (!size.width || !size.height) return;
+
+  const aspect = size.width / size.height;
+  const orientation = aspect < 0.85 ? "portrait" : aspect > 1.15 ? "landscape" : "square";
+  const orientationClasses = ["is-orientation-pending", "is-portrait", "is-landscape", "is-square"];
+
+  [element, frame].forEach((target) => {
+    if (!target) return;
+    target.classList.remove(...orientationClasses);
+    target.classList.add(`is-${orientation}`);
+    target.style.setProperty("--media-aspect", aspect.toFixed(4));
+  });
+  window.requestAnimationFrame(sizeTvSlideFrame);
+}
+
+function getTvMediaIntrinsicSize(element) {
+  const tagName = element?.tagName?.toLowerCase();
+  if (tagName === "video") {
+    return {
+      width: Number(element.videoWidth || 0),
+      height: Number(element.videoHeight || 0)
+    };
+  }
+
+  return {
+    width: Number(element.naturalWidth || 0),
+    height: Number(element.naturalHeight || 0)
+  };
+}
+
 function bindSlidePlayback(media) {
   if (!media) return;
 
@@ -730,6 +895,17 @@ function scheduleSlideAdvance(delayMs) {
 function clearSlideAdvance() {
   window.clearTimeout(slideAdvanceTimer);
   slideAdvanceTimer = 0;
+}
+
+function revealSlideshowControls() {
+  const modal = qs("#slideshowModal");
+  if (!modal || modal.hidden) return;
+
+  modal.classList.remove("is-controls-hidden");
+  window.clearTimeout(slideshowControlsTimer);
+  slideshowControlsTimer = window.setTimeout(() => {
+    if (!modal.hidden) modal.classList.add("is-controls-hidden");
+  }, 4200);
 }
 
 function advanceSlideAfterPlayback() {
@@ -773,6 +949,34 @@ function sizeTvSlideFrame() {
   const width = Math.max(1, Math.min(stageRect.width, stageRect.height * (16 / 9)));
   frame.style.width = `${width}px`;
   frame.style.height = `${width * (9 / 16)}px`;
+  sizeTvForeground(frame);
+}
+
+function sizeTvForeground(frame) {
+  const media = frame?.querySelector(".tv-slide-foreground.is-portrait, .tv-slide-foreground.is-landscape, .tv-slide-foreground.is-square");
+  const wrap = frame?.querySelector(".tv-slide-foreground-wrap");
+  if (!media || !wrap || media.classList.contains("tv-audio-stage")) return;
+
+  const frameRect = frame.getBoundingClientRect?.();
+  if (!frameRect?.width || !frameRect?.height) return;
+
+  const wrapStyle = window.getComputedStyle(wrap);
+  const horizontalPadding = parseFloat(wrapStyle.paddingLeft || "0") + parseFloat(wrapStyle.paddingRight || "0");
+  const verticalPadding = parseFloat(wrapStyle.paddingTop || "0") + parseFloat(wrapStyle.paddingBottom || "0");
+  const availableWidth = Math.max(1, frameRect.width - horizontalPadding);
+  const availableHeight = Math.max(1, frameRect.height - verticalPadding);
+  const aspect = Number.parseFloat(media.style.getPropertyValue("--media-aspect") || frame.style.getPropertyValue("--media-aspect") || "1");
+  if (!Number.isFinite(aspect) || aspect <= 0) return;
+
+  let width = availableWidth;
+  let height = width / aspect;
+  if (height > availableHeight) {
+    height = availableHeight;
+    width = height * aspect;
+  }
+
+  media.style.width = `${Math.round(width)}px`;
+  media.style.height = `${Math.round(height)}px`;
 }
 
 async function requestSlideshowFullscreen() {
@@ -809,9 +1013,11 @@ async function exitSlideshowFullscreen() {
 
 function closeSlide(options = {}) {
   clearSlideAdvance();
+  window.clearTimeout(slideshowControlsTimer);
   qsaPlayableMedia(qs("#slideStage")).forEach((media) => media.pause());
   qs("#slideStage").innerHTML = "";
   qs("#slideshowModal").hidden = true;
+  qs("#slideshowModal").classList.remove("is-controls-hidden");
   document.body.classList.remove("modal-open", "is-tv-slideshow-active", "is-native-tv-slideshow");
   nativeSlideshowFullscreenActive = false;
   if (!options.skipFullscreenExit) exitSlideshowFullscreen();

@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260601-video-thumbs-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260601-tv-cast-fix-1" />
 </head>
 <body class="host-page capsule-viewer">
   <main class="app-shell">
@@ -40,11 +40,26 @@
             <button class="tab-button" type="button" data-capsule-view="feed" aria-pressed="false">Swipe Feed</button>
           </div>
           <button class="button button-secondary capsule-feed-exit" type="button" id="exitSwipeFeedButton" hidden>Exit feed</button>
+          <button class="button button-secondary" type="button" id="castTvButton" hidden>Cast / TV</button>
           <button class="button button-primary" type="button" id="playSlideshowButton" hidden>TV Slideshow</button>
         </div>
       </div>
 
       <div id="capsuleNotice" class="notice" role="status" aria-live="polite" hidden></div>
+      <div class="cast-tv-panel" id="castTvPanel" hidden>
+        <div class="cast-tv-copy">
+          <span class="status-pill">TV mode</span>
+          <strong>Cast or display the slideshow</strong>
+          <p>Start fullscreen for AirPlay or screen mirroring, use Chromecast when configured, or open the TV display link on a laptop, HDMI screen, or smart-TV browser.</p>
+          <p class="muted" id="castTvStatus">Checking TV options.</p>
+        </div>
+        <div class="button-row">
+          <button class="button button-primary" type="button" id="startAirplayFullscreenButton">Start fullscreen</button>
+          <button class="button button-secondary" type="button" id="startChromecastButton" hidden>Chromecast</button>
+          <button class="button button-secondary" type="button" id="copyTvDisplayLinkButton">Copy TV link</button>
+          <a class="button button-secondary" href="#" target="_blank" rel="noopener" id="openTvDisplayLinkButton">Open TV link</a>
+        </div>
+      </div>
       <div class="capsule-timeline" id="capsuleTimeline"></div>
       <div class="capsule-swipe-feed" id="capsuleFeed" aria-label="Swipe through Time Capsule moments" hidden></div>
       <div class="empty-state" id="capsuleEmpty" hidden>This Time Capsule does not have visible moments yet.</div>
@@ -69,6 +84,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js" defer></script>
-  <script type="module" src="capsule.js?v=20260601-tv-slideshow-1"></script>
+  <script type="module" src="capsule.js?v=20260601-tv-cast-fix-1"></script>
 </body>
 </html>
