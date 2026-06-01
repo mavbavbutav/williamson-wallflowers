@@ -175,6 +175,12 @@ test('host and guest frontends expose Host Posts controls and party view', async
   assert.match(guestJs, /\/events\/\$\{encodeURIComponent\(state\.event\.id\)\}\/host-posts/);
   assert.match(styles, /\.host-posts-panel/);
   assert.match(styles, /\.party-feed/);
+  assert.match(styles, /\.party-card-media[\s\S]*?grid-area: 1 \/ 1/);
+  assert.match(styles, /\.party-card-body[\s\S]*?grid-area: 1 \/ 1/);
+  assert.match(styles, /\.party-card-body strong[\s\S]*?background: rgba\(23, 21, 20, 0\.68\)/);
+  assert.match(styles, /\.party-card-body p[\s\S]*?background: rgba\(23, 21, 20, 0\.52\)/);
+  assert.match(styles, /\.party-card-body[\s\S]*?text-shadow:/);
+  assert.match(styles, /\.party-card-body \.status-pill[\s\S]*?color: #fffaf5/);
 });
 
 test('party view migration adds a persisted guest visibility flag', async () => {

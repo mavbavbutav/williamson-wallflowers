@@ -21,7 +21,7 @@ test('host can opt into adding a submission to Time Capsule while approving it',
   assert.match(styles, /\.host-decision-actions/);
   assert.match(styles, /\.decision-status/);
   assert.match(hostHtml, /host\.js\?v=20260601-party-view-1/);
-  assert.match(hostHtml, /styles\.css\?v=20260601-party-view-1/);
+  assert.match(hostHtml, /styles\.css\?v=20260601-party-opacity-1/);
 });
 
 async function readText(path) {
