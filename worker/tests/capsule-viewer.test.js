@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 function createElement() {
@@ -9,11 +10,17 @@ function createElement() {
     dataset: {},
     classList: {
       add() {},
-      remove() {}
+      remove() {},
+      toggle() {}
     },
+    setAttribute() {},
     addEventListener() {},
     append() {},
     focus() {},
+    scrollTo() {},
+    querySelector() {
+      return null;
+    },
     querySelectorAll() {
       return [];
     }
@@ -32,6 +39,7 @@ function installCapsuleDom() {
     '#capsuleMeta',
     '#capsuleEmpty',
     '#capsuleTimeline',
+    '#capsuleFeed',
     '#capsuleNotice',
     '#slideStage',
     '#slideTitle',
@@ -134,3 +142,27 @@ test('capsule viewer keeps the share token in the address bar for copy/share', a
     globalThis.Response = previousResponse;
   }
 });
+
+test('capsule viewer exposes a vertical swipe feed alongside the timeline', async () => {
+  const [capsuleHtml, capsuleJs, styles] = await Promise.all([
+    readText('../../moments/capsule/index.html'),
+    readText('../../moments/capsule/capsule.js'),
+    readText('../../moments/styles.css')
+  ]);
+
+  assert.match(capsuleHtml, /data-capsule-view="timeline"/);
+  assert.match(capsuleHtml, /data-capsule-view="feed"/);
+  assert.match(capsuleHtml, /id="capsuleFeed"/);
+  assert.match(capsuleHtml, /Swipe Feed/);
+  assert.match(capsuleJs, /function renderSwipeFeed/);
+  assert.match(capsuleJs, /function setCapsuleView/);
+  assert.match(capsuleJs, /data-feed-index/);
+  assert.match(capsuleJs, /toggleFeedPlayback/);
+  assert.match(styles, /\.capsule-swipe-feed/);
+  assert.match(styles, /scroll-snap-type: y mandatory/);
+  assert.match(styles, /\.capsule-feed-card/);
+});
+
+async function readText(path) {
+  return readFile(new URL(path, import.meta.url), 'utf8');
+}
