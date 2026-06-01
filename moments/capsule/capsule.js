@@ -8,13 +8,15 @@ let slideIndex = 0;
 let lastFocusedElement = null;
 let currentCapsuleView = "timeline";
 let feedScrollTimer = 0;
+let nativeSwipeFullscreenActive = false;
 
 init();
 
 async function init() {
   qs("#playSlideshowButton").addEventListener("click", () => openSlide(0));
+  qs("#exitSwipeFeedButton").addEventListener("click", () => setCapsuleView("timeline", { userInitiated: true }));
   qsaCapsuleViewButtons().forEach((button) => {
-    button.addEventListener("click", () => setCapsuleView(button.dataset.capsuleView || "timeline"));
+    button.addEventListener("click", () => setCapsuleView(button.dataset.capsuleView || "timeline", { userInitiated: true }));
   });
   qs("#capsuleFeed").addEventListener("scroll", () => {
     window.clearTimeout(feedScrollTimer);
@@ -27,10 +29,13 @@ async function init() {
     if (event.target === event.currentTarget) closeSlide();
   });
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && currentCapsuleView === "feed") setCapsuleView("timeline", { userInitiated: true });
     if (event.key === "Escape" && !qs("#slideshowModal").hidden) closeSlide();
     if (event.key === "ArrowRight" && !qs("#slideshowModal").hidden) changeSlide(1);
     if (event.key === "ArrowLeft" && !qs("#slideshowModal").hidden) changeSlide(-1);
   });
+  document.addEventListener("fullscreenchange", handleFullscreenChange);
+  document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
 
   if (!eventId || !token) {
     showError("This private Time Capsule link is missing its event or access token.");
@@ -68,7 +73,7 @@ function renderTimeline() {
             ? `<img src="${escapeAttribute(item.mediaUrl)}&disposition=inline" alt="${escapeAttribute(item.title)}" loading="lazy" />`
             : item.mediaType === "audio"
               ? `<audio src="${escapeAttribute(item.mediaUrl)}&disposition=inline" preload="metadata" controls></audio>`
-              : `<video src="${escapeAttribute(item.mediaUrl)}&disposition=inline" preload="metadata" muted playsinline></video>`}
+              : `<video poster="${escapeAttribute(videoPosterUrl(item))}" src="${escapeAttribute(item.mediaUrl)}&disposition=inline" preload="metadata" muted playsinline></video>`}
         </span>
         <span class="media-body">
           <span class="status-pill">${escapeHtml(item.chapter || "Guest moments")}</span>
@@ -141,22 +146,26 @@ function renderFeedMedia(item, index) {
   }
 
   return `
-    <video data-feed-media="${index}" src="${mediaUrl}" preload="metadata" playsinline></video>
+    <video data-feed-media="${index}" poster="${escapeAttribute(videoPosterUrl(item))}" src="${mediaUrl}" preload="metadata" playsinline></video>
     <button class="capsule-feed-play" type="button" data-feed-play="${index}" aria-label="Play ${title}">
       <span>Tap to play</span>
     </button>
   `;
 }
 
-function setCapsuleView(view) {
+function setCapsuleView(view, options = {}) {
   currentCapsuleView = view === "feed" && items.length ? "feed" : "timeline";
   qs("#capsuleTimeline").hidden = currentCapsuleView !== "timeline";
   qs("#capsuleFeed").hidden = currentCapsuleView !== "feed";
+  qs("#exitSwipeFeedButton").hidden = currentCapsuleView !== "feed";
+  document.body.classList.toggle("is-swipe-feed-active", currentCapsuleView === "feed");
 
   if (currentCapsuleView !== "feed") {
     pauseAllFeedMedia();
+    if (!options.skipFullscreenExit) exitSwipeFullscreen();
   } else {
     qs("#capsuleFeed").scrollTo({ top: 0, behavior: "smooth" });
+    if (options.userInitiated) requestSwipeFullscreen();
   }
 
   qsaCapsuleViewButtons().forEach((button) => {
@@ -164,6 +173,57 @@ function setCapsuleView(view) {
     button.classList.toggle("is-active", isActive);
     button.setAttribute("aria-pressed", String(isActive));
   });
+}
+
+async function requestSwipeFullscreen() {
+  const target = qs("#capsuleDashboard");
+  const requestFullscreen = target.requestFullscreen || target.webkitRequestFullscreen || target.msRequestFullscreen;
+  if (!requestFullscreen || activeFullscreenElement()) return;
+
+  try {
+    await requestFullscreen.call(target, { navigationUI: "hide" });
+  } catch {
+    try {
+      await requestFullscreen.call(target);
+    } catch {
+      nativeSwipeFullscreenActive = false;
+    }
+  }
+}
+
+async function exitSwipeFullscreen() {
+  const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+  if (!exitFullscreen || !activeFullscreenElement()) return;
+
+  try {
+    await exitFullscreen.call(document);
+  } catch {
+    nativeSwipeFullscreenActive = false;
+  }
+}
+
+function activeFullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement || null;
+}
+
+function handleFullscreenChange() {
+  const target = qs("#capsuleDashboard");
+  const activeElement = activeFullscreenElement();
+  const isSwipeFullscreen = activeElement === target || Boolean(activeElement && target?.contains?.(activeElement));
+
+  if (isSwipeFullscreen) {
+    nativeSwipeFullscreenActive = true;
+    document.body.classList.add("is-native-swipe-feed");
+    return;
+  }
+
+  const wasNativeSwipeFullscreen = nativeSwipeFullscreenActive;
+  nativeSwipeFullscreenActive = false;
+  document.body.classList.remove("is-native-swipe-feed");
+
+  if (wasNativeSwipeFullscreen && currentCapsuleView === "feed") {
+    setCapsuleView("timeline", { skipFullscreenExit: true });
+  }
 }
 
 function toggleFeedPlayback(index) {
@@ -254,6 +314,7 @@ function renderSlide() {
   } else {
     const video = document.createElement("video");
     video.src = `${item.mediaUrl}&disposition=inline`;
+    video.poster = videoPosterUrl(item);
     video.controls = true;
     video.playsInline = true;
     video.preload = "metadata";
@@ -278,6 +339,7 @@ function closeSlide() {
 }
 
 function showError(message) {
+  document.body.classList.remove("is-swipe-feed-active");
   qs("#capsuleTitle").textContent = "Time Capsule unavailable";
   qs("#capsuleMeta").textContent = "Ask the event host for the current private link.";
   setNotice(qs("#capsuleNotice"), message, "error");
@@ -321,6 +383,36 @@ function formatDuration(seconds) {
   const minutes = Math.floor(value / 60);
   const remainder = value % 60;
   return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function videoPosterUrl(item) {
+  const title = posterText(item.title || "Video moment", 34);
+  const chapter = posterText(item.chapter || "Time Capsule", 24);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1600" viewBox="0 0 1200 1600">
+      <defs>
+        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#f7d8c7"/>
+          <stop offset="0.52" stop-color="#8fb8a2"/>
+          <stop offset="1" stop-color="#2f2926"/>
+        </linearGradient>
+      </defs>
+      <rect width="1200" height="1600" fill="url(#bg)"/>
+      <path d="M0 1060 1200 760v840H0z" fill="#201c1a" opacity="0.86"/>
+      <rect x="128" y="1170" width="944" height="6" rx="3" fill="#fffaf5" opacity="0.38"/>
+      <circle cx="600" cy="680" r="156" fill="#fffaf5" opacity="0.9"/>
+      <path d="M565 596v168l146-84z" fill="#2f2926"/>
+      <text x="128" y="1256" fill="#fffaf5" font-family="Arial, sans-serif" font-size="42" font-weight="700" letter-spacing="4">${escapeHtml(chapter).toUpperCase()}</text>
+      <text x="128" y="1356" fill="#fffaf5" font-family="Arial, sans-serif" font-size="76" font-weight="800">${escapeHtml(title)}</text>
+      <text x="128" y="1432" fill="#fffaf5" font-family="Arial, sans-serif" font-size="40" font-weight="700" opacity="0.78">Tap to play video</text>
+    </svg>
+  `;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function posterText(value, maxLength) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
 }
 
 function cssEscape(value) {

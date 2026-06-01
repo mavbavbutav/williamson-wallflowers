@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260601-capsule-feed-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260601-capsule-feed-2" />
 </head>
 <body class="host-page capsule-viewer">
   <main class="app-shell">
@@ -28,7 +28,7 @@
       </a>
     </header>
 
-    <section class="dashboard">
+    <section class="dashboard" id="capsuleDashboard">
       <div class="dashboard-header">
         <div>
           <h1 class="section-title" id="capsuleTitle" tabindex="-1">Opening Time Capsule</h1>
@@ -39,6 +39,7 @@
             <button class="tab-button is-active" type="button" data-capsule-view="timeline" aria-pressed="true">Timeline</button>
             <button class="tab-button" type="button" data-capsule-view="feed" aria-pressed="false">Swipe Feed</button>
           </div>
+          <button class="button button-secondary capsule-feed-exit" type="button" id="exitSwipeFeedButton" hidden>Exit feed</button>
           <button class="button button-primary" type="button" id="playSlideshowButton" hidden>Play slideshow</button>
         </div>
       </div>
@@ -66,6 +67,6 @@
     </div>
   </div>
 
-  <script type="module" src="capsule.js?v=20260601-capsule-feed-1"></script>
+  <script type="module" src="capsule.js?v=20260601-capsule-feed-2"></script>
 </body>
 </html>

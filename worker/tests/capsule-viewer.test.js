@@ -31,6 +31,7 @@ function installCapsuleDom() {
   const elements = new Map();
   const selectors = [
     '#playSlideshowButton',
+    '#exitSwipeFeedButton',
     '#slideClose',
     '#slidePrev',
     '#slideNext',
@@ -161,6 +162,40 @@ test('capsule viewer exposes a vertical swipe feed alongside the timeline', asyn
   assert.match(styles, /\.capsule-swipe-feed/);
   assert.match(styles, /scroll-snap-type: y mandatory/);
   assert.match(styles, /\.capsule-feed-card/);
+});
+
+test('capsule swipe feed becomes fullscreen on mobile and videos use poster art', async () => {
+  const [capsuleJs, styles] = await Promise.all([
+    readText('../../moments/capsule/capsule.js'),
+    readText('../../moments/styles.css')
+  ]);
+
+  assert.match(capsuleJs, /document\.body\.classList\.toggle\("is-swipe-feed-active"/);
+  assert.match(capsuleJs, /function videoPosterUrl/);
+  assert.match(capsuleJs, /poster="\$\{escapeAttribute\(videoPosterUrl\(item\)\)\}"/);
+  assert.match(styles, /\.capsule-viewer\.is-swipe-feed-active \.site-topbar[\s\S]*?display: none/);
+  assert.match(styles, /\.capsule-viewer\.is-swipe-feed-active \.capsule-swipe-feed[\s\S]*?position: fixed/);
+  assert.match(styles, /\.capsule-viewer\.is-swipe-feed-active \.capsule-swipe-feed[\s\S]*?height: 100dvh/);
+  assert.match(styles, /\.capsule-viewer\.is-swipe-feed-active \.capsule-feed-card[\s\S]*?min-height: 100dvh/);
+});
+
+test('capsule swipe feed tries native fullscreen and provides an exit control', async () => {
+  const [capsuleHtml, capsuleJs, styles] = await Promise.all([
+    readText('../../moments/capsule/index.html'),
+    readText('../../moments/capsule/capsule.js'),
+    readText('../../moments/styles.css')
+  ]);
+
+  assert.match(capsuleHtml, /id="capsuleDashboard"/);
+  assert.match(capsuleHtml, /id="exitSwipeFeedButton"/);
+  assert.match(capsuleJs, /setCapsuleView\(button\.dataset\.capsuleView \|\| "timeline", \{ userInitiated: true \}\)/);
+  assert.match(capsuleJs, /function requestSwipeFullscreen/);
+  assert.match(capsuleJs, /requestFullscreen/);
+  assert.match(capsuleJs, /navigationUI: "hide"/);
+  assert.match(capsuleJs, /function exitSwipeFullscreen/);
+  assert.match(capsuleJs, /fullscreenchange/);
+  assert.match(styles, /\.capsule-viewer\.is-swipe-feed-active \.dashboard[\s\S]*?position: fixed/);
+  assert.match(styles, /\.capsule-viewer\.is-swipe-feed-active \.capsule-feed-exit/);
 });
 
 async function readText(path) {
