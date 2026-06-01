@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260601-host-streamline-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260601-party-view-1" />
 </head>
 <body class="host-page">
   <main class="app-shell">
@@ -74,7 +74,7 @@
             <span class="tab-count" data-workspace-count="submissions">0</span>
           </button>
           <button class="tab-button" type="button" data-view="host-posts" aria-pressed="false">
-            <span>Host Posts</span>
+            <span>Party View</span>
             <span class="tab-count" data-workspace-count="host-posts">0</span>
           </button>
           <button class="tab-button" type="button" data-view="capsule" aria-pressed="false">
@@ -115,7 +115,7 @@
         <div class="host-posts-panel">
           <div class="panel-heading">
             <div>
-              <h2>Host Posts</h2>
+              <h2>Post as Host</h2>
               <p class="muted">Add party updates that guests can see right away. These are approved and added to the Time Capsule automatically.</p>
             </div>
             <span class="status-pill">Live to guests</span>
@@ -175,7 +175,7 @@
           <span class="muted" id="hostPostCount">0 host posts</span>
         </div>
         <div class="party-feed" id="hostPostsGrid"></div>
-        <div class="empty-state" id="hostPostsEmpty" hidden>No Host Posts yet. Add one above to start the party feed.</div>
+        <div class="empty-state" id="hostPostsEmpty" hidden>No Party View moments yet. Add a Host Post above or show an approved submission.</div>
       </section>
 
       <section class="dashboard" id="capsulePanel" hidden>
@@ -240,6 +240,6 @@
     <div class="media-modal-stage" id="modalStage"></div>
   </div>
 
-  <script type="module" src="host.js?v=20260601-host-streamline-1"></script>
+  <script type="module" src="host.js?v=20260601-party-view-1"></script>
 </body>
 </html>

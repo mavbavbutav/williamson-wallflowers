@@ -182,6 +182,10 @@ async function handleMomentsApi(request, env, url, corsHeaders) {
     }
 
     if (parts[0] === 'host' && parts[1] === 'submissions' && parts[2]) {
+      if (request.method === 'PATCH' && parts[3] === 'party-view') {
+        return updateSubmissionPartyView(request, env, url, corsHeaders, parts[2]);
+      }
+
       if (request.method === 'PATCH') {
         return updateHostSubmission(request, env, url, corsHeaders, parts[2]);
       }
@@ -418,7 +422,12 @@ async function listGuestHostPosts(request, env, url, corsHeaders, eventId) {
     }, 200, corsHeaders);
   }
 
-  const items = await getTimeCapsuleItems(env, event.id, request, { visibleOnly: true, hostOnly: true });
+  const [hostItems, guestItems] = await Promise.all([
+    getTimeCapsuleItems(env, event.id, request, { visibleOnly: true, hostOnly: true }),
+    getGuestVisibleSubmissions(env, event.id, request)
+  ]);
+  const items = [...hostItems, ...guestItems]
+    .sort((a, b) => new Date(b.capturedAt || b.createdAt || 0) - new Date(a.capturedAt || a.createdAt || 0));
 
   return json({
     ok: true,
@@ -794,11 +803,45 @@ async function updateHostSubmission(request, env, url, corsHeaders, submissionId
   const now = new Date().toISOString();
   await env.MOMENTS_DB.prepare(`
     UPDATE submissions
-    SET status = ?, updated_at = ?
+    SET status = ?, guest_visible_at = CASE WHEN ? = 'approved' THEN guest_visible_at ELSE NULL END, updated_at = ?
     WHERE id = ? AND deleted_at IS NULL
-  `).bind(status, now, submissionId).run();
+  `).bind(status, status, now, submissionId).run();
 
   return json({ ok: true, status }, 200, corsHeaders);
+}
+
+async function updateSubmissionPartyView(request, env, url, corsHeaders, submissionId) {
+  const token = getAccessToken(request, url);
+  const submission = await getSubmissionWithEvent(env, submissionId);
+
+  if (!submission || !isAuthorizedForSubmission(submission, token, env)) {
+    return json({ ok: false, message: 'This host gallery link is not valid.' }, 403, corsHeaders);
+  }
+
+  if (submission.deletedAt || submission.status === 'deleted') {
+    return json({ ok: false, message: 'Submission not found.' }, 404, corsHeaders);
+  }
+
+  const body = await request.json();
+  const visible = body.visible !== false;
+
+  if (visible && submission.status !== 'approved') {
+    return json({ ok: false, message: 'Only approved submissions can be shown in Party View.' }, 400, corsHeaders);
+  }
+
+  const now = new Date().toISOString();
+  const guestVisibleAt = visible ? now : null;
+  await env.MOMENTS_DB.prepare(`
+    UPDATE submissions
+    SET guest_visible_at = ?, updated_at = ?
+    WHERE id = ? AND deleted_at IS NULL
+  `).bind(guestVisibleAt, now, submissionId).run();
+
+  return json({
+    ok: true,
+    guestVisible: visible,
+    guestVisibleAt: guestVisibleAt || ''
+  }, 200, corsHeaders);
 }
 
 async function deleteHostSubmission(request, env, url, corsHeaders, submissionId) {
@@ -1707,6 +1750,17 @@ async function getTimeCapsuleItems(env, eventId, request, options = {}) {
   return Promise.all((result.results || []).map((row) => toTimeCapsuleItemClient(row, request, env)));
 }
 
+async function getGuestVisibleSubmissions(env, eventId, request) {
+  const result = await env.MOMENTS_DB.prepare(`
+    SELECT *
+    FROM submissions
+    WHERE event_id = ? AND status = 'approved' AND deleted_at IS NULL AND guest_visible_at IS NOT NULL
+    ORDER BY guest_visible_at DESC, created_at DESC
+  `).bind(eventId).all();
+
+  return Promise.all((result.results || []).map((row) => toPartyViewSubmissionClient(row, request, env)));
+}
+
 async function getTimeCapsuleItemBySubmission(env, eventId, submissionId) {
   return env.MOMENTS_DB.prepare(`
     SELECT id
@@ -1801,6 +1855,7 @@ async function getSubmissionWithEvent(env, submissionId) {
       s.guest_note AS guestNote,
       s.consent_at AS consentAt,
       s.status,
+      s.guest_visible_at AS guestVisibleAt,
       s.deleted_at AS deletedAt,
       s.created_at AS createdAt,
       s.updated_at AS updatedAt,
@@ -2255,24 +2310,56 @@ async function toSubmissionClient(row, request, env) {
   const mediaToken = await createSignedToken(env, 'media', row.id, MEDIA_TOKEN_TTL_SECONDS);
   const mediaUrl = `${getApiOrigin(request, env)}/moments-api/media/${encodeURIComponent(row.id)}?mediaToken=${encodeURIComponent(mediaToken)}`;
   const thumbnail = await buildThumbnailClient(row, request, env, row.id, row.media_type || row.mediaType, row.thumbnail_object_key || row.thumbnailObjectKey);
+  const guestVisibleAt = row.guest_visible_at || row.guestVisibleAt || '';
 
   return {
     id: row.id,
-    eventId: row.event_id,
-    mediaType: row.media_type,
+    eventId: row.event_id || row.eventId,
+    mediaType: row.media_type || row.mediaType,
     source: row.source || 'guest',
-    mimeType: row.mime_type,
+    mimeType: row.mime_type || row.mimeType,
     size: row.size,
-    durationSeconds: row.duration_seconds,
-    guestName: row.guest_name,
-    guestNote: row.guest_note,
+    durationSeconds: row.duration_seconds || row.durationSeconds || 0,
+    guestName: row.guest_name || row.guestName || '',
+    guestNote: row.guest_note || row.guestNote || '',
     status: row.status,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    guestVisibleAt,
+    guestVisible: Boolean(guestVisibleAt),
+    createdAt: row.created_at || row.createdAt,
+    updatedAt: row.updated_at || row.updatedAt,
     mediaUrl,
     downloadUrl: mediaUrl,
     thumbnailUrl: thumbnail.url,
     thumbnailUploadUrl: thumbnail.uploadUrl
+  };
+}
+
+async function toPartyViewSubmissionClient(row, request, env) {
+  const submission = await toSubmissionClient(row, request, env);
+  return {
+    id: `party-${submission.id}`,
+    eventId: submission.eventId,
+    submissionId: submission.id,
+    title: submission.guestName ? `Moment from ${submission.guestName}` : 'Guest moment',
+    caption: submission.guestNote || '',
+    chapter: 'Guest moments',
+    capturedAt: submission.guestVisibleAt || submission.createdAt,
+    location: '',
+    sortOrder: 0,
+    isVisible: true,
+    mediaType: submission.mediaType,
+    source: submission.source || 'guest',
+    mimeType: submission.mimeType,
+    size: submission.size,
+    durationSeconds: submission.durationSeconds,
+    guestName: submission.guestName,
+    guestNote: submission.guestNote,
+    mediaUrl: submission.mediaUrl,
+    downloadUrl: submission.downloadUrl,
+    thumbnailUrl: submission.thumbnailUrl,
+    thumbnailUploadUrl: submission.thumbnailUploadUrl,
+    createdAt: submission.createdAt,
+    updatedAt: submission.updatedAt
   };
 }
 

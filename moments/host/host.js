@@ -166,7 +166,7 @@ function renderWorkspaceTabs() {
   const counts = getSubmissionCounts();
   const workspaceCounts = {
     submissions: counts.pending || submissions.length || 0,
-    "host-posts": getHostPostItems().length,
+    "host-posts": getPartyViewItems().length,
     capsule: capsuleItems.length,
     share: timeCapsule?.status === "published" ? "Live" : "Draft"
   };
@@ -209,6 +209,7 @@ function renderSubmissionCard(submission) {
   const downloadUrl = `${submission.downloadUrl}&disposition=attachment`;
   const thumb = renderThumb(submission, mediaUrl);
   const inCapsule = isInCapsule(submission.id);
+  const inPartyView = Boolean(submission.guestVisible || submission.guestVisibleAt);
 
   const body = document.createElement("div");
   body.className = "media-body";
@@ -218,6 +219,7 @@ function renderSubmissionCard(submission) {
       <span class="status-pill">${escapeHtml(getMediaTypeLabel(submission.mediaType))}</span>
       ${submission.source === "host" ? `<span class="status-pill">Host Post</span>` : ""}
       ${inCapsule ? `<span class="status-pill is-approved">In Time Capsule</span>` : ""}
+      ${inPartyView ? `<span class="status-pill is-approved">In Guest View</span>` : ""}
     </div>
     <strong>${escapeHtml(submission.guestName || "Anonymous guest")}</strong>
     <p class="muted">${escapeHtml(submission.guestNote || "No note added.")}</p>
@@ -243,6 +245,14 @@ function renderSubmissionCard(submission) {
     saved.className = "decision-status";
     saved.textContent = "Already in Time Capsule";
     actions.append(saved);
+  }
+
+  if (submission.status === "approved" && submission.source !== "host") {
+    actions.append(actionButton(
+      inPartyView ? "Hide from Guest View" : "Show in Guest View",
+      inPartyView ? "" : "is-primary is-featured",
+      () => setSubmissionPartyView(submission, !inPartyView)
+    ));
   }
 
   if (submission.status !== "rejected") {
@@ -376,10 +386,10 @@ function renderShare() {
 function renderHostPosts() {
   if (!eventRecord?.timeCapsule?.enabled) return;
 
-  const posts = getHostPostItems();
+  const posts = getPartyViewItems();
   const grid = qs("#hostPostsGrid");
   grid.innerHTML = "";
-  qs("#hostPostCount").textContent = `${posts.length} ${posts.length === 1 ? "host post" : "host posts"}`;
+  qs("#hostPostCount").textContent = `${posts.length} ${posts.length === 1 ? "party moment" : "party moments"}`;
   qs("#hostPostsEmpty").hidden = posts.length > 0;
 
   posts.forEach((item) => {
@@ -397,10 +407,10 @@ function renderHostPostCard(item) {
   body.className = "media-body";
   body.innerHTML = `
     <div class="button-row">
-      <span class="status-pill">Host Post</span>
+      <span class="status-pill">${item.source === "host" ? "Host Post" : "Guest Moment"}</span>
       <span class="status-pill">${escapeHtml(getMediaTypeLabel(item.mediaType))}</span>
     </div>
-    <strong>${escapeHtml(item.title || "Host Post")}</strong>
+    <strong>${escapeHtml(item.title || (item.source === "host" ? "Host Post" : "Guest moment"))}</strong>
     <p class="muted">${escapeHtml(item.caption || item.guestNote || "No caption added.")}</p>
     <div class="media-meta">
       <span>${formatDateTime(item.capturedAt || item.createdAt)}</span>
@@ -412,20 +422,54 @@ function renderHostPostCard(item) {
   const actions = document.createElement("div");
   actions.className = "row-actions card-actions";
   actions.append(actionButton("View", "is-primary", () => openMediaModal(item, mediaUrl)));
-  actions.append(actionButton("Edit in Capsule", "is-success", () => {
-    currentView = "capsule";
-    render();
-  }));
+  if (item.source === "host" || item.chapter === "Host Posts") {
+    actions.append(actionButton("Edit in Capsule", "is-success", () => {
+      currentView = "capsule";
+      render();
+    }));
+  } else if (item.submissionId) {
+    actions.append(actionButton("Hide from Guest View", "", () => setSubmissionPartyView({ id: item.submissionId }, false)));
+  }
   body.append(actions);
 
   card.append(thumb, body);
   return card;
 }
 
-function getHostPostItems() {
-  return capsuleItems
+function getPartyViewItems() {
+  const hostPosts = capsuleItems
     .filter((item) => item.source === "host" || item.chapter === "Host Posts")
-    .slice()
+    .map((item) => ({ ...item, source: item.source || "host" }));
+
+  const guestMoments = submissions
+    .filter((item) => item.status === "approved" && item.source !== "host" && (item.guestVisible || item.guestVisibleAt))
+    .map((submission) => ({
+      id: `party-${submission.id}`,
+      eventId: submission.eventId,
+      submissionId: submission.id,
+      title: submission.guestName ? `Moment from ${submission.guestName}` : "Guest moment",
+      caption: submission.guestNote || "",
+      chapter: "Guest moments",
+      capturedAt: submission.guestVisibleAt || submission.createdAt,
+      location: "",
+      sortOrder: 0,
+      isVisible: true,
+      mediaType: submission.mediaType,
+      source: submission.source || "guest",
+      mimeType: submission.mimeType,
+      size: submission.size,
+      durationSeconds: submission.durationSeconds,
+      guestName: submission.guestName,
+      guestNote: submission.guestNote,
+      mediaUrl: submission.mediaUrl,
+      downloadUrl: submission.downloadUrl,
+      thumbnailUrl: submission.thumbnailUrl,
+      thumbnailUploadUrl: submission.thumbnailUploadUrl,
+      createdAt: submission.createdAt,
+      updatedAt: submission.updatedAt
+    }));
+
+  return [...hostPosts, ...guestMoments]
     .sort((a, b) => new Date(b.capturedAt || b.createdAt || 0) - new Date(a.capturedAt || a.createdAt || 0));
 }
 
@@ -695,6 +739,19 @@ function createCapsuleItem(submission) {
       chapter: "Guest moments"
     })
   });
+}
+
+async function setSubmissionPartyView(submission, visible) {
+  try {
+    await hostRequest(`/host/submissions/${encodeURIComponent(submission.id)}/party-view`, {
+      method: "PATCH",
+      body: JSON.stringify({ visible })
+    });
+    await loadGallery();
+    showHostCelebration(visible ? "Moment is now visible in the guest Party View." : "Moment hidden from the guest Party View.");
+  } catch (error) {
+    setNotice(qs("#hostNotice"), error.message || "Could not update the guest Party View.", "error");
+  }
 }
 
 async function saveCapsule(status = "") {

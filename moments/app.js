@@ -111,13 +111,13 @@ async function loadHostPosts({ silent = false } = {}) {
     state.hostPosts = payload.items || [];
     renderHostPosts();
     if (!silent && state.hostPosts.length === 0) {
-      setNotice(qs("#hostPostsNotice"), "No Host Posts yet. Check back soon.", "");
+      setNotice(qs("#hostPostsNotice"), "No Party View moments yet. Check back soon.", "");
     } else if (!silent) {
-      setNotice(qs("#hostPostsNotice"), "Host Posts refreshed.", "success");
+      setNotice(qs("#hostPostsNotice"), "Party View refreshed.", "success");
     }
   } catch (error) {
     if (!silent) {
-      setNotice(qs("#hostPostsNotice"), error.message || "Could not refresh Host Posts.", "error");
+      setNotice(qs("#hostPostsNotice"), error.message || "Could not refresh Party View.", "error");
     }
     if (state.hostPosts.length === 0) {
       qs("#hostPostsView").hidden = true;
@@ -156,7 +156,7 @@ function renderHostPostCard(item) {
   if (item.mediaType === "photo") {
     const image = document.createElement("img");
     image.src = mediaUrl;
-    image.alt = item.title || "Host Post photo";
+    image.alt = item.title || "Party View photo";
     image.loading = "lazy";
     media.append(image);
   } else if (item.mediaType === "audio") {
@@ -164,8 +164,8 @@ function renderHostPostCard(item) {
       <div class="voice-memo-panel">
         <div class="voice-memo-header">
           <div class="voice-memo-copy">
-            <span class="voice-memo-kicker">Host voice memo</span>
-            <strong>${escapeHtml(item.title || "Host Post")}</strong>
+            <span class="voice-memo-kicker">${item.source === "host" ? "Host voice memo" : "Guest voice memo"}</span>
+            <strong>${escapeHtml(item.title || "Party View")}</strong>
             <span class="voice-memo-detail">${escapeHtml(item.durationSeconds ? formatTimer(item.durationSeconds) : "Tap play to listen")}</span>
           </div>
         </div>
@@ -193,10 +193,10 @@ function renderHostPostCard(item) {
   body.className = "party-card-body";
   body.innerHTML = `
     <div class="button-row">
-      <span class="status-pill">Host Post</span>
+      <span class="status-pill">${item.source === "host" ? "Host Post" : "Guest Moment"}</span>
       <span class="status-pill">${escapeHtml(getMediaTypeLabel(item.mediaType))}</span>
     </div>
-    <strong>${escapeHtml(item.title || "Host Post")}</strong>
+    <strong>${escapeHtml(item.title || (item.source === "host" ? "Host Post" : "Guest moment"))}</strong>
     <p>${escapeHtml(item.caption || item.guestNote || "")}</p>
     <span class="muted">${escapeHtml(formatDateTime(item.capturedAt || item.createdAt))}</span>
   `;

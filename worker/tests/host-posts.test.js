@@ -83,6 +83,74 @@ test('guest can read Host Posts from the scanned event link with the upload toke
   assert.equal(payload.items[0].mediaUrl.includes('share-token'), false);
 });
 
+test('host can push an approved guest submission to Party View', async () => {
+  const db = new HostPostsFakeDb({
+    submissions: [guestSubmission({ id: 'guest-approved', status: 'approved' })]
+  });
+  const env = envWithDb(db, new FakeBucket());
+
+  const pushResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/submissions/guest-approved/party-view', {
+    method: 'PATCH',
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      Authorization: 'Bearer host-token'
+    },
+    body: JSON.stringify({ visible: true })
+  }), env);
+  const pushPayload = await pushResponse.json();
+
+  assert.equal(pushResponse.status, 200);
+  assert.equal(pushPayload.guestVisible, true);
+  assert.ok(db.submissions[0].guestVisibleAt);
+
+  const tokenResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/tags/host-tag', {
+    headers: { Origin: 'https://williamsonwallflowers.com' }
+  }), env);
+  const { uploadToken } = await tokenResponse.json();
+
+  const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/events/event-host/host-posts', {
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      Authorization: `Bearer ${uploadToken}`
+    }
+  }), env);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.items.length, 1);
+  assert.equal(payload.items[0].submissionId, 'guest-approved');
+  assert.equal(payload.items[0].source, 'guest');
+  assert.equal(payload.items[0].chapter, 'Guest moments');
+  assert.equal(payload.items[0].title, 'Moment from Avery');
+});
+
+test('pending or rejected submissions cannot be pushed to Party View', async () => {
+  const db = new HostPostsFakeDb({
+    submissions: [
+      guestSubmission({ id: 'guest-pending', status: 'pending' }),
+      guestSubmission({ id: 'guest-rejected', status: 'rejected' })
+    ]
+  });
+  const env = envWithDb(db, new FakeBucket());
+
+  for (const id of ['guest-pending', 'guest-rejected']) {
+    const response = await worker.fetch(new Request(`https://williamsonwallflowers.com/moments-api/host/submissions/${id}/party-view`, {
+      method: 'PATCH',
+      headers: {
+        Origin: 'https://williamsonwallflowers.com',
+        Authorization: 'Bearer host-token'
+      },
+      body: JSON.stringify({ visible: true })
+    }), env);
+    const payload = await response.json();
+
+    assert.equal(response.status, 400);
+    assert.match(payload.message, /approved/i);
+  }
+
+  assert.equal(db.submissions.some((item) => item.guestVisibleAt), false);
+});
+
 test('host and guest frontends expose Host Posts controls and party view', async () => {
   const [hostHtml, hostJs, guestHtml, guestJs, styles] = await Promise.all([
     readText('../../moments/host/index.html'),
@@ -94,14 +162,26 @@ test('host and guest frontends expose Host Posts controls and party view', async
 
   assert.match(hostHtml, /data-view="host-posts"/);
   assert.match(hostHtml, /id="hostPostsPanel"/);
+  assert.match(hostHtml, />Party View</);
   assert.match(hostJs, /createHostPost/);
+  assert.match(hostJs, /Show in Guest View/);
+  assert.match(hostJs, /Hide from Guest View/);
+  assert.match(hostJs, /setSubmissionPartyView/);
   assert.match(hostJs, /\/host\/events\/\$\{encodeURIComponent\(eventId\)\}\/posts/);
+  assert.match(hostJs, /\/host\/submissions\/\$\{encodeURIComponent\(submission\.id\)\}\/party-view/);
   assert.match(guestHtml, /id="hostPostsView"/);
-  assert.match(guestHtml, /Host Posts/);
+  assert.match(guestHtml, /Party View/);
   assert.match(guestJs, /loadHostPosts/);
   assert.match(guestJs, /\/events\/\$\{encodeURIComponent\(state\.event\.id\)\}\/host-posts/);
   assert.match(styles, /\.host-posts-panel/);
   assert.match(styles, /\.party-feed/);
+});
+
+test('party view migration adds a persisted guest visibility flag', async () => {
+  const migration = await readText('../../worker/migrations/0007_wallflower_party_view.sql');
+
+  assert.match(migration, /guest_visible_at TEXT/);
+  assert.match(migration, /idx_submissions_party_view/);
 });
 
 async function readText(path) {
@@ -140,12 +220,50 @@ function hostSubmission(overrides = {}) {
     consent_at: '2026-09-19T20:15:00.000Z',
     consentAt: '2026-09-19T20:15:00.000Z',
     status: 'approved',
+    guest_visible_at: null,
+    guestVisibleAt: null,
     deleted_at: null,
     deletedAt: null,
     created_at: '2026-09-19T20:15:00.000Z',
     createdAt: '2026-09-19T20:15:00.000Z',
     updated_at: '2026-09-19T20:15:00.000Z',
     updatedAt: '2026-09-19T20:15:00.000Z',
+    ...overrides
+  };
+}
+
+function guestSubmission(overrides = {}) {
+  return {
+    id: 'guest-approved',
+    event_id: 'event-host',
+    eventId: 'event-host',
+    media_type: 'photo',
+    mediaType: 'photo',
+    source: 'guest',
+    object_key: 'moments/event-host/guest-approved.jpg',
+    objectKey: 'moments/event-host/guest-approved.jpg',
+    original_filename: 'guest-photo.jpg',
+    originalFilename: 'guest-photo.jpg',
+    mime_type: 'image/jpeg',
+    mimeType: 'image/jpeg',
+    size: 1200,
+    duration_seconds: 0,
+    durationSeconds: 0,
+    guest_name: 'Avery',
+    guestName: 'Avery',
+    guest_note: 'A sweet guest moment.',
+    guestNote: 'A sweet guest moment.',
+    consent_at: '2026-09-19T20:20:00.000Z',
+    consentAt: '2026-09-19T20:20:00.000Z',
+    status: 'approved',
+    guest_visible_at: null,
+    guestVisibleAt: null,
+    deleted_at: null,
+    deletedAt: null,
+    created_at: '2026-09-19T20:20:00.000Z',
+    createdAt: '2026-09-19T20:20:00.000Z',
+    updated_at: '2026-09-19T20:20:00.000Z',
+    updatedAt: '2026-09-19T20:20:00.000Z',
     ...overrides
   };
 }
@@ -245,6 +363,35 @@ class HostPostsFakeStatement {
   }
 
   async first() {
+    if (this.sql.includes('FROM submissions s') && this.sql.includes('INNER JOIN events e') && this.sql.includes('WHERE s.id = ?')) {
+      const submission = this.db.submissions.find((item) => item.id === this.params[0]);
+      const event = submission && this.db.events.find((item) => item.id === (submission.event_id || submission.eventId));
+      return submission && event
+        ? {
+          ...submission,
+          eventId: submission.event_id || submission.eventId,
+          mediaType: submission.media_type || submission.mediaType,
+          objectKey: submission.object_key || submission.objectKey,
+          originalFilename: submission.original_filename || submission.originalFilename,
+          mimeType: submission.mime_type || submission.mimeType,
+          thumbnailObjectKey: submission.thumbnail_object_key || submission.thumbnailObjectKey,
+          thumbnailMimeType: submission.thumbnail_mime_type || submission.thumbnailMimeType,
+          thumbnailSize: submission.thumbnail_size || submission.thumbnailSize,
+          thumbnailCreatedAt: submission.thumbnail_created_at || submission.thumbnailCreatedAt,
+          durationSeconds: submission.duration_seconds || submission.durationSeconds,
+          guestName: submission.guest_name || submission.guestName,
+          guestNote: submission.guest_note || submission.guestNote,
+          consentAt: submission.consent_at || submission.consentAt,
+          guestVisibleAt: submission.guest_visible_at || submission.guestVisibleAt,
+          deletedAt: submission.deleted_at || submission.deletedAt,
+          createdAt: submission.created_at || submission.createdAt,
+          updatedAt: submission.updated_at || submission.updatedAt,
+          hostToken: event.hostToken,
+          eventAdminToken: event.adminToken
+        }
+        : null;
+    }
+
     if (this.sql.includes('FROM tags')) {
       const tag = this.db.tags.find((item) => item.publicCode === this.params[0]);
       const event = tag && this.db.events.find((item) => item.id === tag.activeEventId);
@@ -299,6 +446,17 @@ class HostPostsFakeStatement {
   }
 
   async all() {
+    if (this.sql.includes('FROM submissions') && this.sql.includes('guest_visible_at IS NOT NULL')) {
+      const eventId = this.params[0];
+      const rows = this.db.submissions
+        .filter((item) => (item.event_id || item.eventId) === eventId)
+        .filter((item) => item.status === 'approved')
+        .filter((item) => !(item.deleted_at || item.deletedAt))
+        .filter((item) => item.guest_visible_at || item.guestVisibleAt)
+        .sort((a, b) => new Date(b.guest_visible_at || b.guestVisibleAt || b.created_at || b.createdAt || 0) - new Date(a.guest_visible_at || a.guestVisibleAt || a.created_at || a.createdAt || 0));
+      return { results: rows };
+    }
+
     if (this.sql.includes('FROM time_capsule_items')) {
       const eventId = this.params[0];
       const rows = this.db.items
@@ -425,6 +583,31 @@ class HostPostsFakeStatement {
         updated_at: updatedAt,
         updatedAt
       });
+    }
+
+    if (this.sql.includes('UPDATE submissions') && this.sql.includes('guest_visible_at = ?')) {
+      const [guestVisibleAt, updatedAt, id] = this.params;
+      const submission = this.db.submissions.find((item) => item.id === id);
+      if (submission) {
+        submission.guest_visible_at = guestVisibleAt;
+        submission.guestVisibleAt = guestVisibleAt;
+        submission.updated_at = updatedAt;
+        submission.updatedAt = updatedAt;
+      }
+    }
+
+    if (this.sql.includes('UPDATE submissions') && this.sql.includes('SET status = ?')) {
+      const [status, statusForVisibility, updatedAt, id] = this.params;
+      const submission = this.db.submissions.find((item) => item.id === id);
+      if (submission) {
+        submission.status = status;
+        if (statusForVisibility !== 'approved') {
+          submission.guest_visible_at = null;
+          submission.guestVisibleAt = null;
+        }
+        submission.updated_at = updatedAt;
+        submission.updatedAt = updatedAt;
+      }
     }
 
     return { success: true };

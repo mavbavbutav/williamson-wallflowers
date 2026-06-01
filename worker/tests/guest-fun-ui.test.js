@@ -9,8 +9,8 @@ test('guest link keeps the memory booth flow minimal', async () => {
     readText('../../moments/styles.css')
   ]);
 
-  assert.match(guestHtml, /styles\.css\?v=20260601-guest-minimal-1/);
-  assert.match(guestHtml, /app\.js\?v=20260601-guest-minimal-1/);
+  assert.match(guestHtml, /styles\.css\?v=20260601-party-view-1/);
+  assert.match(guestHtml, /app\.js\?v=20260601-party-view-1/);
   assert.doesNotMatch(guestHtml, /class="guest-flow-card"/);
   assert.match(guestHtml, /class="memory-mode-card/);
   assert.match(guestHtml, />Photo</);
