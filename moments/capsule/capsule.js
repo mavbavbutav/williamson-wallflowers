@@ -9,6 +9,7 @@ let slideIndex = 0;
 let lastFocusedElement = null;
 let currentCapsuleView = "timeline";
 let feedScrollTimer = 0;
+let feedSoundUnlocked = false;
 let nativeSwipeFullscreenActive = false;
 const videoPosterCache = new Map();
 const videoPosterPersistCache = new Set();
@@ -170,8 +171,13 @@ function setCapsuleView(view, options = {}) {
     if (!options.skipFullscreenExit) exitSwipeFullscreen();
   } else {
     qs("#capsuleFeed").scrollTo({ top: 0, behavior: "smooth" });
-    if (options.userInitiated) requestSwipeFullscreen();
-    scheduleFeedAutoplay(320);
+    if (options.userInitiated) {
+      unlockFeedSound();
+      requestSwipeFullscreen();
+      syncFeedAutoplay();
+    } else {
+      scheduleFeedAutoplay(320);
+    }
   }
 
   qsaCapsuleViewButtons().forEach((button) => {
@@ -239,6 +245,7 @@ function toggleFeedPlayback(index) {
 
   const shouldUnmuteVideo = isFeedVideo(media) && !media.paused && media.muted;
   const shouldPlay = media.paused || shouldUnmuteVideo;
+  if (shouldPlay) unlockFeedSound();
   pauseAllFeedMedia(media);
   setFeedCardPlaying(card, !media.paused);
   setFeedAutoplayBlocked(card, false);
@@ -247,11 +254,6 @@ function toggleFeedPlayback(index) {
     media.pause();
     setFeedCardPlaying(card, false);
     return;
-  }
-
-  if (isFeedVideo(media)) {
-    media.muted = false;
-    media.dataset.userSound = "true";
   }
 
   media.play().then(() => {
@@ -329,8 +331,8 @@ function autoplayFeedMedia(media) {
     return;
   }
 
-  if (isFeedVideo(media) && media.dataset.userSound !== "true") {
-    media.muted = true;
+  if (isFeedVideo(media)) {
+    media.muted = !feedSoundUnlocked;
   }
 
   media.play().then(() => {
@@ -352,6 +354,16 @@ function bindFeedMediaEvents(media) {
   });
   media.addEventListener("pause", () => setFeedCardPlaying(card, false));
   media.addEventListener("ended", () => setFeedCardPlaying(card, false));
+  media.addEventListener("volumechange", () => {
+    if (isFeedVideo(media) && !media.muted) unlockFeedSound();
+  });
+}
+
+function unlockFeedSound() {
+  feedSoundUnlocked = true;
+  qsaFeedVideos().forEach((video) => {
+    video.muted = false;
+  });
 }
 
 function setFeedCardPlaying(card, isPlaying) {
@@ -479,6 +491,11 @@ function qsaFeedPlayButtons() {
 
 function qsaPlayableMedia(root) {
   return Array.from(root.querySelectorAll("video, audio"));
+}
+
+function qsaFeedVideos() {
+  const feed = qs("#capsuleFeed");
+  return feed ? Array.from(feed.querySelectorAll("video[data-feed-media]")) : [];
 }
 
 function getMediaTypeLabel(mediaType) {

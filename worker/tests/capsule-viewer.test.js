@@ -225,7 +225,7 @@ test('capsule swipe feed auto-plays centered videos and voice memos', async () =
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-feed-autoplay-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-feed-sound-unlock-1/);
   assert.match(capsuleJs, /scheduleFeedAutoplay/);
   assert.match(capsuleJs, /function syncFeedAutoplay/);
   assert.match(capsuleJs, /function getCenteredFeedMedia/);
@@ -235,6 +235,19 @@ test('capsule swipe feed auto-plays centered videos and voice memos', async () =
   assert.match(capsuleJs, /Tap for sound/);
   assert.match(capsuleJs, /Tap to listen/);
   assert.match(capsuleJs, /pauseAllFeedMedia\(media\)/);
+});
+
+test('capsule swipe feed keeps videos unmuted after one sound unlock', async () => {
+  const capsuleJs = await readText('../../moments/capsule/capsule.js');
+
+  assert.match(capsuleJs, /let feedSoundUnlocked = false/);
+  assert.match(capsuleJs, /function unlockFeedSound/);
+  assert.match(capsuleJs, /if \(options\.userInitiated\)[\s\S]*?unlockFeedSound\(\)/);
+  assert.match(capsuleJs, /feedSoundUnlocked = true/);
+  assert.match(capsuleJs, /qsaFeedVideos\(\)\.forEach/);
+  assert.match(capsuleJs, /video\.muted = false/);
+  assert.match(capsuleJs, /volumechange/);
+  assert.match(capsuleJs, /media\.muted = !feedSoundUnlocked/);
 });
 
 async function readText(path) {
