@@ -219,6 +219,24 @@ test('capsule videos replace generic poster art with captured video frames', asy
   assert.match(capsuleJs, /videoPosterCache/);
 });
 
+test('capsule swipe feed auto-plays centered videos and voice memos', async () => {
+  const [capsuleHtml, capsuleJs] = await Promise.all([
+    readText('../../moments/capsule/index.html'),
+    readText('../../moments/capsule/capsule.js')
+  ]);
+
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-feed-autoplay-1/);
+  assert.match(capsuleJs, /scheduleFeedAutoplay/);
+  assert.match(capsuleJs, /function syncFeedAutoplay/);
+  assert.match(capsuleJs, /function getCenteredFeedMedia/);
+  assert.match(capsuleJs, /function autoplayFeedMedia/);
+  assert.match(capsuleJs, /toLowerCase\(\) === "video"/);
+  assert.match(capsuleJs, /toLowerCase\(\) === "audio"/);
+  assert.match(capsuleJs, /Tap for sound/);
+  assert.match(capsuleJs, /Tap to listen/);
+  assert.match(capsuleJs, /pauseAllFeedMedia\(media\)/);
+});
+
 async function readText(path) {
   return readFile(new URL(path, import.meta.url), 'utf8');
 }

@@ -22,8 +22,7 @@ async function init() {
     button.addEventListener("click", () => setCapsuleView(button.dataset.capsuleView || "timeline", { userInitiated: true }));
   });
   qs("#capsuleFeed").addEventListener("scroll", () => {
-    window.clearTimeout(feedScrollTimer);
-    feedScrollTimer = window.setTimeout(pauseOffscreenFeedMedia, 120);
+    scheduleFeedAutoplay(120);
   }, { passive: true });
   qs("#slideClose").addEventListener("click", closeSlide);
   qs("#slidePrev").addEventListener("click", () => changeSlide(-1));
@@ -116,6 +115,7 @@ function renderSwipeFeed() {
   qsaFeedPlayButtons().forEach((button) => {
     button.addEventListener("click", () => toggleFeedPlayback(Number(button.dataset.feedPlay || 0)));
   });
+  qsaPlayableMedia(feed).forEach(bindFeedMediaEvents);
 }
 
 function renderFeedMedia(item, index) {
@@ -151,7 +151,7 @@ function renderFeedMedia(item, index) {
   }
 
   return `
-    <video data-feed-media="${index}" ${videoPosterAttributes(item)} src="${mediaUrl}" preload="metadata" playsinline></video>
+    <video data-feed-media="${index}" ${videoPosterAttributes(item)} src="${mediaUrl}" preload="metadata" playsinline muted></video>
     <button class="capsule-feed-play" type="button" data-feed-play="${index}" aria-label="Play ${title}">
       <span>Tap to play</span>
     </button>
@@ -171,6 +171,7 @@ function setCapsuleView(view, options = {}) {
   } else {
     qs("#capsuleFeed").scrollTo({ top: 0, behavior: "smooth" });
     if (options.userInitiated) requestSwipeFullscreen();
+    scheduleFeedAutoplay(320);
   }
 
   qsaCapsuleViewButtons().forEach((button) => {
@@ -236,9 +237,11 @@ function toggleFeedPlayback(index) {
   const media = card?.querySelector("[data-feed-media]");
   if (!media) return;
 
-  const shouldPlay = media.paused;
+  const shouldUnmuteVideo = isFeedVideo(media) && !media.paused && media.muted;
+  const shouldPlay = media.paused || shouldUnmuteVideo;
   pauseAllFeedMedia(media);
-  setFeedCardPlaying(card, false);
+  setFeedCardPlaying(card, !media.paused);
+  setFeedAutoplayBlocked(card, false);
 
   if (!shouldPlay) {
     media.pause();
@@ -246,9 +249,16 @@ function toggleFeedPlayback(index) {
     return;
   }
 
+  if (isFeedVideo(media)) {
+    media.muted = false;
+    media.dataset.userSound = "true";
+  }
+
   media.play().then(() => {
+    setFeedAutoplayBlocked(card, false);
     setFeedCardPlaying(card, true);
   }).catch(() => {
+    setFeedAutoplayBlocked(card, true);
     setFeedCardPlaying(card, false);
   });
 }
@@ -262,29 +272,117 @@ function pauseAllFeedMedia(except = null) {
 }
 
 function pauseOffscreenFeedMedia() {
+  syncFeedAutoplay();
+}
+
+function scheduleFeedAutoplay(delay = 120) {
+  window.clearTimeout(feedScrollTimer);
+  feedScrollTimer = window.setTimeout(syncFeedAutoplay, delay);
+}
+
+function syncFeedAutoplay() {
   const feed = qs("#capsuleFeed");
   const feedRect = feed?.getBoundingClientRect?.();
-  if (!feedRect || feed.hidden) return;
+  if (!feedRect || feed.hidden || currentCapsuleView !== "feed") {
+    pauseAllFeedMedia();
+    return;
+  }
 
+  const activeMedia = getCenteredFeedMedia(feed);
   qsaPlayableMedia(feed).forEach((media) => {
-    const card = media.closest?.(".capsule-feed-card");
-    const rect = card?.getBoundingClientRect?.();
-    if (!rect) return;
-
-    const center = rect.top + rect.height / 2;
-    const isNearCenter = center >= feedRect.top && center <= feedRect.bottom;
-    if (!isNearCenter) {
+    if (media !== activeMedia) {
       media.pause();
-      setFeedCardPlaying(card, false);
+      setFeedCardPlaying(media.closest?.(".capsule-feed-card"), false);
     }
   });
+
+  if (activeMedia) autoplayFeedMedia(activeMedia);
+}
+
+function getCenteredFeedMedia(feed) {
+  const feedRect = feed?.getBoundingClientRect?.();
+  if (!feedRect) return null;
+
+  const feedCenter = feedRect.top + feedRect.height / 2;
+  let activeMedia = null;
+  let activeDistance = Number.POSITIVE_INFINITY;
+
+  Array.from(feed.querySelectorAll(".capsule-feed-card")).forEach((card) => {
+    const media = card.querySelector("[data-feed-media]");
+    const rect = card.getBoundingClientRect?.();
+    if (!media || !rect || rect.bottom <= feedRect.top || rect.top >= feedRect.bottom) return;
+
+    const distance = Math.abs(rect.top + rect.height / 2 - feedCenter);
+    if (distance < activeDistance) {
+      activeMedia = media;
+      activeDistance = distance;
+    }
+  });
+
+  return activeMedia;
+}
+
+function autoplayFeedMedia(media) {
+  const card = media.closest?.(".capsule-feed-card");
+  if (!card || !media.paused) {
+    setFeedCardPlaying(card, Boolean(media && !media.paused));
+    return;
+  }
+
+  if (isFeedVideo(media) && media.dataset.userSound !== "true") {
+    media.muted = true;
+  }
+
+  media.play().then(() => {
+    setFeedAutoplayBlocked(card, false);
+    setFeedCardPlaying(card, true);
+  }).catch(() => {
+    setFeedAutoplayBlocked(card, true);
+    setFeedCardPlaying(card, false);
+  });
+}
+
+function bindFeedMediaEvents(media) {
+  const card = media.closest?.(".capsule-feed-card");
+  if (!card) return;
+
+  media.addEventListener("play", () => {
+    setFeedAutoplayBlocked(card, false);
+    setFeedCardPlaying(card, true);
+  });
+  media.addEventListener("pause", () => setFeedCardPlaying(card, false));
+  media.addEventListener("ended", () => setFeedCardPlaying(card, false));
 }
 
 function setFeedCardPlaying(card, isPlaying) {
   if (!card) return;
   card.classList.toggle("is-playing", isPlaying);
   const button = card.querySelector("[data-feed-play]");
-  if (button) button.querySelector("span").textContent = isPlaying ? "Tap to pause" : "Tap to play";
+  if (button) button.querySelector("span").textContent = feedPlayButtonLabel(card, isPlaying);
+}
+
+function setFeedAutoplayBlocked(card, isBlocked) {
+  if (!card) return;
+  card.classList.toggle("is-autoplay-blocked", isBlocked);
+}
+
+function feedPlayButtonLabel(card, isPlaying) {
+  const media = card?.querySelector("[data-feed-media]");
+  if (!media) return isPlaying ? "Tap to pause" : "Tap to play";
+  if (card.classList.contains("is-autoplay-blocked")) {
+    return isFeedAudio(media) ? "Tap to listen" : "Tap to play";
+  }
+  if (isPlaying && isFeedVideo(media) && media.muted) return "Tap for sound";
+  if (isPlaying) return "Tap to pause";
+  return isFeedAudio(media) ? "Tap to listen" : "Tap to play";
+}
+
+function isFeedVideo(media) {
+  return media?.tagName?.toLowerCase() === "video";
+}
+
+function isFeedAudio(media) {
+  return media?.tagName?.toLowerCase() === "audio";
 }
 
 function openSlide(index) {
