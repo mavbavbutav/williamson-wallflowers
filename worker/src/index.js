@@ -27,6 +27,8 @@ const TAG_RATE_WINDOW_SECONDS = 60 * 60;
 const DEFAULT_EVENT_MAX_SUBMISSIONS = 500;
 const DEFAULT_EVENT_MAX_BYTES = 10 * 1024 * 1024 * 1024;
 const RETENTION_CLEANUP_LIMIT = 100;
+const STREAM_BACKFILL_DEFAULT_LIMIT = 10;
+const STREAM_BACKFILL_MAX_LIMIT = 25;
 const STANDARD_RETENTION_DAYS = 90;
 const TIME_CAPSULE_RETENTION_DAYS = 365;
 const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
@@ -1043,8 +1045,8 @@ async function optimizeSubmissionForStream(env, request, submission) {
   const existingUid = submission.streamUid || submission.stream_uid || '';
   const existingStatus = submission.streamStatus || submission.stream_status || '';
   if (existingUid && existingStatus !== 'error') {
-    await refreshStreamStatusIfNeeded(env, submission.id, existingUid, existingStatus);
-    return;
+    const refreshed = await refreshStreamStatusIfNeeded(env, submission.id, existingUid, existingStatus);
+    return { ok: true, status: refreshed?.status || existingStatus, uid: existingUid };
   }
 
   const now = new Date().toISOString();
@@ -1060,15 +1062,19 @@ async function optimizeSubmissionForStream(env, request, submission) {
   try {
     const mediaUrl = await buildMediaAccessUrl(request, env, submission.id);
     const video = await createStreamCopy(env, submission, mediaUrl);
-    await storeStreamState(env, submission.id, streamRecordFromVideo(video, 'queued'));
+    const record = streamRecordFromVideo(video, 'queued');
+    await storeStreamState(env, submission.id, record);
+    return { ok: record.status !== 'error', ...record };
   } catch (error) {
+    const message = cleanText(error.message || error, 500);
     await storeStreamState(env, submission.id, {
       uid: '',
       status: 'error',
-      error: cleanText(error.message || error, 500),
+      error: message,
       readyAt: '',
       updatedAt: new Date().toISOString()
     });
+    return { ok: false, status: 'error', error: message };
   }
 }
 
@@ -1300,6 +1306,10 @@ async function handleAdminApi(request, env, url, corsHeaders, parts) {
     return runRetentionCleanup(request, env, corsHeaders);
   }
 
+  if (request.method === 'POST' && parts[0] === 'stream-backfill') {
+    return runStreamBackfill(request, env, corsHeaders);
+  }
+
   if (request.method === 'POST' && parts[0] === 'events') {
     return createAdminEvent(request, env, corsHeaders);
   }
@@ -1393,6 +1403,147 @@ async function runRetentionCleanup(request, env, corsHeaders) {
 
   const result = await cleanExpiredMedia(env, limit);
   return json({ ok: true, ...result }, 200, corsHeaders);
+}
+
+async function runStreamBackfill(request, env, corsHeaders) {
+  let body = {};
+
+  try {
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+
+  const dryRun = normalizeBoolean(body.dryRun);
+  const retryErrors = normalizeBoolean(body.retryErrors);
+  const requestedLimit = Number(body.limit || STREAM_BACKFILL_DEFAULT_LIMIT);
+  const limit = Number.isFinite(requestedLimit) ? Math.max(
+    1,
+    Math.min(requestedLimit, STREAM_BACKFILL_MAX_LIMIT)
+  ) : STREAM_BACKFILL_DEFAULT_LIMIT;
+  const configured = isStreamConfigured(env);
+
+  if (!dryRun && !configured) {
+    return json({
+      ok: false,
+      message: 'Cloudflare Stream is not configured for this Worker.'
+    }, 503, corsHeaders);
+  }
+
+  const [eligible, candidates] = await Promise.all([
+    countStreamBackfillCandidates(env, retryErrors),
+    getStreamBackfillCandidates(env, limit, retryErrors)
+  ]);
+  let queued = 0;
+  const errors = [];
+
+  if (!dryRun) {
+    for (const candidate of candidates) {
+      try {
+        const result = await optimizeSubmissionForStream(env, request, candidate);
+        if (result?.ok === false) {
+          errors.push({
+            id: candidate.id,
+            message: result.error || 'Cloudflare Stream did not accept this video.'
+          });
+        } else {
+          queued += 1;
+        }
+      } catch (error) {
+        errors.push({
+          id: candidate.id,
+          message: cleanText(error.message || error, 500)
+        });
+      }
+    }
+  }
+
+  return json({
+    ok: errors.length === 0,
+    dryRun,
+    configured,
+    retryErrors,
+    limit,
+    eligible,
+    scanned: candidates.length,
+    queued,
+    remaining: Math.max(eligible - queued, 0),
+    candidates: candidates.map(toStreamBackfillCandidateClient),
+    errors
+  }, errors.length ? 207 : 200, corsHeaders);
+}
+
+async function countStreamBackfillCandidates(env, retryErrors = false) {
+  const row = await env.MOMENTS_DB.prepare(`
+    SELECT COUNT(*) AS count
+    FROM submissions
+    WHERE ${streamBackfillWhereClause(retryErrors)}
+  `).first();
+
+  return Number(row?.count || 0);
+}
+
+async function getStreamBackfillCandidates(env, limit, retryErrors = false) {
+  const result = await env.MOMENTS_DB.prepare(`
+    SELECT
+      id,
+      event_id AS eventId,
+      media_type AS mediaType,
+      source,
+      object_key AS objectKey,
+      original_filename AS originalFilename,
+      mime_type AS mimeType,
+      size,
+      status,
+      stream_uid AS streamUid,
+      stream_status AS streamStatus,
+      stream_error AS streamError,
+      stream_ready_at AS streamReadyAt,
+      stream_created_at AS streamCreatedAt,
+      stream_updated_at AS streamUpdatedAt,
+      deleted_at AS deletedAt,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM submissions
+    WHERE ${streamBackfillWhereClause(retryErrors)}
+    ORDER BY created_at ASC
+    LIMIT ?
+  `).bind(limit).all();
+
+  return result.results || [];
+}
+
+function streamBackfillWhereClause(retryErrors = false) {
+  const retryFilter = retryErrors ? " OR stream_status = 'error'" : '';
+  return `
+    media_type = 'video'
+    AND status = 'approved'
+    AND deleted_at IS NULL
+    AND (
+      (
+        (
+          stream_uid IS NULL
+          OR stream_uid = ''
+          OR stream_status IS NULL
+          OR stream_status = ''
+          OR stream_status = 'none'
+        )
+        AND COALESCE(stream_status, 'none') != 'error'
+      )
+      ${retryFilter}
+    )
+  `;
+}
+
+function toStreamBackfillCandidateClient(row) {
+  return {
+    id: row.id,
+    eventId: row.eventId || row.event_id,
+    source: row.source || 'guest',
+    streamStatus: row.streamStatus || row.stream_status || 'none',
+    streamUidPresent: Boolean(row.streamUid || row.stream_uid),
+    createdAt: row.createdAt || row.created_at || ''
+  };
 }
 
 async function cleanExpiredMedia(env, limit = RETENTION_CLEANUP_LIMIT) {
