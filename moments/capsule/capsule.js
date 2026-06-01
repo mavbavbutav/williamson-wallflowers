@@ -14,17 +14,22 @@ let feedScrollDirection = 0;
 let lastFeedScrollTop = 0;
 let feedSoundUnlocked = false;
 let nativeSwipeFullscreenActive = false;
+let nativeSlideshowFullscreenActive = false;
+let slideAutoPlaying = true;
+let slideAdvanceTimer = 0;
 const videoPosterCache = new Map();
 const videoPosterPersistCache = new Set();
 const FEED_MEDIA_WARM_RADIUS = 2;
 const FEED_IMAGE_WARM_RADIUS = 2;
 const FEED_PLAYABLE_READY_STATE = 2;
 const FEED_EARLY_PLAY_VISIBILITY_RATIO = 0.28;
+const PHOTO_SLIDE_DURATION_MS = 20000;
+const SLIDE_ERROR_ADVANCE_MS = 6000;
 
 init();
 
 async function init() {
-  qs("#playSlideshowButton").addEventListener("click", () => openSlide(0));
+  qs("#playSlideshowButton").addEventListener("click", () => openSlide(0, { autoPlay: true, requestFullscreen: true }));
   qs("#exitSwipeFeedButton").addEventListener("click", () => setCapsuleView("timeline", { userInitiated: true }));
   qsaCapsuleViewButtons().forEach((button) => {
     button.addEventListener("click", () => setCapsuleView(button.dataset.capsuleView || "timeline", { userInitiated: true }));
@@ -40,6 +45,7 @@ async function init() {
   qs("#slideClose").addEventListener("click", closeSlide);
   qs("#slidePrev").addEventListener("click", () => changeSlide(-1));
   qs("#slideNext").addEventListener("click", () => changeSlide(1));
+  qs("#slidePlayPause").addEventListener("click", toggleSlideAutoPlay);
   qs("#slideshowModal").addEventListener("click", (event) => {
     if (event.target === event.currentTarget) closeSlide();
   });
@@ -51,6 +57,7 @@ async function init() {
   });
   document.addEventListener("fullscreenchange", handleFullscreenChange);
   document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+  window.addEventListener?.("resize", sizeTvSlideFrame);
 
   if (!eventId || !token) {
     showError("This private Time Capsule link is missing its event or access token.");
@@ -103,7 +110,7 @@ function renderTimeline() {
   `).join("");
 
   qsaSlides().forEach((button) => {
-    button.addEventListener("click", () => openSlide(Number(button.dataset.slide || 0)));
+    button.addEventListener("click", () => openSlide(Number(button.dataset.slide || 0), { autoPlay: false }));
   });
 }
 
@@ -236,22 +243,38 @@ function activeFullscreenElement() {
 }
 
 function handleFullscreenChange() {
-  const target = qs("#capsuleDashboard");
+  const swipeTarget = qs("#capsuleDashboard");
+  const slideshowTarget = qs("#slideshowModal");
   const activeElement = activeFullscreenElement();
-  const isSwipeFullscreen = activeElement === target || Boolean(activeElement && target?.contains?.(activeElement));
+  const isSwipeFullscreen = activeElement === swipeTarget || Boolean(activeElement && swipeTarget?.contains?.(activeElement));
+  const isSlideshowFullscreen = activeElement === slideshowTarget || Boolean(activeElement && slideshowTarget?.contains?.(activeElement));
 
   if (isSwipeFullscreen) {
     nativeSwipeFullscreenActive = true;
     document.body.classList.add("is-native-swipe-feed");
+  } else {
+    const wasNativeSwipeFullscreen = nativeSwipeFullscreenActive;
+    nativeSwipeFullscreenActive = false;
+    document.body.classList.remove("is-native-swipe-feed");
+
+    if (wasNativeSwipeFullscreen && currentCapsuleView === "feed") {
+      setCapsuleView("timeline", { skipFullscreenExit: true });
+    }
+  }
+
+  if (isSlideshowFullscreen) {
+    nativeSlideshowFullscreenActive = true;
+    document.body.classList.add("is-native-tv-slideshow");
+    window.setTimeout(sizeTvSlideFrame, 80);
     return;
   }
 
-  const wasNativeSwipeFullscreen = nativeSwipeFullscreenActive;
-  nativeSwipeFullscreenActive = false;
-  document.body.classList.remove("is-native-swipe-feed");
+  const wasNativeSlideshowFullscreen = nativeSlideshowFullscreenActive;
+  nativeSlideshowFullscreenActive = false;
+  document.body.classList.remove("is-native-tv-slideshow");
 
-  if (wasNativeSwipeFullscreen && currentCapsuleView === "feed") {
-    setCapsuleView("timeline", { skipFullscreenExit: true });
+  if (wasNativeSlideshowFullscreen && !slideshowTarget.hidden) {
+    closeSlide({ skipFullscreenExit: true });
   }
 }
 
@@ -568,12 +591,15 @@ function isFeedAudio(media) {
   return media?.tagName?.toLowerCase() === "audio";
 }
 
-function openSlide(index) {
+function openSlide(index, options = {}) {
   if (!items.length) return;
   slideIndex = normalizeSlideIndex(index);
+  slideAutoPlaying = options.autoPlay !== false;
   lastFocusedElement = document.activeElement;
-  document.body.classList.add("modal-open");
+  document.body.classList.add("modal-open", "is-tv-slideshow-active");
   qs("#slideshowModal").hidden = false;
+  updateSlidePlayPauseButton();
+  if (options.requestFullscreen) requestSlideshowFullscreen();
   renderSlide();
   qs("#slideClose").focus();
 }
@@ -581,37 +607,187 @@ function openSlide(index) {
 function renderSlide() {
   const item = items[slideIndex];
   const stage = qs("#slideStage");
+  clearSlideAdvance();
+  qsaPlayableMedia(stage).forEach((media) => media.pause());
   stage.innerHTML = "";
   qs("#slideTitle").textContent = item.title || "Time Capsule moment";
   qs("#slideMeta").textContent = `${slideIndex + 1} / ${items.length} | ${item.chapter || "Guest moments"} | ${formatDateTime(item.capturedAt)}`;
   qs("#slideCaption").textContent = item.caption || item.guestNote || "";
 
+  const { frame, media } = createTvSlideFrame(item);
+  stage.append(frame);
+  sizeTvSlideFrame();
+  window.setTimeout(sizeTvSlideFrame, 80);
+  hydrateVideoPosters(stage);
+  hydrateStreamVideos(stage);
+  updateSlidePlayPauseButton();
+
+  if (item.mediaType === "photo") {
+    scheduleSlideAdvance(PHOTO_SLIDE_DURATION_MS);
+  } else if (media) {
+    bindSlidePlayback(media);
+    if (slideAutoPlaying) playSlideMedia(media);
+  }
+}
+
+function createTvSlideFrame(item) {
+  const frame = document.createElement("div");
+  frame.className = "tv-slide-frame is-" + (item.mediaType || "media");
+  const backdrop = document.createElement("div");
+  backdrop.className = "tv-slide-backdrop";
+  const backdropMedia = createTvSlideBackdropMedia(item);
+  if (backdropMedia) backdrop.append(backdropMedia);
+  const foreground = document.createElement("div");
+  foreground.className = "tv-slide-foreground-wrap";
+  const content = createTvSlideForeground(item);
+  foreground.append(content.element);
+  frame.append(backdrop, foreground);
+  return { frame, media: content.media };
+}
+
+function createTvSlideBackdropMedia(item) {
+  if (item.mediaType === "audio") return null;
+
+  const image = document.createElement("img");
+  image.className = "tv-slide-backdrop-media";
+  image.alt = "";
+  image.setAttribute("aria-hidden", "true");
+  image.decoding = "async";
+  image.src = item.mediaType === "photo"
+    ? inlineMediaUrl(item.mediaUrl)
+    : item.thumbnailUrl || videoPosterUrl(item);
+  return image;
+}
+
+function createTvSlideForeground(item) {
   if (item.mediaType === "photo") {
     const image = document.createElement("img");
-    image.src = `${item.mediaUrl}&disposition=inline`;
+    image.className = "tv-slide-foreground";
+    image.src = inlineMediaUrl(item.mediaUrl);
     image.alt = item.title || "Time Capsule photo";
-    stage.append(image);
-  } else if (item.mediaType === "audio") {
+    image.decoding = "async";
+    return { element: image, media: null };
+  }
+
+  if (item.mediaType === "audio") {
+    const panel = document.createElement("div");
+    panel.className = "tv-audio-stage tv-slide-foreground";
+    panel.innerHTML = `
+      <div class="tv-audio-mark" aria-hidden="true">
+        ${[38, 72, 52, 88, 46, 96, 58, 76, 42, 84].map((height) => `<span style="--bar-height: ${height}%"></span>`).join("")}
+      </div>
+      <div class="tv-audio-copy">
+        <span>Voice memo</span>
+        <strong>${escapeHtml(item.title || "Time Capsule voice memo")}</strong>
+        <p>${escapeHtml(item.caption || item.guestNote || "Listen to this memory from the event.")}</p>
+      </div>
+    `;
     const audio = document.createElement("audio");
-    audio.src = `${item.mediaUrl}&disposition=inline`;
+    audio.src = inlineMediaUrl(item.mediaUrl);
     audio.controls = true;
-    audio.preload = "metadata";
-    stage.append(audio);
+    audio.preload = "auto";
+    panel.append(audio);
+    return { element: panel, media: audio };
+  }
+
+  const template = document.createElement("template");
+  template.innerHTML = `<video class="tv-slide-foreground" ${videoPosterAttributes(item)} ${videoSourceAttributes(item)} preload="auto" playsinline controls></video>`;
+  const video = template.content.firstElementChild;
+  video.controls = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  return { element: video, media: video };
+}
+
+function bindSlidePlayback(media) {
+  if (!media) return;
+
+  if (media.tagName?.toLowerCase() === "video") {
+    const video = media;
+    video.addEventListener("ended", advanceSlideAfterPlayback, { once: true });
   } else {
-    const video = document.createElement("video");
-    video.src = inlineMediaUrl(item.mediaUrl);
-    video.poster = item.thumbnailUrl || videoPosterUrl(item);
-    if (!item.thumbnailUrl) {
-      video.crossOrigin = "anonymous";
-      video.dataset.videoPosterUrl = inlineMediaUrl(item.mediaUrl);
-      if (item.thumbnailUploadUrl) video.dataset.thumbnailUploadUrl = item.thumbnailUploadUrl;
+    const audio = media;
+    audio.addEventListener("ended", advanceSlideAfterPlayback, { once: true });
+  }
+
+  media.addEventListener("error", () => scheduleSlideAdvance(SLIDE_ERROR_ADVANCE_MS), { once: true });
+}
+
+function playSlideMedia(media) {
+  if (!slideAutoPlaying || !media || typeof media.play !== "function") return;
+
+  media.play().catch(() => {
+    // Keep native controls available if a browser blocks unattended playback after fullscreen.
+  });
+}
+
+function scheduleSlideAdvance(delayMs) {
+  clearSlideAdvance();
+  if (!slideAutoPlaying || items.length < 2) return;
+  slideAdvanceTimer = window.setTimeout(advanceSlideAfterPlayback, delayMs);
+}
+
+function clearSlideAdvance() {
+  window.clearTimeout(slideAdvanceTimer);
+  slideAdvanceTimer = 0;
+}
+
+function advanceSlideAfterPlayback() {
+  if (!slideAutoPlaying || !items.length) return;
+  changeSlide(1);
+}
+
+function toggleSlideAutoPlay() {
+  slideAutoPlaying = !slideAutoPlaying;
+  updateSlidePlayPauseButton();
+
+  if (!slideAutoPlaying) {
+    clearSlideAdvance();
+    qsaPlayableMedia(qs("#slideStage")).forEach((media) => media.pause());
+    return;
+  }
+
+  const currentMedia = qsaPlayableMedia(qs("#slideStage"))[0];
+  if (currentMedia) {
+    playSlideMedia(currentMedia);
+  } else {
+    scheduleSlideAdvance(PHOTO_SLIDE_DURATION_MS);
+  }
+}
+
+function updateSlidePlayPauseButton() {
+  const button = qs("#slidePlayPause");
+  button.textContent = slideAutoPlaying ? "Pause" : "Play";
+  button.setAttribute("aria-pressed", String(slideAutoPlaying));
+}
+
+function sizeTvSlideFrame() {
+  const modal = qs("#slideshowModal");
+  const stage = qs("#slideStage");
+  const frame = stage?.querySelector(".tv-slide-frame");
+  if (!frame || modal?.hidden) return;
+
+  const stageRect = stage.getBoundingClientRect?.();
+  if (!stageRect?.width || !stageRect?.height) return;
+
+  const width = Math.max(1, Math.min(stageRect.width, stageRect.height * (16 / 9)));
+  frame.style.width = `${width}px`;
+  frame.style.height = `${width * (9 / 16)}px`;
+}
+
+async function requestSlideshowFullscreen() {
+  const target = qs("#slideshowModal");
+  const requestFullscreen = target.requestFullscreen || target.webkitRequestFullscreen || target.msRequestFullscreen;
+  if (!requestFullscreen || activeFullscreenElement()) return;
+
+  try {
+    await requestFullscreen.call(target, { navigationUI: "hide" });
+  } catch {
+    try {
+      await requestFullscreen.call(target);
+    } catch {
+      nativeSlideshowFullscreenActive = false;
     }
-    video.controls = true;
-    video.playsInline = true;
-    video.preload = "metadata";
-    stage.append(video);
-    hydrateVideoPosters(stage);
-    hydrateStreamVideos(stage);
   }
 }
 
@@ -620,11 +796,25 @@ function changeSlide(delta) {
   renderSlide();
 }
 
-function closeSlide() {
+async function exitSlideshowFullscreen() {
+  const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+  if (!exitFullscreen || !activeFullscreenElement()) return;
+
+  try {
+    await exitFullscreen.call(document);
+  } catch {
+    nativeSlideshowFullscreenActive = false;
+  }
+}
+
+function closeSlide(options = {}) {
+  clearSlideAdvance();
   qsaPlayableMedia(qs("#slideStage")).forEach((media) => media.pause());
   qs("#slideStage").innerHTML = "";
   qs("#slideshowModal").hidden = true;
-  document.body.classList.remove("modal-open");
+  document.body.classList.remove("modal-open", "is-tv-slideshow-active", "is-native-tv-slideshow");
+  nativeSlideshowFullscreenActive = false;
+  if (!options.skipFullscreenExit) exitSlideshowFullscreen();
   if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
     lastFocusedElement.focus();
   }

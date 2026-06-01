@@ -35,6 +35,7 @@ function installCapsuleDom() {
     '#slideClose',
     '#slidePrev',
     '#slideNext',
+    '#slidePlayPause',
     '#slideshowModal',
     '#capsuleTitle',
     '#capsuleMeta',
@@ -225,7 +226,7 @@ test('capsule swipe feed auto-plays centered videos and voice memos', async () =
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-swipe-smooth-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-slideshow-1/);
   assert.match(capsuleJs, /scheduleFeedAutoplay/);
   assert.match(capsuleJs, /function syncFeedAutoplay/);
   assert.match(capsuleJs, /function getCenteredFeedMedia/);
@@ -276,7 +277,7 @@ test('capsule swipe feed preloads adjacent media before the next swipe', async (
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-swipe-smooth-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-slideshow-1/);
   assert.match(capsuleJs, /const FEED_MEDIA_WARM_RADIUS = 2/);
   assert.match(capsuleJs, /const FEED_IMAGE_WARM_RADIUS = 2/);
   assert.match(capsuleJs, /function warmFeedAroundCard/);
@@ -290,6 +291,36 @@ test('capsule swipe feed preloads adjacent media before the next swipe', async (
   assert.match(capsuleJs, /function setFeedCardReady/);
   assert.match(capsuleJs, /"canplay"/);
   assert.match(capsuleJs, /"loadeddata"/);
+});
+
+test('capsule slideshow has TV mode with fullscreen, 16:9 framing, and auto advance', async () => {
+  const [capsuleHtml, capsuleJs, styles] = await Promise.all([
+    readText('../../moments/capsule/index.html'),
+    readText('../../moments/capsule/capsule.js'),
+    readText('../../moments/styles.css')
+  ]);
+
+  assert.match(capsuleHtml, /TV Slideshow/);
+  assert.match(capsuleHtml, /id="slidePlayPause"/);
+  assert.match(capsuleHtml, /class="media-modal tv-slideshow-modal"/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-slideshow-1/);
+  assert.match(capsuleJs, /const PHOTO_SLIDE_DURATION_MS = 20000/);
+  assert.match(capsuleJs, /function requestSlideshowFullscreen/);
+  assert.match(capsuleJs, /requestFullscreen/);
+  assert.match(capsuleJs, /navigationUI: "hide"/);
+  assert.match(capsuleJs, /function scheduleSlideAdvance/);
+  assert.match(capsuleJs, /function advanceSlideAfterPlayback/);
+  assert.match(capsuleJs, /video\.addEventListener\("ended", advanceSlideAfterPlayback/);
+  assert.match(capsuleJs, /audio\.addEventListener\("ended", advanceSlideAfterPlayback/);
+  assert.match(capsuleJs, /videoSourceAttributes\(item\)/);
+  assert.match(capsuleJs, /className = "tv-slide-frame/);
+  assert.match(capsuleJs, /className = "tv-slide-backdrop/);
+  assert.match(capsuleJs, /className = "tv-audio-stage/);
+  assert.match(styles, /\.tv-slideshow-modal/);
+  assert.match(styles, /\.tv-slide-frame[\s\S]*?aspect-ratio: 16 \/ 9/);
+  assert.match(styles, /\.tv-slide-backdrop[\s\S]*?filter: blur/);
+  assert.match(styles, /\.tv-slide-foreground[\s\S]*?object-fit: contain/);
+  assert.match(styles, /\.tv-audio-stage/);
 });
 
 async function readText(path) {
