@@ -61,6 +61,7 @@ function installCapsuleDom() {
   globalThis.document = {
     activeElement: createElement(),
     body: createElement(),
+    head: createElement(),
     addEventListener() {},
     querySelector(selector) {
       return elements.get(selector) || null;
@@ -359,7 +360,7 @@ test('capsule viewer exposes Cast and TV display fallbacks', async () => {
   assert.match(capsuleHtml, /id="startAirplayFullscreenButton"/);
   assert.match(capsuleHtml, /id="startChromecastButton"/);
   assert.match(capsuleHtml, /id="copyTvDisplayLinkButton"/);
-  assert.match(capsuleJs, /const CAST_RECEIVER_APP_ID =/);
+  assert.match(capsuleJs, /const CAST_RECEIVER_APP_ID = "D4D06631"/);
   assert.match(capsuleJs, /function initCastTvControls/);
   assert.match(capsuleJs, /function updateCastTvControls/);
   assert.match(capsuleJs, /function loadGoogleCastSender/);
