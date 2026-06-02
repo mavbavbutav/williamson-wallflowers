@@ -377,13 +377,36 @@ test('capsule viewer exposes Cast and TV display fallbacks', async () => {
 
   assert.match(castHtml, /Wallflower Time Capsule TV/);
   assert.match(castHtml, /id="castStage"/);
-  assert.match(castHtml, /cast\.js\?v=20260601-tv-cast-fix-1/);
+  assert.match(castHtml, /id="castMusicToggle"/);
+  assert.match(castHtml, /cast\.js\?v=20260601-tv-music-1/);
   assert.match(castJs, /const PHOTO_SLIDE_DURATION_MS = 20000/);
   assert.match(castJs, /\/capsules\/\$\{encodeURIComponent\(eventId\)\}/);
   assert.match(castJs, /function renderCastSlide/);
   assert.match(castJs, /function bindTvMediaOrientation/);
   assert.match(castJs, /item\.streamUrl \|\| item\.mediaUrl/);
   assert.match(castJs, /addEventListener\("ended", showNextCastSlide/);
+});
+
+test('TV display link starts with generated instrumental music enabled', async () => {
+  const [capsuleJs, castHtml, castJs, styles] = await Promise.all([
+    readText('../../moments/capsule/capsule.js'),
+    readText('../../moments/capsule/cast/index.html'),
+    readText('../../moments/capsule/cast/cast.js'),
+    readText('../../moments/styles.css')
+  ]);
+
+  assert.match(capsuleJs, /url\.searchParams\.set\("music", "1"\)/);
+  assert.match(castHtml, /id="castMusicToggle"/);
+  assert.match(castHtml, /Instrumental music/);
+  assert.match(castJs, /const musicRequested = getParam\("music"\) === "1"/);
+  assert.match(castJs, /function startInstrumentalMusic/);
+  assert.match(castJs, /function createInstrumentalMusicNodes/);
+  assert.match(castJs, /function updateInstrumentalMusicForItem/);
+  assert.match(castJs, /function setInstrumentalMusicLevel/);
+  assert.match(castJs, /new AudioContext/);
+  assert.match(castJs, /item\.mediaType === "photo"/);
+  assert.match(castJs, /item\.mediaType === "audio"/);
+  assert.match(styles, /\.cast-music-toggle/);
 });
 
 test('TV slideshow videos favor fullscreen mirroring instead of direct video AirPlay', async () => {

@@ -208,6 +208,7 @@ function buildTvDisplayUrl() {
   const url = new URL("cast/", window.location.href);
   const currentParams = new URLSearchParams(window.location.search);
   url.searchParams.set("event", eventId || "");
+  url.searchParams.set("music", "1");
   ["api", "site"].forEach((name) => {
     const value = currentParams.get(name);
     if (value) url.searchParams.set(name, value);

@@ -7,7 +7,7 @@
   <meta name="referrer" content="no-referrer" />
   <title>Wallflower Time Capsule TV</title>
   <link rel="icon" type="image/png" sizes="48x48" href="../../../favicon-48.png?v=ww-logo-favicon-1" />
-  <link rel="stylesheet" href="../../styles.css?v=20260601-tv-cast-fix-1" />
+  <link rel="stylesheet" href="../../styles.css?v=20260601-tv-music-1" />
 </head>
 <body class="cast-display-page">
   <main>
@@ -16,12 +16,16 @@
       <div class="cast-start-card">
         <h1 class="section-title" id="castTitle">Wallflower Time Capsule TV</h1>
         <p class="muted" id="castStatus">Loading the private slideshow.</p>
+        <label class="cast-music-toggle">
+          <input type="checkbox" id="castMusicToggle" />
+          <span>Instrumental music</span>
+        </label>
         <button class="button button-primary" type="button" id="startCastDisplayButton">Start TV Display</button>
       </div>
     </div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js" defer></script>
-  <script type="module" src="cast.js?v=20260601-tv-cast-fix-1"></script>
+  <script type="module" src="cast.js?v=20260601-tv-music-1"></script>
 </body>
 </html>

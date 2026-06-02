@@ -2,17 +2,35 @@ import { formatDateTime, getParam, qs, requestJson } from "../../shared.js?v=202
 
 const eventId = getParam("event");
 const token = readShareToken();
+const musicRequested = getParam("music") === "1";
 let items = [];
 let slideIndex = 0;
 let slideTimer = 0;
 let displayStarted = false;
+let musicEnabled = musicRequested;
+let musicContext = null;
+let musicNodes = null;
+let musicChordTimer = 0;
+let musicChordIndex = 0;
 const PHOTO_SLIDE_DURATION_MS = 20000;
 const SLIDE_ERROR_ADVANCE_MS = 6000;
+const MUSIC_PHOTO_LEVEL = 0.13;
+const MUSIC_VIDEO_LEVEL = 0.035;
+const MUSIC_AUDIO_LEVEL = 0.008;
+const MUSIC_CHORD_MS = 4800;
+const MUSIC_CHORDS = [
+  [196.0, 246.94, 293.66, 369.99],
+  [174.61, 220.0, 261.63, 329.63],
+  [207.65, 261.63, 311.13, 392.0],
+  [164.81, 196.0, 246.94, 329.63]
+];
 
 init();
 
 async function init() {
   qs("#startCastDisplayButton").addEventListener("click", startCastDisplay);
+  qs("#castMusicToggle").checked = musicEnabled;
+  qs("#castMusicToggle").addEventListener("change", handleMusicToggleChange);
   window.addEventListener("resize", sizeCastFrame);
 
   if (!eventId || !token) {
@@ -27,7 +45,7 @@ async function init() {
     });
     items = payload.items || [];
     qs("#castTitle").textContent = payload.event?.title || payload.event?.name || "Wallflower Time Capsule TV";
-    showCastStatus(items.length ? "Ready to start the TV slideshow." : "This Time Capsule does not have visible moments yet.");
+    showCastStatus(items.length ? readyCastStatus() : "This Time Capsule does not have visible moments yet.");
     renderCastSlide();
   } catch (error) {
     showCastStatus(error.message || "This TV display link is not valid.");
@@ -35,9 +53,11 @@ async function init() {
 }
 
 async function startCastDisplay() {
+  const musicStart = musicEnabled ? startInstrumentalMusic() : Promise.resolve();
   displayStarted = true;
   qs("#castStart").hidden = true;
   await requestCastFullscreen();
+  await musicStart;
   renderCastSlide();
 }
 
@@ -52,6 +72,7 @@ function renderCastSlide() {
   const item = items[slideIndex];
   const { frame, media } = createTvSlideFrame(item);
   stage.append(frame);
+  updateInstrumentalMusicForItem(item);
   sizeCastFrame();
   window.setTimeout(sizeCastFrame, 80);
   hydrateStreamVideos(stage);
@@ -74,6 +95,123 @@ function renderCastSlide() {
       showCastStatus("Tap start, then play the media if this browser blocks autoplay.");
     });
   }
+}
+
+function readyCastStatus() {
+  return musicEnabled
+    ? "Ready to start the TV slideshow with instrumental music."
+    : "Ready to start the TV slideshow.";
+}
+
+function handleMusicToggleChange(event) {
+  musicEnabled = Boolean(event.target.checked);
+  if (!musicEnabled) {
+    setInstrumentalMusicLevel(0);
+    showCastStatus(displayStarted ? "Instrumental music is off." : readyCastStatus());
+    return;
+  }
+
+  showCastStatus(displayStarted ? "Starting instrumental music." : readyCastStatus());
+  if (!displayStarted) return;
+
+  startInstrumentalMusic()
+    .then(() => updateInstrumentalMusicForItem(items[slideIndex]))
+    .catch(() => showCastStatus("This browser blocked the music bed. Tap Start TV Display again to unlock audio."));
+}
+
+async function startInstrumentalMusic() {
+  if (!musicEnabled) return;
+  if (!musicContext) musicContext = createMusicContext();
+  if (!musicContext) {
+    musicEnabled = false;
+    qs("#castMusicToggle").checked = false;
+    showCastStatus("This browser does not support generated music. The TV slideshow will continue without music.");
+    return;
+  }
+
+  if (!musicNodes) {
+    musicNodes = createInstrumentalMusicNodes(musicContext);
+    scheduleInstrumentalMusicChord();
+  }
+
+  if (musicContext.state === "suspended") {
+    await musicContext.resume();
+  }
+}
+
+function createMusicContext() {
+  if (window.AudioContext) return new AudioContext();
+  if (window.webkitAudioContext) return new window.webkitAudioContext();
+  return null;
+}
+
+function createInstrumentalMusicNodes(context) {
+  const masterGain = context.createGain();
+  const filter = context.createBiquadFilter();
+  const textureGain = context.createGain();
+  const voices = MUSIC_CHORDS[0].map((frequency, index) => {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = index === 0 ? "sine" : "triangle";
+    oscillator.frequency.value = frequency;
+    gain.gain.value = 0;
+    oscillator.connect(gain);
+    gain.connect(filter);
+    oscillator.start();
+    return { oscillator, gain };
+  });
+
+  filter.type = "lowpass";
+  filter.frequency.value = 1280;
+  filter.Q.value = 0.72;
+  textureGain.gain.value = 0.035;
+  masterGain.gain.value = 0;
+  filter.connect(masterGain);
+  textureGain.connect(masterGain);
+  masterGain.connect(context.destination);
+
+  return { filter, masterGain, textureGain, voices };
+}
+
+function scheduleInstrumentalMusicChord() {
+  if (!musicContext || !musicNodes) return;
+
+  const chord = MUSIC_CHORDS[musicChordIndex % MUSIC_CHORDS.length];
+  const now = musicContext.currentTime;
+  musicChordIndex += 1;
+  musicNodes.voices.forEach((voice, index) => {
+    const octave = index === 0 ? 0.5 : 1;
+    const targetGain = index === 0 ? 0.08 : 0.032;
+    voice.oscillator.frequency.setTargetAtTime(chord[index] * octave, now, 0.9);
+    voice.gain.gain.setTargetAtTime(targetGain, now, 1.35);
+  });
+  musicNodes.filter.frequency.setTargetAtTime(1120 + (musicChordIndex % 3) * 180, now, 1.8);
+  window.clearTimeout(musicChordTimer);
+  musicChordTimer = window.setTimeout(scheduleInstrumentalMusicChord, MUSIC_CHORD_MS);
+}
+
+function updateInstrumentalMusicForItem(item) {
+  if (!musicEnabled || !displayStarted) {
+    setInstrumentalMusicLevel(0);
+    return;
+  }
+
+  if (item.mediaType === "photo") {
+    setInstrumentalMusicLevel(MUSIC_PHOTO_LEVEL);
+  } else if (item.mediaType === "audio") {
+    setInstrumentalMusicLevel(MUSIC_AUDIO_LEVEL);
+  } else {
+    setInstrumentalMusicLevel(MUSIC_VIDEO_LEVEL);
+  }
+}
+
+function setInstrumentalMusicLevel(level) {
+  if (!musicContext || !musicNodes?.masterGain) return;
+
+  const target = musicEnabled ? Math.max(0, Number(level) || 0) : 0;
+  const now = musicContext.currentTime;
+  musicNodes.masterGain.gain.cancelScheduledValues(now);
+  musicNodes.masterGain.gain.setTargetAtTime(target, now, 0.65);
 }
 
 function createTvSlideFrame(item) {

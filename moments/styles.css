@@ -2802,6 +2802,27 @@ tr:last-child td {
   text-align: center;
 }
 
+.cast-music-toggle {
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 44px;
+  border: 1px solid rgba(255, 250, 245, 0.18);
+  border-radius: 999px;
+  padding: 0.5rem 0.85rem;
+  background: rgba(255, 250, 245, 0.08);
+  color: rgba(255, 250, 245, 0.88);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.cast-music-toggle input {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: #f5c8aa;
+}
+
 .admin-auth {
   max-width: 520px;
   margin: 10vh auto 0;
