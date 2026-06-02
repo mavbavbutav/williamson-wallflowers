@@ -360,6 +360,7 @@ test('capsule viewer exposes Cast and TV display fallbacks', async () => {
   assert.match(capsuleHtml, /<strong>Wallflower Moments<\/strong>/);
   assert.match(capsuleHtml, /<span>Time Capsule<\/span>/);
   assert.doesNotMatch(capsuleHtml, /<strong>Wallflower Time Capsule<\/strong>/);
+  assert.doesNotMatch(capsuleHtml, /private keepsake timeline/i);
   assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.brand-lockup img[\s\S]*?width: 68px/);
   assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.app-shell[\s\S]*?height: 100dvh/);
   assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.dashboard[\s\S]*?overflow: hidden/);
