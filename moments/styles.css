@@ -1818,14 +1818,44 @@ textarea:focus-visible {
 .capsule-viewer:not(.is-swipe-feed-active) .capsule-timeline {
   min-height: 0;
   align-content: start;
+  align-items: start;
+  grid-auto-rows: max-content;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 0 0.35rem 0.5rem 0;
   scrollbar-width: thin;
 }
 
+.capsule-viewer:not(.is-swipe-feed-active) .capsule-memory-card {
+  align-self: start;
+  min-height: max-content;
+}
+
+.capsule-viewer:not(.is-swipe-feed-active) .capsule-memory-card .media-thumb {
+  height: auto;
+  min-height: 0;
+  aspect-ratio: 3 / 4;
+  background: #2f2b28;
+}
+
+.capsule-viewer:not(.is-swipe-feed-active) .capsule-memory-card .media-thumb img,
+.capsule-viewer:not(.is-swipe-feed-active) .capsule-memory-card .media-thumb video {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+  background: #2f2b28;
+}
+
+.capsule-viewer:not(.is-swipe-feed-active) .capsule-memory-card .media-thumb.is-audio {
+  height: auto;
+  min-height: 160px;
+  aspect-ratio: auto;
+}
+
 .capsule-memory-button {
   display: grid;
+  grid-template-rows: auto auto;
   width: 100%;
   min-width: 0;
   border: 0;
@@ -3308,6 +3338,30 @@ tr:last-child td {
   .capsule-view-tabs {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .capsule-viewer:not(.is-swipe-feed-active) .dashboard-header {
+    gap: 0.65rem;
+    margin-top: 0.15rem;
+  }
+
+  .capsule-viewer:not(.is-swipe-feed-active) #capsuleTitle {
+    font-size: clamp(2.35rem, 10vw, 3.25rem);
+    line-height: 0.98;
+  }
+
+  .capsule-viewer:not(.is-swipe-feed-active) .capsule-view-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .capsule-viewer:not(.is-swipe-feed-active) .capsule-view-actions > * {
+    min-width: 0;
+  }
+
+  .capsule-viewer:not(.is-swipe-feed-active) .capsule-view-tabs {
+    grid-column: 1 / -1;
   }
 
   .capsule-swipe-feed,
