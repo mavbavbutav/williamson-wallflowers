@@ -356,9 +356,15 @@ test('capsule viewer exposes Cast and TV display fallbacks', async () => {
   ]);
 
   assert.match(capsuleHtml, /id="castTvButton"/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260601-capsule-polish-1/);
   assert.match(capsuleHtml, /<strong>Wallflower Moments<\/strong>/);
-  assert.match(capsuleHtml, /Time Capsule keepsake/);
+  assert.match(capsuleHtml, /<span>Time Capsule<\/span>/);
   assert.doesNotMatch(capsuleHtml, /<strong>Wallflower Time Capsule<\/strong>/);
+  assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.brand-lockup img[\s\S]*?width: 68px/);
+  assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.app-shell[\s\S]*?height: 100dvh/);
+  assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.dashboard[\s\S]*?overflow: hidden/);
+  assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.capsule-timeline[\s\S]*?overflow-y: auto/);
+  assert.match(styles, /font-family: "Fiona", "Fiona Pro", "BF Fiona Serif"/);
   assert.match(capsuleHtml, /id="castTvPanel"/);
   assert.match(capsuleHtml, /id="startAirplayFullscreenButton"/);
   assert.match(capsuleHtml, /id="startChromecastButton"/);

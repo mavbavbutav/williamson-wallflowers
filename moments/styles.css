@@ -1764,6 +1764,66 @@ textarea:focus-visible {
   gap: 1rem;
 }
 
+.capsule-viewer:not(.is-swipe-feed-active) {
+  overflow: hidden;
+}
+
+.capsule-viewer:not(.is-swipe-feed-active) .app-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100vh;
+  height: 100dvh;
+  padding-bottom: 1rem;
+}
+
+.capsule-viewer:not(.is-swipe-feed-active) .site-topbar {
+  position: sticky;
+  top: 0;
+  padding: 0.65rem 0 0.85rem;
+}
+
+.capsule-viewer:not(.is-swipe-feed-active) .brand-lockup img {
+  width: 68px;
+  height: 68px;
+}
+
+.capsule-viewer:not(.is-swipe-feed-active) .brand-copy strong {
+  font-size: 0.96rem;
+}
+
+.capsule-viewer:not(.is-swipe-feed-active) .brand-copy span {
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.capsule-viewer:not(.is-swipe-feed-active) .dashboard {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.capsule-viewer:not(.is-swipe-feed-active) .dashboard-header {
+  position: relative;
+  z-index: 4;
+  margin-top: 0.25rem;
+  padding-bottom: 0.2rem;
+}
+
+.capsule-viewer:not(.is-swipe-feed-active) #capsuleTitle {
+  font-family: "Fiona", "Fiona Pro", "BF Fiona Serif", "Cormorant Garamond", Georgia, serif;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.capsule-viewer:not(.is-swipe-feed-active) .capsule-timeline {
+  min-height: 0;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 0.35rem 0.5rem 0;
+  scrollbar-width: thin;
+}
+
 .capsule-memory-button {
   display: grid;
   width: 100%;
