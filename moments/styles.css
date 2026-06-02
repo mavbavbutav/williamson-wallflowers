@@ -1111,7 +1111,7 @@ textarea:focus-visible {
 }
 
 .stats-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
 .stat {
@@ -2169,7 +2169,7 @@ textarea:focus-visible {
 
 .setup-guide {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 0.8rem;
 }
 
@@ -2192,6 +2192,65 @@ textarea:focus-visible {
 .data-panel {
   display: grid;
   gap: 0.9rem;
+}
+
+.lighting-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.preset-grid.is-compact {
+  grid-template-columns: repeat(2, minmax(72px, 1fr));
+  gap: 0.45rem;
+  min-width: 220px;
+}
+
+.preset-grid label {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.preset-grid input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid rgba(222, 211, 200, 0.95);
+  border-radius: 12px;
+  padding: 0.45rem 0.55rem;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.78);
+  font: inherit;
+}
+
+.bridge-config {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid rgba(63, 109, 88, 0.26);
+  border-radius: 18px;
+  padding: 1rem;
+  background: rgba(63, 109, 88, 0.08);
+}
+
+.bridge-config pre {
+  overflow: auto;
+  margin: 0;
+  border-radius: 14px;
+  padding: 0.9rem;
+  color: #fffaf5;
+  background: #2f2b28;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
 }
 
 .guide-step {
@@ -3292,6 +3351,10 @@ tr:last-child td {
   .media-grid,
   .stats-grid {
     grid-template-columns: 1fr;
+  }
+
+  .preset-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .button-row .button,

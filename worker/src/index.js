@@ -24,6 +24,12 @@ const UPLOAD_RATE_LIMIT = 12;
 const UPLOAD_RATE_WINDOW_SECONDS = 60 * 60;
 const TAG_RATE_LIMIT = 120;
 const TAG_RATE_WINDOW_SECONDS = 60 * 60;
+const BRIDGE_TRIGGER_LIMIT = 5;
+const BRIDGE_MAX_ATTEMPTS = 3;
+const DEFAULT_SCAN_PRESET_ID = 2;
+const DEFAULT_SUBMISSION_PRESET_ID = 3;
+const DEFAULT_MANUAL_PRESET_ID = 4;
+const DEFAULT_LIGHT_BRIGHTNESS = 180;
 const DEFAULT_EVENT_MAX_SUBMISSIONS = 500;
 const DEFAULT_EVENT_MAX_BYTES = 10 * 1024 * 1024 * 1024;
 const RETENTION_CLEANUP_LIMIT = 100;
@@ -147,6 +153,10 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
       return createSubmission(request, env, corsHeaders, parts[1]);
     }
 
+    if (parts[0] === 'bridge') {
+      return handleBridgeApi(request, env, url, corsHeaders, parts.slice(1));
+    }
+
     if (request.method === 'GET' && parts[0] === 'events' && parts[1] && parts[2] === 'host-posts') {
       return listGuestHostPosts(request, env, url, corsHeaders, parts[1]);
     }
@@ -264,6 +274,8 @@ async function getTagEvent(request, tagCode, env, corsHeaders) {
   }
 
   const uploadToken = await createSignedToken(env, 'upload', row.eventId, UPLOAD_TOKEN_TTL_SECONDS);
+  await recordScanEvent(env, row.eventId, row.tagId);
+  await safeQueueEventLightTrigger(env, row.eventId, 'tag_scan');
 
   return json({
     ok: true,
@@ -393,6 +405,8 @@ async function createSubmission(request, env, corsHeaders, eventId) {
     now,
     now
   ).run();
+
+  await safeQueueEventLightTrigger(env, eventId, 'submission_received');
 
   return json({
     ok: true,
@@ -1334,6 +1348,18 @@ async function handleAdminApi(request, env, url, corsHeaders, parts) {
     return deleteAdminTag(request, env, corsHeaders, parts[1]);
   }
 
+  if (request.method === 'POST' && parts[0] === 'wall-devices') {
+    return createAdminWallDevice(request, env, corsHeaders);
+  }
+
+  if (request.method === 'PATCH' && parts[0] === 'wall-devices' && parts[1]) {
+    return updateAdminWallDevice(request, env, corsHeaders, parts[1]);
+  }
+
+  if (request.method === 'POST' && parts[0] === 'wall-devices' && parts[1] && parts[2] === 'triggers') {
+    return triggerAdminWallDevice(request, env, corsHeaders, parts[1]);
+  }
+
   return json({ ok: false, message: 'Admin route not found.' }, 404, corsHeaders);
 }
 
@@ -1359,12 +1385,27 @@ async function getAdminOverview(request, env, corsHeaders) {
     ORDER BY t.created_at DESC
   `).all();
 
+  const devicesResult = await env.MOMENTS_DB.prepare(`
+    SELECT
+      wd.*,
+      e.name AS event_name,
+      COALESCE(SUM(CASE WHEN lt.status = 'pending' THEN 1 ELSE 0 END), 0) AS pending_trigger_count,
+      COALESCE(SUM(CASE WHEN lt.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_trigger_count
+    FROM wall_devices wd
+    INNER JOIN events e ON e.id = wd.event_id
+    LEFT JOIN light_triggers lt ON lt.wall_device_id = wd.id
+    GROUP BY wd.id
+    ORDER BY wd.created_at DESC
+  `).all();
+
   const stats = await env.MOMENTS_DB.prepare(`
     SELECT
       (SELECT COUNT(*) FROM events) AS events,
       (SELECT COUNT(*) FROM tags) AS tags,
       (SELECT COUNT(*) FROM submissions WHERE status = 'pending' AND deleted_at IS NULL) AS pending,
-      (SELECT COUNT(*) FROM submissions WHERE status = 'approved' AND deleted_at IS NULL) AS approved
+      (SELECT COUNT(*) FROM submissions WHERE status = 'approved' AND deleted_at IS NULL) AS approved,
+      (SELECT COUNT(*) FROM wall_devices) AS wallDevices,
+      (SELECT COUNT(*) FROM light_triggers WHERE status = 'pending') AS pendingLightTriggers
   `).first();
 
   return json({
@@ -1372,6 +1413,7 @@ async function getAdminOverview(request, env, corsHeaders) {
     stats,
     events: (eventsResult.results || []).map((row) => toAdminEventClient(row, env)),
     tags: (tagsResult.results || []).map((row) => toAdminTagClient(row)),
+    wallDevices: (devicesResult.results || []).map((row) => toAdminWallDeviceClient(row)),
     links: {
       guestBaseUrl: `${getSiteUrl(env)}/moments/?t=`,
       adminUrl: `${getSiteUrl(env)}/moments/admin/`
@@ -1836,6 +1878,266 @@ async function deleteAdminTag(request, env, corsHeaders, tagId) {
   }, 200, corsHeaders);
 }
 
+async function createAdminWallDevice(request, env, corsHeaders) {
+  const body = await request.json();
+  const eventId = cleanText(body.eventId, 80);
+  const name = cleanText(body.name, 100) || 'Butterfly Wall';
+
+  if (!eventId) {
+    return json({ ok: false, message: 'Event is required for the wall device.' }, 400, corsHeaders);
+  }
+
+  const event = await getEventById(env, eventId);
+  if (!event) {
+    return json({ ok: false, message: 'Assigned event was not found.' }, 404, corsHeaders);
+  }
+
+  const bridgeToken = randomToken();
+  const now = new Date().toISOString();
+  const id = crypto.randomUUID();
+  const device = {
+    scanPresetId: normalizePresetId(body.scanPresetId, DEFAULT_SCAN_PRESET_ID),
+    submissionPresetId: normalizePresetId(body.submissionPresetId, DEFAULT_SUBMISSION_PRESET_ID),
+    manualPresetId: normalizePresetId(body.manualPresetId, DEFAULT_MANUAL_PRESET_ID),
+    brightness: normalizeBrightness(body.brightness, DEFAULT_LIGHT_BRIGHTNESS),
+    status: normalizeStatus(body.status, ['active', 'inactive'])
+  };
+
+  try {
+    await env.MOMENTS_DB.prepare(`
+      INSERT INTO wall_devices (
+        id, event_id, name, status, bridge_token_hash, scan_preset_id,
+        submission_preset_id, manual_preset_id, brightness, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      id,
+      eventId,
+      name,
+      device.status,
+      await hashBridgeToken(bridgeToken),
+      device.scanPresetId,
+      device.submissionPresetId,
+      device.manualPresetId,
+      device.brightness,
+      now,
+      now
+    ).run();
+  } catch (error) {
+    if (String(error.message || error).toLowerCase().includes('unique')) {
+      return json({ ok: false, message: 'This event already has a wall device.' }, 409, corsHeaders);
+    }
+    throw error;
+  }
+
+  const created = await getWallDeviceById(env, id);
+  return json({
+    ok: true,
+    wallDevice: toAdminWallDeviceClient(created),
+    bridgeToken,
+    bridgeConfig: buildBridgeConfig(env, id, bridgeToken)
+  }, 201, corsHeaders);
+}
+
+async function updateAdminWallDevice(request, env, corsHeaders, deviceId) {
+  const current = await getWallDeviceById(env, deviceId);
+  if (!current) {
+    return json({ ok: false, message: 'Wall device not found.' }, 404, corsHeaders);
+  }
+
+  const body = await request.json();
+  const eventId = body.eventId === undefined ? current.eventId : cleanText(body.eventId, 80);
+
+  if (!eventId) {
+    return json({ ok: false, message: 'Event is required for the wall device.' }, 400, corsHeaders);
+  }
+
+  if (eventId !== current.eventId) {
+    const event = await getEventById(env, eventId);
+    if (!event) return json({ ok: false, message: 'Assigned event was not found.' }, 404, corsHeaders);
+  }
+
+  const next = {
+    eventId,
+    name: body.name === undefined ? current.name : cleanText(body.name, 100) || current.name,
+    status: body.status === undefined ? current.status : normalizeStatus(body.status, ['active', 'inactive']),
+    scanPresetId: body.scanPresetId === undefined ? current.scanPresetId : normalizePresetId(body.scanPresetId, current.scanPresetId),
+    submissionPresetId: body.submissionPresetId === undefined ? current.submissionPresetId : normalizePresetId(body.submissionPresetId, current.submissionPresetId),
+    manualPresetId: body.manualPresetId === undefined ? current.manualPresetId : normalizePresetId(body.manualPresetId, current.manualPresetId),
+    brightness: body.brightness === undefined ? current.brightness : normalizeBrightness(body.brightness, current.brightness)
+  };
+  const bridgeToken = body.rotateBridgeToken ? randomToken() : '';
+  const bridgeTokenHash = bridgeToken ? await hashBridgeToken(bridgeToken) : current.bridgeTokenHash;
+
+  try {
+    await env.MOMENTS_DB.prepare(`
+      UPDATE wall_devices
+      SET event_id = ?, name = ?, status = ?, bridge_token_hash = ?, scan_preset_id = ?,
+          submission_preset_id = ?, manual_preset_id = ?, brightness = ?, updated_at = ?
+      WHERE id = ?
+    `).bind(
+      next.eventId,
+      next.name,
+      next.status,
+      bridgeTokenHash,
+      next.scanPresetId,
+      next.submissionPresetId,
+      next.manualPresetId,
+      next.brightness,
+      new Date().toISOString(),
+      deviceId
+    ).run();
+  } catch (error) {
+    if (String(error.message || error).toLowerCase().includes('unique')) {
+      return json({ ok: false, message: 'That event already has a wall device.' }, 409, corsHeaders);
+    }
+    throw error;
+  }
+
+  const updated = await getWallDeviceById(env, deviceId);
+  return json({
+    ok: true,
+    wallDevice: toAdminWallDeviceClient(updated),
+    bridgeToken: bridgeToken || undefined,
+    bridgeConfig: bridgeToken ? buildBridgeConfig(env, deviceId, bridgeToken) : undefined
+  }, 200, corsHeaders);
+}
+
+async function triggerAdminWallDevice(request, env, corsHeaders, deviceId) {
+  const device = await getWallDeviceById(env, deviceId);
+  if (!device) {
+    return json({ ok: false, message: 'Wall device not found.' }, 404, corsHeaders);
+  }
+
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+
+  const triggerType = normalizeTriggerType(body.triggerType || 'manual_test');
+  const presetId = normalizePresetId(body.presetId, getPresetForTrigger(device, triggerType));
+  const brightness = normalizeBrightness(body.brightness, device.brightness || DEFAULT_LIGHT_BRIGHTNESS);
+  const trigger = await queueDeviceLightTrigger(env, {
+    eventId: device.eventId,
+    wallDeviceId: device.id,
+    triggerType,
+    presetId,
+    brightness
+  });
+
+  return json({ ok: true, queued: Boolean(trigger), trigger }, 201, corsHeaders);
+}
+
+async function handleBridgeApi(request, env, url, corsHeaders, parts) {
+  if (request.method === 'GET' && parts[0] === 'devices' && parts[1] && parts[2] === 'triggers') {
+    return listBridgeTriggers(request, env, url, corsHeaders, parts[1]);
+  }
+
+  if (request.method === 'POST' && parts[0] === 'triggers' && parts[1] && parts[2] === 'complete') {
+    return completeBridgeTrigger(request, env, url, corsHeaders, parts[1]);
+  }
+
+  return json({ ok: false, message: 'Bridge route not found.' }, 404, corsHeaders);
+}
+
+async function listBridgeTriggers(request, env, url, corsHeaders, deviceId) {
+  const bridge = await authorizeBridgeDevice(request, url, env, deviceId);
+
+  if (!bridge.ok) {
+    return json({ ok: false, message: bridge.message }, bridge.status, corsHeaders);
+  }
+
+  const now = new Date().toISOString();
+  await env.MOMENTS_DB.prepare('UPDATE wall_devices SET last_seen_at = ?, updated_at = ? WHERE id = ?')
+    .bind(now, now, deviceId)
+    .run();
+
+  const result = await env.MOMENTS_DB.prepare(`
+    SELECT
+      id,
+      event_id AS eventId,
+      wall_device_id AS wallDeviceId,
+      trigger_type AS triggerType,
+      preset_id AS presetId,
+      brightness,
+      status,
+      attempts,
+      created_at AS createdAt
+    FROM light_triggers
+    WHERE wall_device_id = ? AND status = 'pending'
+    ORDER BY created_at ASC
+    LIMIT ?
+  `).bind(deviceId, BRIDGE_TRIGGER_LIMIT).all();
+
+  const triggers = result.results || [];
+
+  for (const trigger of triggers) {
+    await env.MOMENTS_DB.prepare(`
+      UPDATE light_triggers
+      SET status = 'processing', attempts = attempts + 1, claimed_at = ?, updated_at = ?
+      WHERE id = ? AND status = 'pending'
+    `).bind(now, now, trigger.id).run();
+  }
+
+  return json({
+    ok: true,
+    device: {
+      id: bridge.device.id,
+      name: bridge.device.name
+    },
+    triggers: triggers.map(toBridgeTriggerClient)
+  }, 200, corsHeaders);
+}
+
+async function completeBridgeTrigger(request, env, url, corsHeaders, triggerId) {
+  const trigger = await getLightTriggerWithDevice(env, triggerId);
+  if (!trigger) {
+    return json({ ok: false, message: 'Light trigger not found.' }, 404, corsHeaders);
+  }
+
+  const bridge = await authorizeBridgeDevice(request, url, env, trigger.wallDeviceId, trigger.device);
+
+  if (!bridge.ok) {
+    return json({ ok: false, message: bridge.message }, bridge.status, corsHeaders);
+  }
+
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+
+  const now = new Date().toISOString();
+  const success = body.success === true;
+
+  if (success) {
+    await env.MOMENTS_DB.prepare(`
+      UPDATE light_triggers
+      SET status = 'completed', completed_at = ?, error_message = NULL, updated_at = ?
+      WHERE id = ?
+    `).bind(now, now, triggerId).run();
+
+    return json({ ok: true, status: 'completed' }, 200, corsHeaders);
+  }
+
+  const nextStatus = Number(trigger.attempts || 0) >= BRIDGE_MAX_ATTEMPTS ? 'failed' : 'pending';
+  await env.MOMENTS_DB.prepare(`
+    UPDATE light_triggers
+    SET status = ?, error_message = ?, updated_at = ?
+    WHERE id = ?
+  `).bind(
+    nextStatus,
+    cleanText(body.errorMessage, 500) || 'Bridge reported a WLED failure.',
+    now,
+    triggerId
+  ).run();
+
+  return json({ ok: true, status: nextStatus }, 200, corsHeaders);
+}
+
 function getAllowedOrigins(env) {
   return (env.ALLOWED_ORIGINS || '')
     .split(',')
@@ -1922,6 +2224,245 @@ async function validateEventQuota(env, eventId, incomingBytes) {
   }
 
   return '';
+}
+
+async function recordScanEvent(env, eventId, tagId) {
+  try {
+    await env.MOMENTS_DB.prepare(`
+      INSERT INTO scan_events (id, event_id, tag_id, created_at)
+      VALUES (?, ?, ?, ?)
+    `).bind(crypto.randomUUID(), eventId, tagId, new Date().toISOString()).run();
+  } catch (error) {
+    console.error('Wallflower Moments scan audit failed', String(error.message || error));
+  }
+}
+
+async function safeQueueEventLightTrigger(env, eventId, triggerType) {
+  try {
+    return await queueEventLightTrigger(env, eventId, triggerType);
+  } catch (error) {
+    console.error('Wallflower Moments light trigger queue failed', String(error.message || error));
+    return null;
+  }
+}
+
+async function queueEventLightTrigger(env, eventId, triggerType) {
+  const device = await getActiveWallDeviceForEvent(env, eventId);
+  if (!device) return null;
+
+  return queueDeviceLightTrigger(env, {
+    eventId,
+    wallDeviceId: device.id,
+    triggerType,
+    presetId: getPresetForTrigger(device, triggerType),
+    brightness: device.brightness || DEFAULT_LIGHT_BRIGHTNESS
+  });
+}
+
+async function queueDeviceLightTrigger(env, input) {
+  const now = new Date().toISOString();
+  const trigger = {
+    id: crypto.randomUUID(),
+    eventId: input.eventId,
+    wallDeviceId: input.wallDeviceId,
+    triggerType: normalizeTriggerType(input.triggerType),
+    presetId: normalizePresetId(input.presetId, DEFAULT_MANUAL_PRESET_ID),
+    brightness: normalizeBrightness(input.brightness, DEFAULT_LIGHT_BRIGHTNESS),
+    status: 'pending',
+    createdAt: now
+  };
+
+  await env.MOMENTS_DB.prepare(`
+    INSERT INTO light_triggers (
+      id, event_id, wall_device_id, trigger_type, preset_id, brightness,
+      status, attempts, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+  `).bind(
+    trigger.id,
+    trigger.eventId,
+    trigger.wallDeviceId,
+    trigger.triggerType,
+    trigger.presetId,
+    trigger.brightness,
+    trigger.status,
+    now,
+    now
+  ).run();
+
+  return trigger;
+}
+
+async function getActiveWallDeviceForEvent(env, eventId) {
+  const row = await env.MOMENTS_DB.prepare(`
+    SELECT
+      id,
+      event_id AS eventId,
+      name,
+      status,
+      bridge_token_hash AS bridgeTokenHash,
+      scan_preset_id AS scanPresetId,
+      submission_preset_id AS submissionPresetId,
+      manual_preset_id AS manualPresetId,
+      brightness,
+      last_seen_at AS lastSeenAt,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM wall_devices
+    WHERE event_id = ? AND status = 'active'
+    LIMIT 1
+  `).bind(eventId).first();
+
+  return row || null;
+}
+
+async function getWallDeviceById(env, deviceId) {
+  const row = await env.MOMENTS_DB.prepare(`
+    SELECT
+      wd.id,
+      wd.event_id AS eventId,
+      wd.name,
+      wd.status,
+      wd.bridge_token_hash AS bridgeTokenHash,
+      wd.scan_preset_id AS scanPresetId,
+      wd.submission_preset_id AS submissionPresetId,
+      wd.manual_preset_id AS manualPresetId,
+      wd.brightness,
+      wd.last_seen_at AS lastSeenAt,
+      wd.created_at AS createdAt,
+      wd.updated_at AS updatedAt,
+      e.name AS eventName
+    FROM wall_devices wd
+    INNER JOIN events e ON e.id = wd.event_id
+    WHERE wd.id = ?
+  `).bind(deviceId).first();
+
+  return row || null;
+}
+
+async function getLightTriggerWithDevice(env, triggerId) {
+  const row = await env.MOMENTS_DB.prepare(`
+    SELECT
+      lt.id,
+      lt.event_id AS eventId,
+      lt.wall_device_id AS wallDeviceId,
+      lt.trigger_type AS triggerType,
+      lt.preset_id AS presetId,
+      lt.brightness,
+      lt.status,
+      lt.attempts,
+      lt.created_at AS createdAt,
+      wd.id AS deviceId,
+      wd.name AS deviceName,
+      wd.status AS deviceStatus,
+      wd.bridge_token_hash AS bridgeTokenHash
+    FROM light_triggers lt
+    INNER JOIN wall_devices wd ON wd.id = lt.wall_device_id
+    WHERE lt.id = ?
+  `).bind(triggerId).first();
+
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    eventId: row.eventId,
+    wallDeviceId: row.wallDeviceId,
+    triggerType: row.triggerType,
+    presetId: row.presetId,
+    brightness: row.brightness,
+    status: row.status,
+    attempts: row.attempts,
+    createdAt: row.createdAt,
+    device: {
+      id: row.deviceId,
+      name: row.deviceName,
+      status: row.deviceStatus,
+      bridgeTokenHash: row.bridgeTokenHash
+    }
+  };
+}
+
+async function authorizeBridgeDevice(request, url, env, deviceId, knownDevice) {
+  const token = getBearerToken(request) || url.searchParams.get('bridgeToken') || '';
+
+  if (!token) {
+    return { ok: false, status: 401, message: 'Bridge token is required.' };
+  }
+
+  const device = knownDevice || await getWallDeviceById(env, deviceId);
+
+  if (!device || device.status !== 'active') {
+    return { ok: false, status: 403, message: 'This wall device is not active.' };
+  }
+
+  const tokenHash = await hashBridgeToken(token);
+  if (!constantTimeEqual(tokenHash, device.bridgeTokenHash || '')) {
+    return { ok: false, status: 403, message: 'Bridge token is not valid.' };
+  }
+
+  return { ok: true, device };
+}
+
+function getBearerToken(request) {
+  const auth = request.headers.get('Authorization') || '';
+  return auth.toLowerCase().startsWith('bearer ') ? auth.slice(7) : '';
+}
+
+function normalizeTriggerType(value) {
+  const triggerType = String(value || '').toLowerCase();
+  return ['tag_scan', 'submission_received', 'manual_test'].includes(triggerType) ? triggerType : 'manual_test';
+}
+
+function getPresetForTrigger(device, triggerType) {
+  if (triggerType === 'tag_scan') return Number(device.scanPresetId || DEFAULT_SCAN_PRESET_ID);
+  if (triggerType === 'submission_received') return Number(device.submissionPresetId || DEFAULT_SUBMISSION_PRESET_ID);
+  return Number(device.manualPresetId || DEFAULT_MANUAL_PRESET_ID);
+}
+
+function normalizePresetId(value, fallback) {
+  const presetId = Number(value);
+  if (Number.isInteger(presetId) && presetId >= 1 && presetId <= 250) return presetId;
+  return Number(fallback || DEFAULT_MANUAL_PRESET_ID);
+}
+
+function normalizeBrightness(value, fallback) {
+  const brightness = Number(value);
+  if (Number.isInteger(brightness) && brightness >= 1 && brightness <= 255) return brightness;
+  return Number(fallback || DEFAULT_LIGHT_BRIGHTNESS);
+}
+
+async function hashBridgeToken(token) {
+  return sha256Hex(`wallflower-bridge:${token}`);
+}
+
+function toBridgeTriggerClient(row) {
+  return {
+    id: row.id,
+    eventId: row.eventId,
+    wallDeviceId: row.wallDeviceId,
+    triggerType: row.triggerType,
+    presetId: Number(row.presetId),
+    brightness: Number(row.brightness),
+    createdAt: row.createdAt
+  };
+}
+
+function buildBridgeConfig(env, deviceId, bridgeToken) {
+  const apiBaseUrl = getApiBaseUrl(env);
+  const apiBase = apiBaseUrl.endsWith('/moments-api') ? apiBaseUrl : `${apiBaseUrl}/moments-api`;
+
+  return [
+    `WALLFLOWER_API_BASE=${apiBase}`,
+    `WALL_DEVICE_ID=${deviceId}`,
+    `BRIDGE_TOKEN=${bridgeToken}`,
+    'WLED_BASE_URL=http://192.168.1.50',
+    'BRIDGE_POLL_MS=1500',
+    'WLED_TIMEOUT_MS=5000'
+  ].join('\n');
+}
+
+function getApiBaseUrl(env) {
+  return (env.MOMENTS_API_URL || env.PUBLIC_SITE_URL || PUBLIC_SITE_URL).replace(/\/$/, '');
 }
 
 async function readSubmission(request) {
@@ -2761,6 +3302,27 @@ function toAdminTagClient(row) {
     activeEventId: row.active_event_id,
     activeEventName: row.active_event_name,
     createdAt: row.created_at
+  };
+}
+
+function toAdminWallDeviceClient(row) {
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    eventId: row.event_id || row.eventId,
+    eventName: row.event_name || row.eventName,
+    name: row.name,
+    status: row.status,
+    scanPresetId: Number(row.scan_preset_id ?? row.scanPresetId ?? DEFAULT_SCAN_PRESET_ID),
+    submissionPresetId: Number(row.submission_preset_id ?? row.submissionPresetId ?? DEFAULT_SUBMISSION_PRESET_ID),
+    manualPresetId: Number(row.manual_preset_id ?? row.manualPresetId ?? DEFAULT_MANUAL_PRESET_ID),
+    brightness: Number(row.brightness || DEFAULT_LIGHT_BRIGHTNESS),
+    lastSeenAt: row.last_seen_at || row.lastSeenAt,
+    createdAt: row.created_at || row.createdAt,
+    updatedAt: row.updated_at || row.updatedAt,
+    pendingTriggerCount: Number(row.pending_trigger_count || row.pendingTriggerCount || 0),
+    failedTriggerCount: Number(row.failed_trigger_count || row.failedTriggerCount || 0)
   };
 }
 

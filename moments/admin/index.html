@@ -31,7 +31,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260531-admin-delete-tag-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260602-lighting-1" />
 </head>
 <body class="admin-page">
   <main class="app-shell">
@@ -135,6 +135,11 @@
             <strong>Share links</strong>
             <small>Test guest scan, then give the host link.</small>
           </div>
+          <div class="guide-step" data-guide-step="lighting">
+            <span>5</span>
+            <strong>Register lighting</strong>
+            <small>Connect the Butterfly Wall bridge and test WLED presets.</small>
+          </div>
         </section>
 
         <div class="admin-grid">
@@ -233,6 +238,73 @@
         <div class="mobile-card-list" id="tagsCards"></div>
       </section>
 
+      <section class="panel data-panel" id="lightingPanel">
+        <div class="panel-heading">
+          <div>
+            <h2>Flower wall lighting</h2>
+            <p class="muted">Register the Butterfly Wall bridge, copy its laptop config, and test WLED presets.</p>
+          </div>
+          <span class="status-pill" id="devicesCountLabel">0 devices</span>
+        </div>
+
+        <form class="lighting-form" id="wallDeviceForm">
+          <div class="form-grid">
+            <div class="field">
+              <label for="wallDeviceEvent">Event</label>
+              <select id="wallDeviceEvent" name="eventId" required></select>
+            </div>
+            <div class="field">
+              <label for="wallDeviceName">Device name</label>
+              <input id="wallDeviceName" name="name" required placeholder="Butterfly Wall" />
+            </div>
+          </div>
+          <div class="preset-grid">
+            <div class="field">
+              <label for="scanPresetId">Scan preset</label>
+              <input id="scanPresetId" name="scanPresetId" type="number" min="1" max="250" value="2" />
+            </div>
+            <div class="field">
+              <label for="submissionPresetId">Submission preset</label>
+              <input id="submissionPresetId" name="submissionPresetId" type="number" min="1" max="250" value="3" />
+            </div>
+            <div class="field">
+              <label for="manualPresetId">Test preset</label>
+              <input id="manualPresetId" name="manualPresetId" type="number" min="1" max="250" value="4" />
+            </div>
+            <div class="field">
+              <label for="deviceBrightness">Brightness</label>
+              <input id="deviceBrightness" name="brightness" type="number" min="1" max="255" value="180" />
+            </div>
+          </div>
+          <button class="button button-primary" type="submit">Register wall device</button>
+        </form>
+
+        <div class="bridge-config" id="bridgeConfigPanel" hidden>
+          <div>
+            <strong>Bridge config</strong>
+            <p class="muted">Copy this now. The bridge token is only shown when created or rotated.</p>
+          </div>
+          <pre id="bridgeConfigText"></pre>
+          <button class="small-button is-primary" type="button" id="copyBridgeConfigButton">Copy bridge config</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Device</th>
+                <th>Status</th>
+                <th>Presets</th>
+                <th>Bridge</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="devicesTable"></tbody>
+          </table>
+        </div>
+        <div class="mobile-card-list" id="devicesCards"></div>
+      </section>
+
       <section class="panel maintenance-panel" id="maintenancePanel">
         <div class="panel-heading">
           <div>
@@ -246,6 +318,6 @@
     </section>
   </main>
 
-  <script type="module" src="admin.js?v=20260531-admin-delete-tag-1"></script>
+  <script type="module" src="admin.js?v=20260602-lighting-1"></script>
 </body>
 </html>

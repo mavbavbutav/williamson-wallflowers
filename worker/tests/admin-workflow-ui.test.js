@@ -11,11 +11,13 @@ test('admin page prioritizes event operations and setup workflow', async () => {
 
   assert.match(adminHtml, /id="attentionPanel"/);
   assert.match(adminHtml, /id="assignTagForm"/);
+  assert.match(adminHtml, /id="lightingPanel"/);
+  assert.match(adminHtml, /id="wallDeviceForm"/);
   assert.match(adminHtml, /id="maintenancePanel"/);
   assert.doesNotMatch(adminHtml, /id="cleanupButton">Run cleanup<\/button>[\s\S]*id="signOutButton"/);
   assert.ok(adminHtml.indexOf('id="eventsPanel"') < adminHtml.indexOf('id="tagsPanel"'));
-  assert.match(adminHtml, /admin\.js\?v=20260531-admin-delete-tag-1/);
-  assert.match(adminHtml, /styles\.css\?v=20260531-admin-delete-tag-1/);
+  assert.match(adminHtml, /admin\.js\?v=20260602-lighting-1/);
+  assert.match(adminHtml, /styles\.css\?v=20260602-lighting-1/);
 
   assert.match(adminJs, /function renderAttention/);
   assert.match(adminJs, /function renderAssignTagForm/);
@@ -30,6 +32,9 @@ test('admin page prioritizes event operations and setup workflow', async () => {
   assert.match(adminJs, /data-delete-event/);
   assert.match(adminJs, /function deleteEvent/);
   assert.match(adminJs, /Permanently delete/);
+  assert.match(adminJs, /function renderWallDevices/);
+  assert.match(adminJs, /function showBridgeConfig/);
+  assert.match(adminJs, /data-test-trigger/);
   assert.match(adminJs, /setup-guide"\)\.classList\.toggle\("is-collapsed"/);
   assert.doesNotMatch(adminJs, /<span class="muted link-preview">\$\{escapeHtml\(hostUrl\)\}<\/span>/);
 
@@ -44,6 +49,9 @@ test('admin page prioritizes event operations and setup workflow', async () => {
   assert.match(styles, /\.admin-page \.data-panel/);
   assert.match(styles, /\.admin-page \.attention-item/);
   assert.match(styles, /\.admin-page \.admin-mobile-card/);
+  assert.match(styles, /\.lighting-form/);
+  assert.match(styles, /\.preset-grid/);
+  assert.match(styles, /\.bridge-config/);
 });
 
 async function readText(path) {

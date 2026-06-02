@@ -4,6 +4,7 @@ import {
   clearAdminToken,
   copyText,
   formatDate,
+  formatDateTime,
   getAdminToken,
   getPublishedCapsuleShareUrl,
   qs,
@@ -15,6 +16,7 @@ import {
 let adminToken = getAdminToken();
 let events = [];
 let tags = [];
+let wallDevices = [];
 
 init();
 
@@ -32,7 +34,9 @@ function init() {
   qs("#eventForm").addEventListener("submit", createEvent);
   qs("#tagForm").addEventListener("submit", createTag);
   qs("#assignTagForm").addEventListener("submit", assignTag);
+  qs("#wallDeviceForm").addEventListener("submit", createWallDevice);
   qs("#generateTagCodeButton").addEventListener("click", generateTagCode);
+  qs("#copyBridgeConfigButton").addEventListener("click", () => copyText(qs("#bridgeConfigText").textContent, qs("#copyBridgeConfigButton")));
   bindScrollActions();
 
   if (adminToken) {
@@ -48,6 +52,7 @@ async function loadAdmin() {
     const payload = await adminRequest("/admin/overview");
     events = payload.events || [];
     tags = payload.tags || [];
+    wallDevices = payload.wallDevices || [];
     const shouldFocusTitle = qs("#adminApp").hidden;
     qs("#authPanel").hidden = true;
     qs("#adminApp").hidden = false;
@@ -57,6 +62,8 @@ async function loadAdmin() {
     renderAssignTagForm();
     renderEvents();
     renderTags();
+    renderWallDeviceForm();
+    renderWallDevices();
     if (shouldFocusTitle) focusElement(qs("#adminTitle"));
   } catch (error) {
     qs("#authPanel").hidden = false;
@@ -143,6 +150,34 @@ async function assignTag(event) {
   }
 }
 
+async function createWallDevice(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submitButton = form.querySelector("button[type='submit']");
+  const formData = new FormData(form);
+  const body = Object.fromEntries(formData.entries());
+
+  try {
+    setButtonBusy(submitButton, true, "Registering device...");
+    const result = await adminRequest("/admin/wall-devices", {
+      method: "POST",
+      body: JSON.stringify(body)
+    });
+    form.reset();
+    qs("#scanPresetId").value = "2";
+    qs("#submissionPresetId").value = "3";
+    qs("#manualPresetId").value = "4";
+    qs("#deviceBrightness").value = "180";
+    await loadAdmin();
+    showBridgeConfig(result.bridgeConfig);
+    showAdminNotice(`Wall device "${result.wallDevice?.name || body.name || "Butterfly Wall"}" was registered. Copy the bridge config before leaving this page.`, "success");
+  } catch (error) {
+    showAdminNotice(error.message || "Could not register wall device.", "error");
+  } finally {
+    setButtonBusy(submitButton, false);
+  }
+}
+
 function showAdminNotice(message, type = "") {
   const notice = qs("#adminNotice");
   setNotice(notice, message, type);
@@ -170,6 +205,8 @@ function renderStats(stats) {
   const values = [
     ["Events", stats.events || 0, "events"],
     ["Tags", stats.tags || 0, "tags"],
+    ["Lights", stats.wallDevices || 0, "lights"],
+    ["Light queue", stats.pendingLightTriggers || 0, "pending"],
     ["Pending", stats.pending || 0, "pending"],
     ["Approved", stats.approved || 0, "approved"]
   ];
@@ -338,6 +375,47 @@ function renderAssignTagForm() {
   qs("#assignTagHelp").textContent = canAssign
     ? "Choose a tag and event, then copy the guest link from Reusable tags when you are ready to write the NTAG."
     : "Create an event and register a tag before assigning.";
+}
+
+function renderWallDeviceForm() {
+  const select = qs("#wallDeviceEvent");
+  if (!select) return;
+  select.innerHTML = buildEventOptions("");
+}
+
+function renderWallDevices() {
+  const countLabel = qs("#devicesCountLabel");
+  if (countLabel) {
+    countLabel.textContent = `${wallDevices.length} ${wallDevices.length === 1 ? "device" : "devices"}`;
+  }
+
+  const rows = wallDevices.map((device) => `
+    <tr data-device-id="${escapeAttribute(device.id)}">
+      <td>
+        <strong>${escapeHtml(device.name)}</strong><br />
+        <span class="muted">${escapeHtml(device.eventName || "Unassigned event")}</span>
+      </td>
+      <td>
+        <select data-device-status>
+          <option value="active"${device.status === "active" ? " selected" : ""}>Active</option>
+          <option value="inactive"${device.status === "inactive" ? " selected" : ""}>Inactive</option>
+        </select>
+      </td>
+      <td>${renderPresetInputs(device)}</td>
+      <td>
+        <span class="muted">${device.lastSeenAt ? `Last seen ${formatDateTime(device.lastSeenAt)}` : "Bridge not seen yet"}</span><br />
+        <span class="status-pill is-pending">${device.pendingTriggerCount || 0} pending</span>
+        <span class="status-pill">${device.failedTriggerCount || 0} failed</span>
+      </td>
+      <td>${renderDeviceActions()}</td>
+    </tr>
+  `).join("");
+
+  const cards = wallDevices.map(renderWallDeviceCard).join("");
+
+  qs("#devicesTable").innerHTML = rows || `<tr><td colspan="5">No wall devices registered yet.</td></tr>`;
+  qs("#devicesCards").innerHTML = cards || `<div class="empty-state">No wall devices registered yet.</div>`;
+  bindWallDeviceActions();
 }
 
 function renderEvents() {
@@ -537,6 +615,30 @@ function bindAttentionActions() {
   });
 }
 
+function bindWallDeviceActions() {
+  qsaWithin("#devicesTable, #devicesCards", "[data-save-device]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest("[data-device-id]");
+      await updateWallDevice(row.dataset.deviceId, getWallDeviceFormValues(row));
+    });
+  });
+
+  qsaWithin("#devicesTable, #devicesCards", "[data-rotate-bridge]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest("[data-device-id]");
+      if (!window.confirm("Rotate this bridge token? The laptop bridge must be updated with the new token.")) return;
+      await updateWallDevice(row.dataset.deviceId, { rotateBridgeToken: true }, "Bridge token rotated. Copy the new bridge config before leaving this page.");
+    });
+  });
+
+  qsaWithin("#devicesTable, #devicesCards", "[data-test-trigger]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest("[data-device-id]");
+      await testWallDevice(row.dataset.deviceId, button.dataset.testTrigger);
+    });
+  });
+}
+
 function bindScrollActions() {
   Array.from(document.querySelectorAll("[data-scroll-target]")).forEach((button) => {
     button.addEventListener("click", () => scrollToTarget(button.dataset.scrollTarget));
@@ -594,6 +696,33 @@ async function updateEvent(eventId, body) {
   }
 }
 
+async function updateWallDevice(deviceId, body, successMessage = "Wall device updated.") {
+  try {
+    const result = await adminRequest(`/admin/wall-devices/${encodeURIComponent(deviceId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body)
+    });
+    await loadAdmin();
+    if (result.bridgeConfig) showBridgeConfig(result.bridgeConfig);
+    showAdminNotice(successMessage, "success");
+  } catch (error) {
+    showAdminNotice(error.message || "Could not update wall device.", "error");
+  }
+}
+
+async function testWallDevice(deviceId, triggerType) {
+  try {
+    await adminRequest(`/admin/wall-devices/${encodeURIComponent(deviceId)}/triggers`, {
+      method: "POST",
+      body: JSON.stringify({ triggerType })
+    });
+    await loadAdmin();
+    showAdminNotice("Light test queued. The bridge will pick it up on its next poll.", "success");
+  } catch (error) {
+    showAdminNotice(error.message || "Could not queue light test.", "error");
+  }
+}
+
 async function deleteEvent(eventId, eventName) {
   try {
     await adminRequest(`/admin/events/${encodeURIComponent(eventId)}`, {
@@ -640,6 +769,8 @@ function signOut() {
   clearAdminToken();
   adminToken = "";
   qs("#adminToken").value = "";
+  qs("#bridgeConfigPanel").hidden = true;
+  qs("#bridgeConfigText").textContent = "";
   qs("#authPanel").hidden = false;
   qs("#adminApp").hidden = true;
 }
@@ -648,11 +779,13 @@ function renderGuide() {
   const hasEvent = events.length > 0;
   const hasTag = tags.length > 0;
   const hasAssignedTag = tags.some((tag) => tag.activeEventId && tag.status === "active");
+  const hasLighting = wallDevices.some((device) => device.status === "active");
   const steps = {
     event: hasEvent,
     tag: hasTag,
     assign: hasAssignedTag,
-    share: hasEvent && hasAssignedTag
+    share: hasEvent && hasAssignedTag,
+    lighting: hasLighting
   };
   const firstOpen = Object.keys(steps).find((key) => !steps[key]);
   qs(".setup-guide").classList.toggle("is-collapsed", !firstOpen);
@@ -729,10 +862,84 @@ function renderEventCard(event) {
   `;
 }
 
+function renderWallDeviceCard(device) {
+  return `
+    <article class="admin-mobile-card" data-device-id="${escapeAttribute(device.id)}">
+      <div class="mobile-card-heading">
+        <div>
+          <strong>${escapeHtml(device.name)}</strong>
+          <span>${escapeHtml(device.eventName || "Unassigned event")}</span>
+        </div>
+        <span class="status-pill">${escapeHtml(device.status)}</span>
+      </div>
+      <div class="field">
+        <label>Status</label>
+        <select data-device-status>
+          <option value="active"${device.status === "active" ? " selected" : ""}>Active</option>
+          <option value="inactive"${device.status === "inactive" ? " selected" : ""}>Inactive</option>
+        </select>
+      </div>
+      ${renderPresetInputs(device)}
+      <div class="button-row">
+        <span class="status-pill is-pending">${device.pendingTriggerCount || 0} pending</span>
+        <span class="status-pill">${device.failedTriggerCount || 0} failed</span>
+      </div>
+      <p class="muted">${device.lastSeenAt ? `Last seen ${formatDateTime(device.lastSeenAt)}` : "Bridge not seen yet"}</p>
+      ${renderDeviceActions()}
+    </article>
+  `;
+}
+
+function renderPresetInputs(device) {
+  return `
+    <div class="preset-grid is-compact">
+      <label>Scan
+        <input data-device-scan-preset type="number" min="1" max="250" value="${escapeAttribute(device.scanPresetId || 2)}" />
+      </label>
+      <label>Submission
+        <input data-device-submission-preset type="number" min="1" max="250" value="${escapeAttribute(device.submissionPresetId || 3)}" />
+      </label>
+      <label>Test
+        <input data-device-manual-preset type="number" min="1" max="250" value="${escapeAttribute(device.manualPresetId || 4)}" />
+      </label>
+      <label>Brightness
+        <input data-device-brightness type="number" min="1" max="255" value="${escapeAttribute(device.brightness || 180)}" />
+      </label>
+    </div>
+  `;
+}
+
+function renderDeviceActions() {
+  return `
+    <div class="row-actions">
+      <button class="small-button" type="button" data-save-device>Save</button>
+      <button class="small-button" type="button" data-rotate-bridge>Rotate bridge</button>
+      <button class="small-button" type="button" data-test-trigger="tag_scan">Test scan</button>
+      <button class="small-button" type="button" data-test-trigger="submission_received">Test submit</button>
+      <button class="small-button" type="button" data-test-trigger="manual_test">Celebrate</button>
+    </div>
+  `;
+}
+
+function getWallDeviceFormValues(root) {
+  return {
+    status: root.querySelector("[data-device-status]").value,
+    scanPresetId: root.querySelector("[data-device-scan-preset]").value,
+    submissionPresetId: root.querySelector("[data-device-submission-preset]").value,
+    manualPresetId: root.querySelector("[data-device-manual-preset]").value,
+    brightness: root.querySelector("[data-device-brightness]").value
+  };
+}
+
+function showBridgeConfig(config) {
+  qs("#bridgeConfigPanel").hidden = !config;
+  qs("#bridgeConfigText").textContent = config || "";
+}
+
 function buildEventOptions(activeEventId) {
   return [
     `<option value="">Unassigned</option>`,
-    ...events.map((event) => `<option value="${event.id}"${event.id === activeEventId ? " selected" : ""}>${escapeHtml(event.name)}</option>`)
+    ...events.map((event) => `<option value="${escapeAttribute(event.id)}"${event.id === activeEventId ? " selected" : ""}>${escapeHtml(event.name)}</option>`)
   ].join("");
 }
 
