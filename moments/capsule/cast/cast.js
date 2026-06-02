@@ -14,9 +14,9 @@ let musicChordTimer = 0;
 let musicChordIndex = 0;
 const PHOTO_SLIDE_DURATION_MS = 20000;
 const SLIDE_ERROR_ADVANCE_MS = 6000;
-const MUSIC_PHOTO_LEVEL = 0.13;
-const MUSIC_VIDEO_LEVEL = 0.035;
-const MUSIC_AUDIO_LEVEL = 0.008;
+const MUSIC_PHOTO_LEVEL = 0.34;
+const MUSIC_VIDEO_LEVEL = 0.095;
+const MUSIC_AUDIO_LEVEL = 0.018;
 const MUSIC_CHORD_MS = 4800;
 const MUSIC_CHORDS = [
   [196.0, 246.94, 293.66, 369.99],
@@ -31,6 +31,7 @@ async function init() {
   qs("#startCastDisplayButton").addEventListener("click", startCastDisplay);
   qs("#castMusicToggle").checked = musicEnabled;
   qs("#castMusicToggle").addEventListener("change", handleMusicToggleChange);
+  setMusicState(musicEnabled ? "ready" : "off");
   window.addEventListener("resize", sizeCastFrame);
 
   if (!eventId || !token) {
@@ -53,11 +54,16 @@ async function init() {
 }
 
 async function startCastDisplay() {
-  const musicStart = musicEnabled ? startInstrumentalMusic() : Promise.resolve();
   displayStarted = true;
   qs("#castStart").hidden = true;
   await requestCastFullscreen();
-  await musicStart;
+  if (musicEnabled) {
+    await startInstrumentalMusic().catch(() => {
+      setMusicState("blocked");
+      qs("#castStart").hidden = false;
+      showCastStatus("This browser blocked the music bed. Tap Start TV Display again to unlock audio.");
+    });
+  }
   renderCastSlide();
 }
 
@@ -106,11 +112,13 @@ function readyCastStatus() {
 function handleMusicToggleChange(event) {
   musicEnabled = Boolean(event.target.checked);
   if (!musicEnabled) {
+    setMusicState("off");
     setInstrumentalMusicLevel(0);
     showCastStatus(displayStarted ? "Instrumental music is off." : readyCastStatus());
     return;
   }
 
+  setMusicState("ready");
   showCastStatus(displayStarted ? "Starting instrumental music." : readyCastStatus());
   if (!displayStarted) return;
 
@@ -125,6 +133,7 @@ async function startInstrumentalMusic() {
   if (!musicContext) {
     musicEnabled = false;
     qs("#castMusicToggle").checked = false;
+    setMusicState("unsupported");
     showCastStatus("This browser does not support generated music. The TV slideshow will continue without music.");
     return;
   }
@@ -137,6 +146,8 @@ async function startInstrumentalMusic() {
   if (musicContext.state === "suspended") {
     await musicContext.resume();
   }
+  setMusicState("playing");
+  showCastStatus("Instrumental music is on.");
 }
 
 function createMusicContext() {
@@ -149,6 +160,8 @@ function createInstrumentalMusicNodes(context) {
   const masterGain = context.createGain();
   const filter = context.createBiquadFilter();
   const textureGain = context.createGain();
+  const pulseOscillator = context.createOscillator();
+  const pulseGain = context.createGain();
   const voices = MUSIC_CHORDS[0].map((frequency, index) => {
     const oscillator = context.createOscillator();
     const gain = context.createGain();
@@ -165,12 +178,18 @@ function createInstrumentalMusicNodes(context) {
   filter.frequency.value = 1280;
   filter.Q.value = 0.72;
   textureGain.gain.value = 0.035;
+  pulseOscillator.type = "sine";
+  pulseOscillator.frequency.value = 392;
+  pulseGain.gain.value = 0;
   masterGain.gain.value = 0;
+  pulseOscillator.connect(pulseGain);
+  pulseGain.connect(filter);
   filter.connect(masterGain);
   textureGain.connect(masterGain);
   masterGain.connect(context.destination);
+  pulseOscillator.start();
 
-  return { filter, masterGain, textureGain, voices };
+  return { filter, masterGain, pulseGain, pulseOscillator, textureGain, voices };
 }
 
 function scheduleInstrumentalMusicChord() {
@@ -181,13 +200,29 @@ function scheduleInstrumentalMusicChord() {
   musicChordIndex += 1;
   musicNodes.voices.forEach((voice, index) => {
     const octave = index === 0 ? 0.5 : 1;
-    const targetGain = index === 0 ? 0.08 : 0.032;
+    const targetGain = index === 0 ? 0.16 : 0.068;
     voice.oscillator.frequency.setTargetAtTime(chord[index] * octave, now, 0.9);
     voice.gain.gain.setTargetAtTime(targetGain, now, 1.35);
   });
   musicNodes.filter.frequency.setTargetAtTime(1120 + (musicChordIndex % 3) * 180, now, 1.8);
+  playInstrumentalPulse(chord);
   window.clearTimeout(musicChordTimer);
   musicChordTimer = window.setTimeout(scheduleInstrumentalMusicChord, MUSIC_CHORD_MS);
+}
+
+function playInstrumentalPulse(chord) {
+  if (!musicContext || !musicNodes?.pulseOscillator || !musicNodes?.pulseGain) return;
+
+  const now = musicContext.currentTime;
+  const notes = [chord[1], chord[2], chord[3], chord[2]];
+  notes.forEach((frequency, index) => {
+    const start = now + index * 0.42;
+    musicNodes.pulseOscillator.frequency.setValueAtTime(frequency, start);
+    musicNodes.pulseGain.gain.cancelScheduledValues(start);
+    musicNodes.pulseGain.gain.setValueAtTime(0.0001, start);
+    musicNodes.pulseGain.gain.linearRampToValueAtTime(0.18, start + 0.045);
+    musicNodes.pulseGain.gain.exponentialRampToValueAtTime(0.0001, start + 0.72);
+  });
 }
 
 function updateInstrumentalMusicForItem(item) {
@@ -212,6 +247,10 @@ function setInstrumentalMusicLevel(level) {
   const now = musicContext.currentTime;
   musicNodes.masterGain.gain.cancelScheduledValues(now);
   musicNodes.masterGain.gain.setTargetAtTime(target, now, 0.65);
+}
+
+function setMusicState(state) {
+  document.body.dataset.musicState = state;
 }
 
 function createTvSlideFrame(item) {

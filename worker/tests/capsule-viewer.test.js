@@ -378,7 +378,7 @@ test('capsule viewer exposes Cast and TV display fallbacks', async () => {
   assert.match(castHtml, /Wallflower Time Capsule TV/);
   assert.match(castHtml, /id="castStage"/);
   assert.match(castHtml, /id="castMusicToggle"/);
-  assert.match(castHtml, /cast\.js\?v=20260601-tv-music-1/);
+  assert.match(castHtml, /cast\.js\?v=20260601-tv-music-2/);
   assert.match(castJs, /const PHOTO_SLIDE_DURATION_MS = 20000/);
   assert.match(castJs, /\/capsules\/\$\{encodeURIComponent\(eventId\)\}/);
   assert.match(castJs, /function renderCastSlide/);
@@ -407,6 +407,18 @@ test('TV display link starts with generated instrumental music enabled', async (
   assert.match(castJs, /item\.mediaType === "photo"/);
   assert.match(castJs, /item\.mediaType === "audio"/);
   assert.match(styles, /\.cast-music-toggle/);
+});
+
+test('TV display music is audible and exposes playback state', async () => {
+  const castJs = await readText('../../moments/capsule/cast/cast.js');
+
+  assert.match(castJs, /const MUSIC_PHOTO_LEVEL = 0\.34/);
+  assert.match(castJs, /const MUSIC_VIDEO_LEVEL = 0\.095/);
+  assert.match(castJs, /function setMusicState/);
+  assert.match(castJs, /document\.body\.dataset\.musicState/);
+  assert.match(castJs, /setMusicState\("playing"\)/);
+  assert.match(castJs, /function playInstrumentalPulse/);
+  assert.match(castJs, /pulseOscillator/);
 });
 
 test('TV slideshow videos favor fullscreen mirroring instead of direct video AirPlay', async () => {
