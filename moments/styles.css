@@ -1765,15 +1765,15 @@ textarea:focus-visible {
 }
 
 .capsule-viewer:not(.is-swipe-feed-active) {
-  overflow: hidden;
+  overflow-x: hidden;
 }
 
 .capsule-viewer:not(.is-swipe-feed-active) .app-shell {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  height: 100vh;
-  height: 100dvh;
-  padding-bottom: 1rem;
+  display: block;
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: auto;
+  padding-bottom: 3rem;
 }
 
 .capsule-viewer:not(.is-swipe-feed-active) .site-topbar {
@@ -1797,9 +1797,9 @@ textarea:focus-visible {
 }
 
 .capsule-viewer:not(.is-swipe-feed-active) .dashboard {
-  grid-template-rows: auto auto auto minmax(0, 1fr);
-  min-height: 0;
-  overflow: hidden;
+  grid-template-rows: none;
+  min-height: auto;
+  overflow: visible;
 }
 
 .capsule-viewer:not(.is-swipe-feed-active) .dashboard-header {
@@ -1816,14 +1816,13 @@ textarea:focus-visible {
 }
 
 .capsule-viewer:not(.is-swipe-feed-active) .capsule-timeline {
-  min-height: 0;
+  min-height: auto;
   align-content: start;
   align-items: start;
   grid-auto-rows: max-content;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 0 0.35rem 0.5rem 0;
-  scrollbar-width: thin;
+  overflow: visible;
+  overscroll-behavior: auto;
+  padding: 0 0 0.5rem;
 }
 
 .capsule-viewer:not(.is-swipe-feed-active) .capsule-memory-card {

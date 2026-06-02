@@ -356,16 +356,17 @@ test('capsule viewer exposes Cast and TV display fallbacks', async () => {
   ]);
 
   assert.match(capsuleHtml, /id="castTvButton"/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260601-capsule-full-thumbs-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260602-capsule-scroll-1/);
   assert.match(capsuleHtml, /<img src="\.\.\/\.\.\/assets\/williamson-wallflowers-logo\.png" alt="" \/>/);
   assert.match(capsuleHtml, /<strong>Wallflower Moments<\/strong>/);
   assert.match(capsuleHtml, /<span>Time Capsule<\/span>/);
   assert.doesNotMatch(capsuleHtml, /<strong>Wallflower Time Capsule<\/strong>/);
   assert.doesNotMatch(capsuleHtml, /private keepsake timeline/i);
   assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.brand-lockup img[\s\S]*?width: 68px/);
-  assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.app-shell[\s\S]*?height: 100dvh/);
-  assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.dashboard[\s\S]*?overflow: hidden/);
-  assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.capsule-timeline[\s\S]*?overflow-y: auto/);
+  assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.site-topbar[\s\S]*?position: sticky/);
+  assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.app-shell[\s\S]*?height: auto/);
+  assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.dashboard[\s\S]*?overflow: visible/);
+  assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.capsule-timeline[\s\S]*?overflow: visible/);
   assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.capsule-timeline[\s\S]*?grid-auto-rows: max-content/);
   assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.capsule-memory-card \.media-thumb[\s\S]*?aspect-ratio: 3 \/ 4/);
   assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.capsule-memory-card \.media-thumb img[\s\S]*?object-fit: contain/);
