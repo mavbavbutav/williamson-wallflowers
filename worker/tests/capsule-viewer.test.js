@@ -356,6 +356,9 @@ test('capsule viewer exposes Cast and TV display fallbacks', async () => {
   ]);
 
   assert.match(capsuleHtml, /id="castTvButton"/);
+  assert.match(capsuleHtml, /<strong>Wallflower Moments<\/strong>/);
+  assert.match(capsuleHtml, /Time Capsule keepsake/);
+  assert.doesNotMatch(capsuleHtml, /<strong>Wallflower Time Capsule<\/strong>/);
   assert.match(capsuleHtml, /id="castTvPanel"/);
   assert.match(capsuleHtml, /id="startAirplayFullscreenButton"/);
   assert.match(capsuleHtml, /id="startChromecastButton"/);
