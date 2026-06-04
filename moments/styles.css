@@ -1454,6 +1454,19 @@ textarea:focus-visible {
   font-size: 0.82rem;
 }
 
+.button.is-dirty,
+.small-button.is-dirty {
+  border-color: rgba(155, 116, 69, 0.62);
+  color: #fffaf5;
+  background: var(--warning);
+  box-shadow: 0 10px 24px rgba(155, 116, 69, 0.22);
+}
+
+.button.is-dirty:hover,
+.small-button.is-dirty:hover {
+  background: #846038;
+}
+
 .decision-status {
   border: 1px solid rgba(63, 109, 88, 0.22);
   border-radius: 999px;

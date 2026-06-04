@@ -535,6 +535,10 @@ function renderMoreActions(event) {
 }
 
 function bindTagActions() {
+  qsaWithin("#tagsTable, #tagsCards", "[data-tag-id]").forEach((row) => {
+    bindDirtySaveButton(row, "[data-tag-status], [data-tag-event]", "[data-save-tag]");
+  });
+
   qsaWithin("#tagsTable, #tagsCards", "[data-save-tag]").forEach((button) => {
     button.addEventListener("click", async () => {
       const row = button.closest("[data-tag-id]");
@@ -616,6 +620,10 @@ function bindAttentionActions() {
 }
 
 function bindWallDeviceActions() {
+  qsaWithin("#devicesTable, #devicesCards", "[data-device-id]").forEach((row) => {
+    bindDirtySaveButton(row, "[data-device-status], [data-device-scan-preset], [data-device-submission-preset], [data-device-manual-preset], [data-device-brightness]", "[data-save-device]");
+  });
+
   qsaWithin("#devicesTable, #devicesCards", "[data-save-device]").forEach((button) => {
     button.addEventListener("click", async () => {
       const row = button.closest("[data-device-id]");
@@ -934,6 +942,39 @@ function getWallDeviceFormValues(root) {
 function showBridgeConfig(config) {
   qs("#bridgeConfigPanel").hidden = !config;
   qs("#bridgeConfigText").textContent = config || "";
+}
+
+function bindDirtySaveButton(root, fieldSelector, buttonSelector) {
+  if (!root || root.dataset.dirtyTrackerBound === "true") return;
+
+  const button = root.querySelector(buttonSelector);
+  const fields = Array.from(root.querySelectorAll(fieldSelector));
+  if (!button || fields.length === 0) return;
+
+  root.dataset.dirtyTrackerBound = "true";
+  button.dataset.cleanLabel = button.dataset.cleanLabel || button.textContent.trim();
+  button.dataset.dirtyLabel = button.dataset.dirtyLabel || "Save changes";
+  root.dataset.cleanSnapshot = getDirtySnapshot(fields);
+  updateDirtySaveButton(root, fields, button);
+
+  fields.forEach((field) => {
+    field.addEventListener("input", () => updateDirtySaveButton(root, fields, button));
+    field.addEventListener("change", () => updateDirtySaveButton(root, fields, button));
+  });
+}
+
+function updateDirtySaveButton(root, fields, button) {
+  const isDirty = getDirtySnapshot(fields) !== root.dataset.cleanSnapshot;
+  button.classList.toggle("is-dirty", isDirty);
+  button.dataset.hasUnsavedChanges = String(isDirty);
+  button.textContent = isDirty ? button.dataset.dirtyLabel : button.dataset.cleanLabel;
+}
+
+function getDirtySnapshot(fields) {
+  return JSON.stringify(fields.map((field) => {
+    if (field.type === "checkbox") return field.checked;
+    return field.value;
+  }));
 }
 
 function buildEventOptions(activeEventId) {

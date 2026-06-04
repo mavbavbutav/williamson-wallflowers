@@ -34,6 +34,7 @@ function init() {
     });
   });
   qs("#countdownForm").addEventListener("submit", saveCountdownSettings);
+  bindDirtySaveButton(qs("#countdownForm"), "input, select, textarea", "button[type='submit']");
 
   qsa("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -210,6 +211,7 @@ function applyCountdownDefaults() {
   qs("#eventStartAt").value = toDatetimeLocal(eventRecord.eventStartAt || "");
   qs("#countdownMessage").value = eventRecord.countdownMessage || "";
   qs("#countdownEnabled").checked = !!eventRecord.countdownEnabled;
+  resetDirtySaveButton(qs("#countdownForm"));
 }
 
 function updateCountdownState() {
@@ -401,6 +403,8 @@ function renderCapsule() {
   if (!eventRecord?.timeCapsule?.enabled) return;
 
   qs("#capsuleTitle").value = timeCapsule?.title || eventRecord.timeCapsule.title || `${eventRecord.name} Time Capsule`;
+  bindDirtySaveButton(qs(".capsule-settings"), "#capsuleTitle", "#saveCapsuleButton");
+  resetDirtySaveButton(qs(".capsule-settings"));
   qs("#capsuleStatus").textContent = timeCapsule?.status === "published"
     ? `Published ${formatDateTime(timeCapsule.publishedAt)}.`
     : "Draft keepsake timeline.";
@@ -463,11 +467,14 @@ function renderCapsuleCard(item) {
   const actions = document.createElement("div");
   actions.className = "row-actions";
   actions.append(actionButton("View", "is-primary", () => openMediaModal(item, mediaUrl)));
-  actions.append(actionButton("Save", "is-success", () => saveCapsuleItem(item.id)));
+  const saveButton = actionButton("Save", "is-success", () => saveCapsuleItem(item.id));
+  saveButton.dataset.saveCapsuleItem = "true";
+  actions.append(saveButton);
   actions.append(actionButton("Remove", "is-danger", () => removeCapsuleItem(item.id)));
   body.append(actions);
 
   card.append(thumb, body);
+  bindDirtySaveButton(card, "[data-capsule-field]", "[data-save-capsule-item]");
   return card;
 }
 
@@ -959,6 +966,7 @@ function openMediaModal(submission, mediaUrl) {
 
 async function saveCountdownSettings(event) {
   event.preventDefault();
+  const formElement = qs("#countdownForm");
   const submitButton = qs("#countdownForm").querySelector("button[type='submit']");
   const form = {
     eventStartAt: datetimeLocalToIso(qs("#eventStartAt").value),
@@ -986,13 +994,14 @@ async function saveCountdownSettings(event) {
     }
     applyCountdownDefaults();
     updateCountdownState();
+    resetDirtySaveButton(formElement);
     setNotice(qs("#hostNotice"), "Countdown settings updated.", "success");
   } catch (error) {
     setNotice(qs("#hostNotice"), error.message || "Could not update countdown settings.", "error");
   } finally {
     if (submitButton) {
-      submitButton.textContent = submitButton.dataset.originalLabel || "Save countdown settings";
       submitButton.disabled = false;
+      updateDirtySaveButton(formElement);
     }
   }
 }
@@ -1148,6 +1157,53 @@ function showHostCelebration(message, notice = qs("#hostNotice")) {
   });
   document.body.append(burst);
   window.setTimeout(() => burst.remove(), 1200);
+}
+
+function bindDirtySaveButton(root, fieldSelector, buttonSelector) {
+  if (!root || root.dataset.dirtyTrackerBound === "true") return;
+
+  const button = root.querySelector(buttonSelector);
+  const fields = Array.from(root.querySelectorAll(fieldSelector));
+  if (!button || fields.length === 0) return;
+
+  root.dataset.dirtyTrackerBound = "true";
+  root.dataset.dirtyFieldSelector = fieldSelector;
+  root.dataset.dirtyButtonSelector = buttonSelector;
+  button.dataset.cleanLabel = button.dataset.cleanLabel || button.textContent.trim();
+  button.dataset.dirtyLabel = button.dataset.dirtyLabel || "Save changes";
+  root.dataset.cleanSnapshot = getDirtySnapshot(fields);
+  updateDirtySaveButton(root);
+
+  fields.forEach((field) => {
+    field.addEventListener("input", () => updateDirtySaveButton(root));
+    field.addEventListener("change", () => updateDirtySaveButton(root));
+  });
+}
+
+function resetDirtySaveButton(root) {
+  if (!root?.dataset.dirtyTrackerBound) return;
+  const fields = Array.from(root.querySelectorAll(root.dataset.dirtyFieldSelector));
+  root.dataset.cleanSnapshot = getDirtySnapshot(fields);
+  updateDirtySaveButton(root);
+}
+
+function updateDirtySaveButton(root) {
+  if (!root?.dataset.dirtyTrackerBound) return;
+  const fields = Array.from(root.querySelectorAll(root.dataset.dirtyFieldSelector));
+  const button = root.querySelector(root.dataset.dirtyButtonSelector);
+  if (!button || button.disabled) return;
+
+  const isDirty = getDirtySnapshot(fields) !== root.dataset.cleanSnapshot;
+  button.classList.toggle("is-dirty", isDirty);
+  button.dataset.hasUnsavedChanges = String(isDirty);
+  button.textContent = isDirty ? button.dataset.dirtyLabel : button.dataset.cleanLabel;
+}
+
+function getDirtySnapshot(fields) {
+  return JSON.stringify(fields.map((field) => {
+    if (field.type === "checkbox") return field.checked;
+    return field.value;
+  }));
 }
 
 function cssEscape(value) {
