@@ -1,4 +1,4 @@
-import { copyText, formatBytes, formatDate, formatDateTime, getHostToken, getParam, qs, qsa, requestJson, setNotice } from "../shared.js?v=20260531-1";
+import { copyText, formatBytes, formatDate, formatDateTime, getHostToken, getParam, isLocalHost, qs, qsa, requestJson, setNotice } from "../shared.js?v=20260604-local-demo-1";
 import { createVideoThumbnailFile } from "../video-thumbnails.js?v=20260601-video-thumbs-1";
 
 const MAX_VIDEO_SECONDS = 30;
@@ -15,6 +15,7 @@ let eventRecord = null;
 let timeCapsule = null;
 let capsuleItems = [];
 let lastFocusedElement = null;
+let localDemoHostState = null;
 const hostPostState = {
   mediaFile: null,
   thumbnailFile: null,
@@ -1131,6 +1132,9 @@ async function deleteSubmission(submissionId) {
 }
 
 function hostRequest(path, options = {}) {
+  const localDemoPayload = getLocalDemoHostPayload(path, options);
+  if (localDemoPayload) return Promise.resolve(localDemoPayload);
+
   return requestJson(path, {
     ...options,
     headers: {
@@ -1221,6 +1225,149 @@ function bindDirtySaveButton(root, fieldSelector, buttonSelector) {
     field.addEventListener("input", () => updateDirtySaveButton(root));
     field.addEventListener("change", () => updateDirtySaveButton(root));
   });
+}
+
+function getLocalDemoHostPayload(path, options = {}) {
+  if (!isLocalHost() || !eventId.startsWith("demo-") || token !== "demo-host") return null;
+  localDemoHostState = localDemoHostState || createLocalDemoHostState(eventId);
+
+  if (path.endsWith("/submissions")) {
+    return {
+      event: localDemoHostState.event,
+      submissions: localDemoHostState.submissions
+    };
+  }
+
+  if (path.endsWith("/time-capsule") && (!options.method || options.method === "GET")) {
+    return {
+      timeCapsule: localDemoHostState.timeCapsule,
+      items: localDemoHostState.items
+    };
+  }
+
+  if (path.endsWith("/countdown") && options.method === "PATCH") {
+    const form = JSON.parse(options.body || "{}");
+    localDemoHostState.event = {
+      ...localDemoHostState.event,
+      eventStartAt: form.eventStartAt,
+      countdownMessage: form.countdownMessage,
+      countdownEnabled: form.countdownEnabled
+    };
+    return { event: localDemoHostState.event };
+  }
+
+  if (path.endsWith("/posts") && options.method === "POST") {
+    const item = createLocalDemoHostItem({
+      id: `demo-host-${Date.now()}`,
+      title: "Local host post",
+      caption: "This local demo post is not saved after refresh.",
+      capturedAt: new Date().toISOString()
+    });
+    localDemoHostState.items.unshift(item);
+    return { submission: item, item };
+  }
+
+  return { ok: true };
+}
+
+function createLocalDemoHostState(id) {
+  const started = id === "demo-live";
+  const empty = id === "demo-empty";
+  const start = new Date(Date.now() + (id === "demo-pre-party" ? 18 * 60 * 1000 : -8 * 60 * 1000));
+  const eventDate = toLocalDate(start);
+  const event = {
+    id,
+    name: id === "demo-pre-party" ? "Demo Pre-Party" : (empty ? "Demo Empty Party" : "Demo Live Party"),
+    eventDate,
+    eventStartAt: start.toISOString(),
+    countdownEnabled: !empty,
+    countdownMessage: "Party starts in",
+    timeCapsule: {
+      enabled: true,
+      status: "draft"
+    }
+  };
+  const submissions = empty ? [] : [
+    createLocalDemoSubmission({
+      id: `${id}-pending-photo`,
+      guestName: "Pending Guest",
+      status: "pending",
+      guestNote: "This is waiting for host approval."
+    }),
+    createLocalDemoSubmission({
+      id: `${id}-approved-video`,
+      guestName: "Approved Guest",
+      mediaType: "photo",
+      status: "approved",
+      guestVisible: true,
+      guestVisibleAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+      guestNote: "This approved guest moment is visible in Party View."
+    })
+  ];
+  const items = empty ? [] : [
+    createLocalDemoHostItem({
+      id: `${id}-host-photo`,
+      title: started ? "Live party host post" : "Pre-party host post",
+      caption: started ? "Guests can upload now." : "Only the host can post before the countdown ends."
+    })
+  ];
+
+  return {
+    event,
+    submissions,
+    timeCapsule: { status: "draft", shareToken: "demo-capsule-token" },
+    items
+  };
+}
+
+function createLocalDemoSubmission(overrides = {}) {
+  const now = new Date().toISOString();
+  return {
+    id: "demo-submission",
+    eventId,
+    guestName: "Guest",
+    guestNote: "",
+    status: "pending",
+    source: "guest",
+    mediaType: "photo",
+    size: 153600,
+    durationSeconds: 0,
+    mediaUrl: "../../assets/williamson-wallflowers-logo.png?demo=1",
+    downloadUrl: "../../assets/williamson-wallflowers-logo.png?demo=1",
+    thumbnailUrl: "",
+    createdAt: now,
+    capturedAt: now,
+    ...overrides
+  };
+}
+
+function createLocalDemoHostItem(overrides = {}) {
+  const now = new Date().toISOString();
+  return {
+    id: "demo-host-item",
+    eventId,
+    submissionId: "",
+    source: "host",
+    chapter: "Host Posts",
+    title: "Host post",
+    caption: "",
+    mediaType: "photo",
+    size: 153600,
+    durationSeconds: 0,
+    mediaUrl: "../../assets/williamson-wallflowers-logo.png?demo=1",
+    downloadUrl: "../../assets/williamson-wallflowers-logo.png?demo=1",
+    thumbnailUrl: "",
+    createdAt: now,
+    capturedAt: now,
+    ...overrides
+  };
+}
+
+function toLocalDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function resetDirtySaveButton(root) {

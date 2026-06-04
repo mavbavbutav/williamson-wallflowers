@@ -154,12 +154,13 @@ test('pending or rejected submissions cannot be pushed to Party View', async () 
 });
 
 test('host and guest frontends expose Host Posts controls and party view', async () => {
-  const [hostHtml, hostJs, guestHtml, guestJs, styles] = await Promise.all([
+  const [hostHtml, hostJs, guestHtml, guestJs, styles, localTestHtml] = await Promise.all([
     readText('../../moments/host/index.html'),
     readText('../../moments/host/host.js'),
     readText('../../moments/index.html'),
     readText('../../moments/app.js'),
-    readText('../../moments/styles.css')
+    readText('../../moments/styles.css'),
+    readText('../../moments/local-test.html')
   ]);
 
   assert.match(hostHtml, /data-view="host-posts"/);
@@ -179,12 +180,18 @@ test('host and guest frontends expose Host Posts controls and party view', async
   assert.match(guestJs, /loadHostPosts/);
   assert.match(guestJs, /applyGuestUploadLock/);
   assert.match(guestJs, /Pre-Party View/);
+  assert.match(guestJs, /getLocalDemoGuestPayload/);
   assert.match(guestJs, /party-card is-\$\{item\.mediaType\}/);
   assert.match(guestJs, /bindPartyVideoOverlay\(card, video\)/);
   assert.match(guestJs, /is-overlay-muted/);
   assert.match(guestJs, /\/events\/\$\{encodeURIComponent\(state\.event\.id\)\}\/host-posts/);
   assert.match(styles, /\.host-posts-panel/);
   assert.match(styles, /\.guest-page\.is-countdown-locked \.memory-mode-card/);
+  assert.match(styles, /\.countdown-banner\.is-live \.countdown-timer/);
+  assert.match(hostJs, /getLocalDemoHostPayload/);
+  assert.match(localTestHtml, /demo-pre-party/);
+  assert.match(localTestHtml, /demo-live/);
+  assert.match(localTestHtml, /demo-empty/);
   assert.match(styles, /\.party-feed/);
   assert.match(styles, /\.party-card\.is-video[\s\S]*?width: min\(100%, 420px\)/);
   assert.match(styles, /\.party-card\.is-video \.party-card-media[\s\S]*?aspect-ratio: 9 \/ 16/);

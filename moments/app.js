@@ -1,4 +1,4 @@
-import { apiBase, formatDate, formatDateTime, getParam, qs, qsa, requestJson, setNotice } from "./shared.js?v=20260525-3";
+import { apiBase, formatDate, formatDateTime, getParam, isLocalHost, qs, qsa, requestJson, setNotice } from "./shared.js?v=20260604-local-demo-1";
 import { createVideoThumbnailFile } from "./video-thumbnails.js?v=20260601-video-thumbs-1";
 
 const MAX_VIDEO_SECONDS = 30;
@@ -27,6 +27,7 @@ const state = {
   recordStartedAt: 0,
   timerId: 0,
   hostPosts: [],
+  isLocalDemo: false,
   hostPostsTimerId: 0,
   countdownTimerId: 0,
   isCountdownLocked: false
@@ -70,9 +71,11 @@ async function init() {
   }
 
   try {
-    const payload = await requestJson(`/tags/${encodeURIComponent(state.tagCode)}`);
+    const payload = getLocalDemoGuestPayload(state.tagCode) || await requestJson(`/tags/${encodeURIComponent(state.tagCode)}`);
     state.event = payload.event;
     state.uploadToken = payload.uploadToken || "";
+    state.isLocalDemo = !!payload.isLocalDemo;
+    state.hostPosts = payload.hostPosts || [];
     qs("#eventTitle").textContent = `${state.event.name}`;
     qs("#eventDetails").textContent = formatDate(state.event.eventDate);
     renderCountdown();
@@ -118,6 +121,11 @@ function bindEvents() {
 
 async function loadHostPosts({ silent = false } = {}) {
   if (!state.event?.id || !state.uploadToken) return;
+  if (state.isLocalDemo) {
+    renderHostPosts();
+    if (!silent) setNotice(qs("#hostPostsNotice"), `${getGuestPartyViewName()} refreshed.`, "success");
+    return;
+  }
 
   try {
     const payload = await requestJson(`/events/${encodeURIComponent(state.event.id)}/host-posts`, {
@@ -142,6 +150,7 @@ async function loadHostPosts({ silent = false } = {}) {
 }
 
 function startHostPostsPolling() {
+  if (state.isLocalDemo) return;
   if (state.hostPostsTimerId) window.clearInterval(state.hostPostsTimerId);
   state.hostPostsTimerId = window.setInterval(() => loadHostPosts({ silent: true }), 30000);
 }
@@ -798,6 +807,15 @@ async function submitMoment(event) {
 }
 
 function uploadWithProgress(path, formData) {
+  if (state.isLocalDemo) {
+    return new Promise((resolve) => {
+      progressBar.style.width = "100%";
+      progressTrack.setAttribute("aria-valuenow", "100");
+      setNotice(uploadNotice, "Local demo upload complete. No media was saved.", "success");
+      window.setTimeout(() => resolve({ ok: true, demo: true }), 350);
+    });
+  }
+
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${apiBase}${path}`);
@@ -1018,4 +1036,76 @@ function escapeHtml(value) {
     "\"": "&quot;",
     "'": "&#39;"
   })[char]);
+}
+
+function getLocalDemoGuestPayload(tagCode) {
+  if (!isLocalHost()) return null;
+  const demo = getLocalDemoParty(tagCode);
+  if (!demo) return null;
+  return {
+    isLocalDemo: true,
+    event: demo.event,
+    uploadToken: "demo-upload-token",
+    hostPosts: demo.hostPosts
+  };
+}
+
+function getLocalDemoParty(id) {
+  const started = id === "demo-live";
+  const empty = id === "demo-empty";
+  const preParty = id === "demo-pre-party";
+  if (!started && !empty && !preParty) return null;
+
+  const start = new Date(Date.now() + (preParty ? 18 * 60 * 1000 : -8 * 60 * 1000));
+  const eventDate = toLocalDate(start);
+  return {
+    event: {
+      id,
+      name: preParty ? "Demo Pre-Party" : (empty ? "Demo Empty Party" : "Demo Live Party"),
+      eventDate,
+      eventStartAt: start.toISOString(),
+      countdownEnabled: !empty,
+      countdownMessage: "Party starts in"
+    },
+    hostPosts: empty ? [] : [
+      localDemoHostPost({
+        id: `${id}-host-photo`,
+        mediaType: "photo",
+        title: preParty ? "The room is almost ready" : "Welcome to the party",
+        caption: preParty ? "Host-only warmup media shows here before guests can upload." : "Guest uploads are unlocked in this demo.",
+        capturedAt: new Date(Date.now() - 12 * 60 * 1000).toISOString()
+      }),
+      localDemoHostPost({
+        id: `${id}-host-audio`,
+        mediaType: "photo",
+        title: "Second host warmup",
+        caption: "Multiple host posts make the local feed easier to inspect.",
+        capturedAt: new Date(Date.now() - 6 * 60 * 1000).toISOString()
+      })
+    ]
+  };
+}
+
+function localDemoHostPost(overrides = {}) {
+  return {
+    id: "demo-host-post",
+    eventId: "demo",
+    source: "host",
+    mediaType: "photo",
+    title: "Host post",
+    caption: "",
+    mediaUrl: "../assets/williamson-wallflowers-logo.png?demo=1",
+    thumbnailUrl: "",
+    durationSeconds: 0,
+    capturedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    ...overrides
+  };
+}
+
+function toLocalDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }

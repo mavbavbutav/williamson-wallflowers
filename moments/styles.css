@@ -288,6 +288,10 @@ a {
   gap: clamp(0.45rem, 1.6vw, 0.75rem);
 }
 
+.countdown-banner.is-live .countdown-timer {
+  display: block;
+}
+
 .countdown-unit {
   display: grid;
   justify-items: center;
@@ -317,6 +321,8 @@ a {
 
 .countdown-live-message {
   display: block;
+  width: 100%;
+  box-sizing: border-box;
   border: 1px solid rgba(63, 109, 88, 0.22);
   border-radius: 18px;
   padding: clamp(1rem, 3vw, 1.35rem);

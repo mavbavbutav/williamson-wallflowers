@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Local Moments Test Parties</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Manrope:wght@400;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=20260604-local-demo-1" />
+</head>
+<body class="guest-page">
+  <main class="app-shell">
+    <header class="site-topbar">
+      <a class="brand-lockup" href="./" aria-label="Wallflower Moments home">
+        <img src="../assets/williamson-wallflowers-logo.png" alt="" />
+        <span class="brand-copy">
+          <strong>Wallflower Moments</strong>
+          <span>Local test parties</span>
+        </span>
+      </a>
+    </header>
+
+    <section class="hero">
+      <div class="hero-main">
+        <h1>Local test parties.</h1>
+        <p>Start a static server from the repo root, then use these links to test guest and host UI states without real event data.</p>
+        <div class="panel" style="text-align:left; display:grid; gap:0.75rem;">
+          <strong>Run locally</strong>
+          <code>python -m http.server 8765</code>
+          <p class="muted">Open this page at http://127.0.0.1:8765/moments/local-test.html. Demo parties only work on localhost, 127.0.0.1, or file://.</p>
+        </div>
+
+        <div class="admin-grid" style="margin-top:1rem;">
+          <article class="panel">
+            <h2>Pre-party locked</h2>
+            <p class="muted">Countdown is active, guest upload buttons are locked, and the guest feed is named Pre-Party View.</p>
+            <div class="button-row">
+              <a class="button button-primary" href="./?t=demo-pre-party">Guest</a>
+              <a class="button button-secondary" href="./host/?event=demo-pre-party#token=demo-host">Host</a>
+            </div>
+          </article>
+
+          <article class="panel">
+            <h2>Party live</h2>
+            <p class="muted">Countdown is complete, the live message fills the countdown box, and guest upload buttons are enabled.</p>
+            <div class="button-row">
+              <a class="button button-primary" href="./?t=demo-live">Guest</a>
+              <a class="button button-secondary" href="./host/?event=demo-live#token=demo-host">Host</a>
+            </div>
+          </article>
+
+          <article class="panel">
+            <h2>Empty event</h2>
+            <p class="muted">No countdown and no party feed. Useful for checking empty states and spacing.</p>
+            <div class="button-row">
+              <a class="button button-primary" href="./?t=demo-empty">Guest</a>
+              <a class="button button-secondary" href="./host/?event=demo-empty#token=demo-host">Host</a>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

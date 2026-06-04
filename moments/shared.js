@@ -4,7 +4,7 @@ const ADMIN_TOKEN_KEY = "wallflowerMomentsAdminToken";
 const HOST_TOKEN_KEY_PREFIX = "wallflowerMomentsHostToken:";
 const PUBLIC_SITE_URL = "https://williamsonwallflowers.com";
 
-function isLocalHost() {
+export function isLocalHost() {
   return ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
 }
 
