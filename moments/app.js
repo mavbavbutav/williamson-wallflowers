@@ -450,15 +450,17 @@ function startCountdown() {
   const render = () => {
     const remaining = target - Date.now();
     countdownBanner.hidden = false;
-    countdownBadge.textContent = "Countdown";
+    countdownBanner.classList.toggle("is-live", remaining <= 0);
     if (remaining <= 0) {
+      countdownBadge.textContent = "Now live";
       countdownMessage.textContent = "Party is underway";
-      countdownTimer.textContent = "Guests can send now.";
+      countdownTimer.innerHTML = `<span class="countdown-live-message">Guests can send moments now.</span>`;
       return;
     }
 
+    countdownBadge.textContent = "Countdown";
     countdownMessage.textContent = `${label}`;
-    countdownTimer.textContent = formatCountdown(remaining);
+    countdownTimer.innerHTML = formatCountdown(remaining);
   };
 
   render();
@@ -469,6 +471,7 @@ function startCountdown() {
 function hideCountdown() {
   if (countdownBanner) {
     countdownBanner.hidden = true;
+    countdownBanner.classList.remove("is-live");
   }
 
   if (state.countdownTimerId) {
@@ -487,12 +490,19 @@ function formatCountdown(totalMs) {
   const hours = Math.floor((totalSeconds % (24 * 60 * 60)) / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
+  const parts = [
+    ["Days", days],
+    ["Hours", hours],
+    ["Minutes", minutes],
+    ["Seconds", seconds]
+  ];
 
-  if (days > 0) {
-    return `${days}d ${String(hours).padStart(2, "0")}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s`;
-  }
-
-  return `${String(hours).padStart(2, "0")}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s`;
+  return parts.map(([label, value]) => `
+    <span class="countdown-unit">
+      <span class="countdown-value">${String(value).padStart(2, "0")}</span>
+      <span class="countdown-label">${label}</span>
+    </span>
+  `).join("");
 }
 
 function parseCountdownStart(value) {
