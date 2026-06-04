@@ -968,6 +968,9 @@ async function saveCountdownSettings(event) {
   event.preventDefault();
   const formElement = qs("#countdownForm");
   const submitButton = qs("#countdownForm").querySelector("button[type='submit']");
+
+  if (submitButton?.dataset.hasUnsavedChanges !== "true") return;
+
   const form = {
     eventStartAt: datetimeLocalToIso(qs("#eventStartAt").value),
     countdownMessage: qs("#countdownMessage").value.trim(),
@@ -1195,6 +1198,7 @@ function updateDirtySaveButton(root) {
 
   const isDirty = getDirtySnapshot(fields) !== root.dataset.cleanSnapshot;
   button.classList.toggle("is-dirty", isDirty);
+  button.hidden = !isDirty;
   button.dataset.hasUnsavedChanges = String(isDirty);
   button.textContent = isDirty ? button.dataset.dirtyLabel : button.dataset.cleanLabel;
 }

@@ -966,6 +966,7 @@ function bindDirtySaveButton(root, fieldSelector, buttonSelector) {
 function updateDirtySaveButton(root, fields, button) {
   const isDirty = getDirtySnapshot(fields) !== root.dataset.cleanSnapshot;
   button.classList.toggle("is-dirty", isDirty);
+  button.hidden = !isDirty;
   button.dataset.hasUnsavedChanges = String(isDirty);
   button.textContent = isDirty ? button.dataset.dirtyLabel : button.dataset.cleanLabel;
 }
