@@ -21,7 +21,9 @@ const hostPostState = {
   thumbnailFile: null,
   mediaType: "",
   durationSeconds: 0,
-  previewUrl: ""
+  previewUrl: "",
+  thumbnailPreviewUrl: "",
+  isPreparing: false
 };
 let countdownInterval = 0;
 
@@ -56,11 +58,16 @@ function init() {
   qsa("[data-host-post-mode]").forEach((button) => {
     button.addEventListener("click", () => chooseHostPostMode(button.dataset.hostPostMode));
   });
-  qs("#hostPostFileInput").addEventListener("change", async () => {
-    const file = qs("#hostPostFileInput").files && qs("#hostPostFileInput").files[0];
+  qs("#hostPostFileInput").addEventListener("change", () => {
+    const fileInput = qs("#hostPostFileInput");
+    const file = fileInput.files && fileInput.files[0];
+    fileInput.value = "";
     if (!file) return;
-    await acceptHostPostFile(file);
-    qs("#hostPostFileInput").value = "";
+    acceptHostPostFile(file).catch(() => {
+      hostPostState.isPreparing = false;
+      setHostPostSubmitPending(false);
+      setNotice(qs("#hostPostNotice"), "Could not prepare that file. Try choosing it again.", "error");
+    });
   });
   qs("#hostPostForm").addEventListener("submit", createHostPost);
   qs("#clearHostPostButton").addEventListener("click", clearHostPostComposer);
@@ -607,10 +614,29 @@ async function acceptHostPostFile(file) {
   hostPostState.mediaFile = file;
   hostPostState.thumbnailFile = null;
   hostPostState.mediaType = mediaType;
-  hostPostState.durationSeconds = mediaType === "photo" ? 0 : Math.round(await readMediaDuration(file, mediaType));
+  hostPostState.durationSeconds = 0;
+  hostPostState.isPreparing = mediaType !== "photo";
+  renderHostPostPreview();
+
+  if (mediaType === "photo") {
+    setNotice(qs("#hostPostNotice"), `${getMediaTypeLabel(mediaType)} ready to post.`, "success");
+    return;
+  }
+
+  setHostPostSubmitPending(true);
+  setNotice(qs("#hostPostNotice"), `Checking ${getMediaTypeLabel(mediaType).toLowerCase()} length...`);
+
+  const durationSeconds = Math.round(await readMediaDuration(file, mediaType));
+  if (!isCurrentHostPostFile(file, mediaType)) return;
+
+  hostPostState.durationSeconds = durationSeconds;
+  hostPostState.isPreparing = false;
+  setHostPostSubmitPending(false);
 
   if (mediaType === "video" && hostPostState.durationSeconds > MAX_VIDEO_SECONDS + 1) {
     hostPostState.mediaFile = null;
+    hostPostState.thumbnailFile = null;
+    hostPostState.durationSeconds = 0;
     setNotice(qs("#hostPostNotice"), "Host videos must be 30 seconds or shorter.", "error");
     renderHostPostPreview();
     return;
@@ -618,17 +644,20 @@ async function acceptHostPostFile(file) {
 
   if (mediaType === "audio" && hostPostState.durationSeconds > MAX_AUDIO_SECONDS + 1) {
     hostPostState.mediaFile = null;
+    hostPostState.durationSeconds = 0;
     setNotice(qs("#hostPostNotice"), "Host voice memos must be 60 seconds or shorter.", "error");
     renderHostPostPreview();
     return;
   }
 
-  if (mediaType === "video") {
-    hostPostState.thumbnailFile = await createVideoThumbnailFile(file, `wallflower-host-video-thumbnail-${Date.now()}.jpg`);
-  }
-
-  renderHostPostPreview();
   setNotice(qs("#hostPostNotice"), `${getMediaTypeLabel(mediaType)} ready to post.`, "success");
+
+  if (mediaType === "video") {
+    const thumbnailFile = await createVideoThumbnailFile(file, `wallflower-host-video-thumbnail-${Date.now()}.jpg`);
+    if (!isCurrentHostPostFile(file, mediaType) || !thumbnailFile) return;
+    hostPostState.thumbnailFile = thumbnailFile;
+    renderHostPostPreview();
+  }
 }
 
 function renderHostPostPreview() {
@@ -659,12 +688,23 @@ function renderHostPostPreview() {
     video.src = url;
     video.controls = true;
     video.playsInline = true;
+    video.preload = "metadata";
+    if (hostPostState.thumbnailFile) {
+      const posterUrl = URL.createObjectURL(hostPostState.thumbnailFile);
+      hostPostState.thumbnailPreviewUrl = posterUrl;
+      video.poster = posterUrl;
+    }
     frame.append(video);
   }
 }
 
 async function createHostPost(event) {
   event.preventDefault();
+
+  if (hostPostState.isPreparing) {
+    setNotice(qs("#hostPostNotice"), "Give this file a moment to finish getting ready.", "error");
+    return;
+  }
 
   if (!hostPostState.mediaFile) {
     setNotice(qs("#hostPostNotice"), "Choose a photo, video, or voice memo before posting.", "error");
@@ -706,6 +746,8 @@ function clearHostPostComposer() {
   hostPostState.thumbnailFile = null;
   hostPostState.mediaType = "";
   hostPostState.durationSeconds = 0;
+  hostPostState.isPreparing = false;
+  setHostPostSubmitPending(false);
   revokeHostPostPreviewUrl();
   qs("#hostPostForm").reset();
   renderHostPostPreview();
@@ -713,9 +755,24 @@ function clearHostPostComposer() {
 }
 
 function revokeHostPostPreviewUrl() {
-  if (!hostPostState.previewUrl) return;
-  URL.revokeObjectURL(hostPostState.previewUrl);
-  hostPostState.previewUrl = "";
+  if (hostPostState.previewUrl) {
+    URL.revokeObjectURL(hostPostState.previewUrl);
+    hostPostState.previewUrl = "";
+  }
+  if (hostPostState.thumbnailPreviewUrl) {
+    URL.revokeObjectURL(hostPostState.thumbnailPreviewUrl);
+    hostPostState.thumbnailPreviewUrl = "";
+  }
+}
+
+function isCurrentHostPostFile(file, mediaType) {
+  return hostPostState.mediaFile === file && hostPostState.mediaType === mediaType;
+}
+
+function setHostPostSubmitPending(isPending) {
+  const button = qs("#createHostPostButton");
+  if (!button) return;
+  button.disabled = Boolean(isPending);
 }
 
 function inferHostPostMediaType(file) {
@@ -744,7 +801,7 @@ function getFileExtension(filename) {
   return index >= 0 ? clean.slice(index + 1).toLowerCase() : "";
 }
 
-function readMediaDuration(file, mediaType) {
+function readMediaDuration(file, mediaType, timeoutMs = 2500) {
   return new Promise((resolve) => {
     if (mediaType === "photo") {
       resolve(0);
@@ -752,16 +809,27 @@ function readMediaDuration(file, mediaType) {
     }
 
     const element = document.createElement(mediaType === "audio" ? "audio" : "video");
+    const objectUrl = URL.createObjectURL(file);
+    let timeoutId = 0;
+    let settled = false;
+    const finish = (duration) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      element.onloadedmetadata = null;
+      element.onerror = null;
+      URL.revokeObjectURL(objectUrl);
+      element.removeAttribute("src");
+      if (typeof element.load === "function") element.load();
+      resolve(duration || 0);
+    };
+
     element.preload = "metadata";
-    element.onloadedmetadata = () => {
-      URL.revokeObjectURL(element.src);
-      resolve(element.duration || 0);
-    };
-    element.onerror = () => {
-      URL.revokeObjectURL(element.src);
-      resolve(0);
-    };
-    element.src = URL.createObjectURL(file);
+    element.onloadedmetadata = () => finish(element.duration);
+    element.onerror = () => finish(0);
+    timeoutId = window.setTimeout(() => finish(0), timeoutMs);
+    element.src = objectUrl;
+    if (typeof element.load === "function") element.load();
   });
 }
 

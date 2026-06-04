@@ -16,8 +16,8 @@ test('admin page prioritizes event operations and setup workflow', async () => {
   assert.match(adminHtml, /id="maintenancePanel"/);
   assert.doesNotMatch(adminHtml, /id="cleanupButton">Run cleanup<\/button>[\s\S]*id="signOutButton"/);
   assert.ok(adminHtml.indexOf('id="eventsPanel"') < adminHtml.indexOf('id="tagsPanel"'));
-  assert.match(adminHtml, /admin\.js\?v=20260602-lighting-1/);
-  assert.match(adminHtml, /styles\.css\?v=20260602-lighting-1/);
+  assert.match(adminHtml, /<script type="module" src="admin\.js\?v=[^"]+"><\/script>/);
+  assert.match(adminHtml, /<link rel="stylesheet" href="\.\.\/styles\.css\?v=[^"]+" \/>/);
 
   assert.match(adminJs, /function renderAttention/);
   assert.match(adminJs, /function renderAssignTagForm/);

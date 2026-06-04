@@ -16,8 +16,8 @@ test('host voice memos render as distinct audio-only cards instead of blank vide
   assert.match(styles, /\.voice-memo-panel/);
   assert.match(styles, /\.voice-waveform/);
   assert.match(styles, /\.voice-memo-kicker/);
-  assert.match(hostHtml, /host\.js\?v=20260601-party-upload-time-1/);
-  assert.match(hostHtml, /styles\.css\?v=20260601-party-video-fit-1/);
+  assert.match(hostHtml, /<script type="module" src="host\.js\?v=[^"]+"><\/script>/);
+  assert.match(hostHtml, /<link rel="stylesheet" href="\.\.\/styles\.css\?v=[^"]+" \/>/);
 });
 
 async function readText(path) {

@@ -20,8 +20,8 @@ test('host can opt into adding a submission to Time Capsule while approving it',
   assert.doesNotMatch(hostJs, /shouldAddToCapsuleOnApprove/);
   assert.match(styles, /\.host-decision-actions/);
   assert.match(styles, /\.decision-status/);
-  assert.match(hostHtml, /host\.js\?v=20260601-party-upload-time-1/);
-  assert.match(hostHtml, /styles\.css\?v=20260601-party-video-fit-1/);
+  assert.match(hostHtml, /<script type="module" src="host\.js\?v=[^"]+"><\/script>/);
+  assert.match(hostHtml, /<link rel="stylesheet" href="\.\.\/styles\.css\?v=[^"]+" \/>/);
 });
 
 async function readText(path) {

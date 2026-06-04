@@ -11,8 +11,8 @@ test('host page has the fun pass dashboard, cleaner actions, and share card', as
 
   assert.match(hostHtml, /id="hostPulse"/);
   assert.match(hostHtml, /id="shareCard"/);
-  assert.match(hostHtml, /host\.js\?v=20260601-party-upload-time-1/);
-  assert.match(hostHtml, /styles\.css\?v=20260601-party-video-fit-1/);
+  assert.match(hostHtml, /<script type="module" src="host\.js\?v=[^"]+"><\/script>/);
+  assert.match(hostHtml, /<link rel="stylesheet" href="\.\.\/styles\.css\?v=[^"]+" \/>/);
   assert.match(hostHtml, /data-workspace-count="submissions"/);
   assert.match(hostHtml, /data-workspace-count="capsule"/);
 

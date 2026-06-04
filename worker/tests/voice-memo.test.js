@@ -222,6 +222,30 @@ test('guest and host uploads generate video thumbnails before posting', async ()
   assert.match(hostJs, /formData\.append\("thumbnail"/);
 });
 
+test('host prerecorded video selection previews before mobile media probes', async () => {
+  const hostJs = await readText('../../moments/host/host.js');
+  const acceptStart = hostJs.indexOf('async function acceptHostPostFile(file)');
+  const previewIndex = hostJs.indexOf('renderHostPostPreview();', acceptStart);
+  const durationIndex = hostJs.indexOf('readMediaDuration(file, mediaType)', acceptStart);
+  const thumbnailIndex = hostJs.indexOf('createVideoThumbnailFile(file', acceptStart);
+
+  assert.notEqual(acceptStart, -1);
+  assert.ok(previewIndex > acceptStart, 'host file selection should render the chosen media preview');
+  assert.ok(previewIndex < durationIndex, 'preview should render before waiting for mobile metadata duration');
+  assert.ok(previewIndex < thumbnailIndex, 'preview should render before generating a JPEG video thumbnail');
+});
+
+test('host media duration reader resolves when mobile metadata never loads', async () => {
+  const hostJs = await readText('../../moments/host/host.js');
+  const durationStart = hostJs.indexOf('function readMediaDuration(file, mediaType');
+  const durationEnd = hostJs.indexOf('function renderThumb', durationStart);
+  const durationSource = hostJs.slice(durationStart, durationEnd);
+
+  assert.notEqual(durationStart, -1);
+  assert.match(durationSource, /window\.setTimeout/);
+  assert.match(durationSource, /finish\(0\)/);
+});
+
 async function readText(path) {
   return readFile(new URL(path, import.meta.url), 'utf8');
 }
