@@ -22,6 +22,7 @@ const hostPostState = {
   durationSeconds: 0,
   previewUrl: ""
 };
+let countdownInterval = 0;
 
 init();
 
@@ -32,6 +33,7 @@ function init() {
       render();
     });
   });
+  qs("#countdownForm").addEventListener("submit", saveCountdownSettings);
 
   qsa("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -83,6 +85,8 @@ async function loadGallery() {
     eventRecord = payload.event;
     submissions = payload.submissions || [];
     qs("#eventName").textContent = eventRecord.name;
+    applyCountdownDefaults();
+    updateCountdownState();
     qs("#eventMeta").textContent = `${formatDate(eventRecord.eventDate)}. Pending guest moments stay private until approved.`;
 
     if (eventRecord.timeCapsule?.enabled) {
@@ -199,6 +203,87 @@ function renderSubmissions() {
   visible.forEach((submission) => {
     grid.append(renderSubmissionCard(submission));
   });
+}
+
+function applyCountdownDefaults() {
+  if (!eventRecord) return;
+  qs("#eventStartAt").value = toDatetimeLocal(eventRecord.eventStartAt || "");
+  qs("#countdownMessage").value = eventRecord.countdownMessage || "";
+  qs("#countdownEnabled").checked = !!eventRecord.countdownEnabled;
+}
+
+function updateCountdownState() {
+  const preview = qs("#countdownPreview");
+  const stateBadge = qs("#countdownState");
+  const eventStartAt = eventRecord ? parseCountdownStart(eventRecord.eventStartAt) : null;
+  const isEnabled = !!(eventRecord && eventRecord.countdownEnabled);
+
+  stopCountdownInterval();
+
+  if (!preview || !stateBadge) return;
+
+  if (!isEnabled || !eventStartAt) {
+    preview.hidden = true;
+    stateBadge.textContent = "Off";
+    stateBadge.className = "status-pill";
+    return;
+  }
+
+  stateBadge.textContent = "Live";
+  stateBadge.className = "status-pill is-pending";
+  preview.hidden = false;
+
+  const render = () => {
+    const remaining = eventStartAt - Date.now();
+
+    if (remaining <= 0) {
+      preview.textContent = "Party is underway. Guests can share now.";
+      return;
+    }
+
+    const parts = formatCountdownParts(remaining);
+    preview.textContent = `${eventRecord.countdownMessage || "Party starts in"} ${parts}`;
+  };
+
+  render();
+  countdownInterval = window.setInterval(render, 1000);
+}
+
+function toDatetimeLocal(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const offsetAdjusted = new Date(parsed.getTime() - (parsed.getTimezoneOffset() * 60000));
+  return offsetAdjusted.toISOString().slice(0, 16);
+}
+
+function parseCountdownStart(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+}
+
+function stopCountdownInterval() {
+  if (countdownInterval) {
+    window.clearInterval(countdownInterval);
+    countdownInterval = 0;
+  }
+}
+
+function formatCountdownParts(totalMs) {
+  const totalSeconds = Math.max(0, Math.floor(totalMs / 1000));
+  const days = Math.floor(totalSeconds / (24 * 60 * 60));
+  const hours = Math.floor((totalSeconds % (24 * 60 * 60)) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  const chunks = [];
+  if (days > 0) chunks.push(`${days}d`);
+  chunks.push(`${String(hours).padStart(2, "0")}h`);
+  chunks.push(`${String(minutes).padStart(2, "0")}m`);
+  chunks.push(`${String(seconds).padStart(2, "0")}s`);
+
+  return chunks.join(" ");
 }
 
 function renderSubmissionCard(submission) {
@@ -850,6 +935,46 @@ function openMediaModal(submission, mediaUrl) {
   document.body.classList.add("modal-open");
   modal.hidden = false;
   qs("#modalClose").focus();
+}
+
+async function saveCountdownSettings(event) {
+  event.preventDefault();
+  const submitButton = qs("#countdownForm").querySelector("button[type='submit']");
+  const form = {
+    eventStartAt: qs("#eventStartAt").value.trim(),
+    countdownMessage: qs("#countdownMessage").value.trim(),
+    countdownEnabled: qs("#countdownEnabled").checked
+  };
+
+  try {
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.dataset.originalLabel = submitButton.textContent;
+      submitButton.textContent = "Saving...";
+    }
+
+    setNotice(qs("#hostNotice"), "", "");
+    const payload = await hostRequest(`/host/events/${encodeURIComponent(eventId)}/countdown`, {
+      method: "PATCH",
+      body: JSON.stringify(form)
+    });
+
+    if (payload?.event) {
+      eventRecord = payload.event;
+    } else {
+      await loadGallery();
+    }
+    applyCountdownDefaults();
+    updateCountdownState();
+    setNotice(qs("#hostNotice"), "Countdown settings updated.", "success");
+  } catch (error) {
+    setNotice(qs("#hostNotice"), error.message || "Could not update countdown settings.", "error");
+  } finally {
+    if (submitButton) {
+      submitButton.textContent = submitButton.dataset.originalLabel || "Save countdown settings";
+      submitButton.disabled = false;
+    }
+  }
 }
 
 function closeMediaModal() {

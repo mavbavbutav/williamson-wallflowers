@@ -169,6 +169,10 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
       return createHostPost(request, env, url, corsHeaders, parts[2], ctx);
     }
 
+    if (request.method === 'PATCH' && parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'countdown') {
+      return updateHostEventCountdown(request, env, url, corsHeaders, parts[2]);
+    }
+
     if (parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'time-capsule') {
       if (request.method === 'GET') {
         return getHostTimeCapsule(request, env, url, corsHeaders, parts[2]);
@@ -258,6 +262,9 @@ async function getTagEvent(request, tagCode, env, corsHeaders) {
       e.name AS eventName,
       e.event_date AS eventDate,
       e.host_name AS hostName,
+      e.event_start_at AS eventStartAt,
+      e.countdown_enabled AS countdownEnabled,
+      e.countdown_message AS countdownMessage,
       e.status AS eventStatus,
       e.retention_expires_at AS retentionExpiresAt
     FROM tags t
@@ -288,6 +295,9 @@ async function getTagEvent(request, tagCode, env, corsHeaders) {
       id: row.eventId,
       name: row.eventName,
       eventDate: row.eventDate,
+      eventStartAt: row.eventStartAt,
+      countdownEnabled: row.countdownEnabled,
+      countdownMessage: row.countdownMessage,
       hostName: row.hostName
     },
     uploadToken
@@ -873,6 +883,57 @@ async function updateSubmissionPartyView(request, env, url, corsHeaders, submiss
     ok: true,
     guestVisible: visible,
     guestVisibleAt: guestVisibleAt || ''
+  }, 200, corsHeaders);
+}
+
+async function updateHostEventCountdown(request, env, url, corsHeaders, eventId) {
+  const token = getAccessToken(request, url);
+  const event = await getHostEvent(env, eventId, token);
+
+  if (!event) {
+    return json({ ok: false, message: 'This host gallery link is not valid.' }, 403, corsHeaders);
+  }
+
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    return json({ ok: false, message: 'Invalid event settings payload.' }, 400, corsHeaders);
+  }
+
+  const countdownEnabled = Boolean(body.countdownEnabled);
+  const countdownMessage = cleanText(body.countdownMessage || '', 140);
+  const eventStartAt = normalizeCountdownStartAt(body.eventStartAt);
+  const enabled = countdownEnabled && Boolean(eventStartAt);
+  const finalMessage = countdownMessage || 'Party starts in';
+  const now = new Date().toISOString();
+
+  if (countdownEnabled && !eventStartAt) {
+    return json({ ok: false, message: 'Set an event start time to enable the countdown.' }, 400, corsHeaders);
+  }
+
+  await env.MOMENTS_DB.prepare(`
+    UPDATE events
+    SET event_start_at = ?, countdown_enabled = ?, countdown_message = ?, updated_at = ?
+    WHERE id = ? AND host_token = ?
+  `).bind(
+    eventStartAt || null,
+    enabled ? 1 : 0,
+    finalMessage || null,
+    now,
+    event.id,
+    token
+  ).run();
+
+  return json({
+    ok: true,
+    event: toEventClient({
+      ...event,
+      eventStartAt,
+      countdownEnabled: enabled ? 1 : 0,
+      countdownMessage: finalMessage,
+      updatedAt: now
+    }, env)
   }, 200, corsHeaders);
 }
 
@@ -2623,6 +2684,9 @@ async function getEventById(env, eventId) {
       id,
       name,
       event_date AS eventDate,
+      event_start_at AS eventStartAt,
+      countdown_enabled AS countdownEnabled,
+      countdown_message AS countdownMessage,
       host_name AS hostName,
       host_email AS hostEmail,
       host_token AS hostToken,
@@ -2651,6 +2715,9 @@ async function getHostEvent(env, eventId, token) {
       id,
       name,
       event_date AS eventDate,
+      event_start_at AS eventStartAt,
+      countdown_enabled AS countdownEnabled,
+      countdown_message AS countdownMessage,
       host_name AS hostName,
       host_email AS hostEmail,
       host_token AS hostToken,
@@ -3206,11 +3273,24 @@ function getRetentionExpiresAt(eventDate, retentionDays = STANDARD_RETENTION_DAY
   return base.toISOString();
 }
 
+function normalizeCountdownStartAt(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  return parsed.toISOString();
+}
+
 function toEventClient(row, env) {
   return {
     id: row.id,
     name: row.name,
     eventDate: row.eventDate,
+    eventStartAt: row.eventStartAt || null,
+    countdownEnabled: Number(row.countdownEnabled || 0) === 1,
+    countdownMessage: row.countdownMessage || "",
     hostName: row.hostName,
     status: row.status,
     retentionExpiresAt: row.retentionExpiresAt,

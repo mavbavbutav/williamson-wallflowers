@@ -27,7 +27,8 @@ const state = {
   recordStartedAt: 0,
   timerId: 0,
   hostPosts: [],
-  hostPostsTimerId: 0
+  hostPostsTimerId: 0,
+  countdownTimerId: 0
 };
 
 const views = {
@@ -48,6 +49,10 @@ const uploadNotice = qs("#uploadNotice");
 const switchCameraButton = qs("#switchCameraButton");
 const cameraStage = qs("#cameraStage");
 const voiceMemoCue = qs("#voiceMemoCue");
+const countdownBadge = qs("#countdownBadge");
+const countdownBanner = qs("#countdownBanner");
+const countdownMessage = qs("#countdownMessage");
+const countdownTimer = qs("#countdownTimer");
 
 init();
 
@@ -65,6 +70,7 @@ async function init() {
     state.uploadToken = payload.uploadToken || "";
     qs("#eventTitle").textContent = `${state.event.name}`;
     qs("#eventDetails").textContent = formatDate(state.event.eventDate);
+    renderCountdown();
     showView("welcome");
     await loadHostPosts({ silent: true });
     startHostPostsPolling();
@@ -422,6 +428,77 @@ function startTimer(maxSeconds = MAX_VIDEO_SECONDS) {
 function stopTimer() {
   if (state.timerId) window.clearInterval(state.timerId);
   state.timerId = 0;
+}
+
+function startCountdown() {
+  if (!state.event) return;
+  if (!state.event.countdownEnabled) {
+    hideCountdown();
+    return;
+  }
+
+  const target = parseCountdownStart(state.event.eventStartAt);
+  if (!target) {
+    hideCountdown();
+    return;
+  }
+
+  if (!countdownBanner || !countdownMessage || !countdownTimer) return;
+
+  const label = state.event.countdownMessage || "Party starts in";
+
+  const render = () => {
+    const remaining = target - Date.now();
+    countdownBanner.hidden = false;
+    countdownBadge.textContent = "Countdown";
+    if (remaining <= 0) {
+      countdownMessage.textContent = "Party is underway";
+      countdownTimer.textContent = "Guests can send now.";
+      return;
+    }
+
+    countdownMessage.textContent = `${label}`;
+    countdownTimer.textContent = formatCountdown(remaining);
+  };
+
+  render();
+  if (state.countdownTimerId) window.clearInterval(state.countdownTimerId);
+  state.countdownTimerId = window.setInterval(render, 1000);
+}
+
+function hideCountdown() {
+  if (countdownBanner) {
+    countdownBanner.hidden = true;
+  }
+
+  if (state.countdownTimerId) {
+    window.clearInterval(state.countdownTimerId);
+    state.countdownTimerId = 0;
+  }
+}
+
+function renderCountdown() {
+  startCountdown();
+}
+
+function formatCountdown(totalMs) {
+  const totalSeconds = Math.max(0, Math.floor(totalMs / 1000));
+  const days = Math.floor(totalSeconds / (24 * 60 * 60));
+  const hours = Math.floor((totalSeconds % (24 * 60 * 60)) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (days > 0) {
+    return `${days}d ${String(hours).padStart(2, "0")}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s`;
+  }
+
+  return `${String(hours).padStart(2, "0")}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s`;
+}
+
+function parseCountdownStart(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
 }
 
 function getSupportedVideoMimeType() {

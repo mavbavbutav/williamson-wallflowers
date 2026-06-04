@@ -31,7 +31,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260601-party-video-fit-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260603-countdown-1" />
 </head>
 <body class="host-page">
   <main class="app-shell">
@@ -55,6 +55,31 @@
           <p class="muted" id="eventMeta">Review and download guest moments.</p>
         </div>
       </div>
+
+      <section class="panel countdown-settings" id="countdownSettings">
+        <div class="panel-heading">
+          <h2>Guest countdown</h2>
+          <span class="status-pill" id="countdownState">Off</span>
+        </div>
+        <p class="countdown-preview muted" id="countdownPreview" role="status" aria-live="polite" hidden></p>
+        <form id="countdownForm" class="countdown-form">
+          <div class="field">
+            <label for="eventStartAt">Event start time</label>
+            <input id="eventStartAt" name="eventStartAt" type="datetime-local" />
+          </div>
+          <div class="field">
+            <label for="countdownMessage">Countdown label</label>
+            <input id="countdownMessage" name="countdownMessage" maxlength="140" placeholder="Party starts in..." />
+          </div>
+          <label class="checkbox-row">
+            <input id="countdownEnabled" name="countdownEnabled" type="checkbox" />
+            <span>Show countdown to guests before the event starts.</span>
+          </label>
+          <div class="button-row">
+            <button class="button button-primary" type="submit">Save countdown settings</button>
+          </div>
+        </form>
+      </section>
 
       <section class="host-pulse" id="hostPulse" aria-label="Event memory status" hidden>
         <div class="host-pulse-copy">
@@ -257,6 +282,6 @@
     <div class="media-modal-stage" id="modalStage"></div>
   </div>
 
-  <script type="module" src="host.js?v=20260601-party-upload-time-1"></script>
+  <script type="module" src="host.js?v=20260603-countdown-1"></script>
 </body>
 </html>

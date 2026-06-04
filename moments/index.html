@@ -31,7 +31,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20260601-party-video-fit-1" />
+  <link rel="stylesheet" href="styles.css?v=20260603-countdown-1" />
 </head>
 <body class="guest-page">
   <main class="app-shell">
@@ -66,6 +66,11 @@
       <div class="hero-main">
         <h1 id="eventTitle" tabindex="-1">Leave a little love.</h1>
         <p id="eventDetails">Choose what to send.</p>
+        <div class="countdown-banner" id="countdownBanner" hidden>
+          <p class="countdown-badge" id="countdownBadge">Event countdown</p>
+          <strong id="countdownMessage"></strong>
+          <p id="countdownTimer" class="muted"></p>
+        </div>
         <div class="memory-mode-grid" aria-label="Choose what to send">
           <button class="memory-mode-card is-photo" type="button" data-mode="photo">
             <strong class="mode-title">Photo</strong>
@@ -184,6 +189,6 @@
     </section>
   </main>
 
-  <script type="module" src="app.js?v=20260601-party-video-fit-1"></script>
+  <script type="module" src="app.js?v=20260603-countdown-1"></script>
 </body>
 </html>

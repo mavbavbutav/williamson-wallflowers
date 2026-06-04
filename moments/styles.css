@@ -236,6 +236,51 @@ a {
   padding: 1.2rem;
 }
 
+.countdown-banner,
+.countdown-preview,
+.countdown-settings {
+  border: 1px solid rgba(222, 211, 200, 0.86);
+  border-radius: 24px;
+  padding: 1rem;
+  background: rgba(255, 250, 245, 0.78);
+}
+
+.countdown-banner {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.countdown-badge {
+  align-self: start;
+  width: fit-content;
+  min-height: 30px;
+  border-radius: 999px;
+  border: 1px solid rgba(222, 211, 200, 0.92);
+  background: rgba(255, 255, 255, 0.74);
+  padding: 0.2rem 0.64rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.countdown-banner strong {
+  font-size: clamp(1.1rem, 3.2vw, 1.65rem);
+  line-height: 1.12;
+}
+
+.countdown-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.countdown-form .button-row {
+  margin-top: 0.25rem;
+}
+
+.countdown-preview {
+  margin-bottom: 0.5rem;
+}
+
 .capture-card {
   display: grid;
   gap: 1rem;
