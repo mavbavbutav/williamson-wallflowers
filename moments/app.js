@@ -28,7 +28,8 @@ const state = {
   timerId: 0,
   hostPosts: [],
   hostPostsTimerId: 0,
-  countdownTimerId: 0
+  countdownTimerId: 0,
+  isCountdownLocked: false
 };
 
 const views = {
@@ -53,6 +54,10 @@ const countdownBadge = qs("#countdownBadge");
 const countdownBanner = qs("#countdownBanner");
 const countdownMessage = qs("#countdownMessage");
 const countdownTimer = qs("#countdownTimer");
+const countdownUnlockHint = qs("#countdownUnlockHint");
+const countdownLockedNotice = qs("#countdownLockedNotice");
+const hostPostsTitle = qs("#hostPostsTitle");
+const hostPostsSubtitle = qs("#hostPostsSubtitle");
 
 init();
 
@@ -101,6 +106,11 @@ function bindEvents() {
   fileInput.addEventListener("change", async () => {
     const file = fileInput.files && fileInput.files[0];
     if (!file) return;
+    if (isCountdownLocked()) {
+      showCountdownLockedNotice();
+      fileInput.value = "";
+      return;
+    }
     await acceptFile(file);
     fileInput.value = "";
   });
@@ -117,13 +127,13 @@ async function loadHostPosts({ silent = false } = {}) {
     state.hostPosts = payload.items || [];
     renderHostPosts();
     if (!silent && state.hostPosts.length === 0) {
-      setNotice(qs("#hostPostsNotice"), "No Party View moments yet. Check back soon.", "");
+      setNotice(qs("#hostPostsNotice"), `No ${getGuestPartyViewName()} moments yet. Check back soon.`, "");
     } else if (!silent) {
-      setNotice(qs("#hostPostsNotice"), "Party View refreshed.", "success");
+      setNotice(qs("#hostPostsNotice"), `${getGuestPartyViewName()} refreshed.`, "success");
     }
   } catch (error) {
     if (!silent) {
-      setNotice(qs("#hostPostsNotice"), error.message || "Could not refresh Party View.", "error");
+      setNotice(qs("#hostPostsNotice"), error.message || `Could not refresh ${getGuestPartyViewName()}.`, "error");
     }
     if (state.hostPosts.length === 0) {
       qs("#hostPostsView").hidden = true;
@@ -139,6 +149,7 @@ function startHostPostsPolling() {
 function renderHostPosts() {
   const view = qs("#hostPostsView");
   const grid = qs("#guestHostPostsGrid");
+  updateGuestPartyViewLanguage();
   const posts = state.hostPosts
     .slice()
     .sort((a, b) => new Date(b.capturedAt || b.createdAt || 0) - new Date(a.capturedAt || a.createdAt || 0));
@@ -154,6 +165,7 @@ function renderHostPosts() {
 function renderHostPostCard(item) {
   const card = document.createElement("article");
   card.className = `party-card is-${item.mediaType}`;
+  const partyViewName = getGuestPartyViewName();
 
   const mediaUrl = `${item.mediaUrl}&disposition=inline`;
   const media = document.createElement("div");
@@ -162,7 +174,7 @@ function renderHostPostCard(item) {
   if (item.mediaType === "photo") {
     const image = document.createElement("img");
     image.src = mediaUrl;
-    image.alt = item.title || "Party View photo";
+    image.alt = item.title || `${partyViewName} photo`;
     image.loading = "lazy";
     media.append(image);
   } else if (item.mediaType === "audio") {
@@ -171,7 +183,7 @@ function renderHostPostCard(item) {
         <div class="voice-memo-header">
           <div class="voice-memo-copy">
             <span class="voice-memo-kicker">${item.source === "host" ? "Host voice memo" : "Guest voice memo"}</span>
-            <strong>${escapeHtml(item.title || "Party View")}</strong>
+            <strong>${escapeHtml(item.title || partyViewName)}</strong>
             <span class="voice-memo-detail">${escapeHtml(item.durationSeconds ? formatTimer(item.durationSeconds) : "Tap play to listen")}</span>
           </div>
         </div>
@@ -237,11 +249,21 @@ function bindPartyVideoOverlay(card, video) {
 }
 
 function openPhoneLibrary() {
+  if (isCountdownLocked()) {
+    showCountdownLockedNotice();
+    return;
+  }
+
   fileInput.removeAttribute("capture");
   fileInput.click();
 }
 
 async function chooseMode(mode) {
+  if (isCountdownLocked()) {
+    showCountdownLockedNotice();
+    return;
+  }
+
   state.mode = mode;
   state.mediaType = mode;
   state.mediaBlob = null;
@@ -437,7 +459,7 @@ function startCountdown() {
     return;
   }
 
-  const target = parseCountdownStart(state.event.eventStartAt);
+  const target = getCountdownTarget();
   if (!target) {
     hideCountdown();
     return;
@@ -449,9 +471,11 @@ function startCountdown() {
 
   const render = () => {
     const remaining = target - Date.now();
+    const locked = remaining > 0;
     countdownBanner.hidden = false;
-    countdownBanner.classList.toggle("is-live", remaining <= 0);
-    if (remaining <= 0) {
+    countdownBanner.classList.toggle("is-live", !locked);
+    applyGuestUploadLock(locked);
+    if (!locked) {
       countdownBadge.textContent = "Now live";
       countdownMessage.textContent = "Party is underway";
       countdownTimer.innerHTML = `<span class="countdown-live-message">Guests can send moments now.</span>`;
@@ -473,6 +497,7 @@ function hideCountdown() {
     countdownBanner.hidden = true;
     countdownBanner.classList.remove("is-live");
   }
+  applyGuestUploadLock(false);
 
   if (state.countdownTimerId) {
     window.clearInterval(state.countdownTimerId);
@@ -482,6 +507,73 @@ function hideCountdown() {
 
 function renderCountdown() {
   startCountdown();
+}
+
+function getCountdownTarget() {
+  return parseCountdownStart(state.event?.eventStartAt);
+}
+
+function isCountdownLocked() {
+  const target = getCountdownTarget();
+  return Boolean(state.event?.countdownEnabled && target && target > Date.now());
+}
+
+function applyGuestUploadLock(locked) {
+  const wasLocked = state.isCountdownLocked;
+  state.isCountdownLocked = Boolean(locked);
+  document.body.classList.toggle("is-countdown-locked", state.isCountdownLocked);
+  if (countdownUnlockHint) countdownUnlockHint.hidden = !state.isCountdownLocked;
+  if (countdownLockedNotice) countdownLockedNotice.hidden = !state.isCountdownLocked;
+  updateGuestPartyViewLanguage();
+
+  qsa("[data-mode]").forEach((button) => {
+    button.disabled = state.isCountdownLocked;
+    button.setAttribute("aria-disabled", String(state.isCountdownLocked));
+    if (state.isCountdownLocked) {
+      button.setAttribute("aria-describedby", "countdownLockedNotice");
+      button.title = "Uploads unlock when the party starts.";
+    } else {
+      button.removeAttribute("aria-describedby");
+      button.removeAttribute("title");
+    }
+  });
+
+  ["#fileFallbackButton", "#photoCaptureButton", "#videoRecordButton", "#switchCameraButton"].forEach((selector) => {
+    const control = qs(selector);
+    if (!control) return;
+    if (state.isCountdownLocked) {
+      control.disabled = true;
+    } else if (wasLocked) {
+      control.disabled = false;
+    }
+  });
+
+  const submitButton = qs("#submitButton");
+  if (submitButton && state.isCountdownLocked) {
+    submitButton.disabled = true;
+  } else if (submitButton && wasLocked) {
+    submitButton.disabled = false;
+  }
+}
+
+function updateGuestPartyViewLanguage() {
+  const name = getGuestPartyViewName();
+  if (hostPostsTitle) hostPostsTitle.textContent = name;
+  if (hostPostsSubtitle) {
+    hostPostsSubtitle.textContent = state.isCountdownLocked
+      ? "Only the host can add media before the party starts. Guest uploads unlock when the countdown ends."
+      : "Moments the host shares for everyone to enjoy during the event.";
+  }
+}
+
+function getGuestPartyViewName() {
+  return state.isCountdownLocked ? "Pre-Party View" : "Party View";
+}
+
+function showCountdownLockedNotice() {
+  const message = "The party has not started yet. Guest uploads unlock when the countdown ends.";
+  setNotice(uploadNotice, message, "error");
+  setNotice(permissionNotice, message, "error");
 }
 
 function formatCountdown(totalMs) {
@@ -660,6 +752,11 @@ function renderSendSummary() {
 async function submitMoment(event) {
   event.preventDefault();
 
+  if (isCountdownLocked()) {
+    showCountdownLockedNotice();
+    return;
+  }
+
   if (!state.mediaFile) {
     setNotice(uploadNotice, "Please capture or choose a photo, video, or voice memo first.", "error");
     return;
@@ -696,7 +793,7 @@ async function submitMoment(event) {
   } catch (error) {
     setNotice(uploadNotice, error.message || "Upload failed. Please try again.", "error");
   } finally {
-    qs("#submitButton").disabled = false;
+    qs("#submitButton").disabled = isCountdownLocked();
   }
 }
 

@@ -175,6 +175,7 @@ function renderWorkspaceTabs() {
     capsule: capsuleItems.length,
     share: timeCapsule?.status === "published" ? "Live" : "Draft"
   };
+  updateHostPartyViewLanguage();
 
   qs("#submissionsPanel").hidden = currentView !== "submissions";
   qs("#hostPostsPanel").hidden = !capsuleEnabled || currentView !== "host-posts";
@@ -355,8 +356,9 @@ function renderSubmissionCard(submission) {
   }
 
   if (submission.status === "approved" && submission.source !== "host") {
+    const partyViewLabel = getHostPartyViewLabel();
     actions.append(actionButton(
-      inPartyView ? "Hide from Guest View" : "Show in Guest View",
+      inPartyView ? `Hide from ${partyViewLabel}` : `Show in ${partyViewLabel}`,
       inPartyView ? "" : "is-primary is-featured",
       () => setSubmissionPartyView(submission, !inPartyView)
     ));
@@ -679,7 +681,7 @@ async function createHostPost(event) {
   }
 
   qs("#createHostPostButton").disabled = true;
-  setNotice(qs("#hostPostNotice"), "Posting to the guest view...");
+  setNotice(qs("#hostPostNotice"), `Posting to the ${getHostPartyViewLabel()}...`);
 
   try {
     await hostRequest(`/host/events/${encodeURIComponent(eventId)}/posts`, {
@@ -690,7 +692,7 @@ async function createHostPost(event) {
     clearHostPostComposer();
     currentView = "host-posts";
     await loadGallery();
-    showHostCelebration("Host Post is live for guests and saved to the Time Capsule.", qs("#hostPostNotice"));
+    showHostCelebration(`Host Post is live in the ${getHostPartyViewLabel()} and saved to the Time Capsule.`, qs("#hostPostNotice"));
   } catch (error) {
     setNotice(qs("#hostPostNotice"), error.message || "Could not create this Host Post.", "error");
   } finally {
@@ -1030,6 +1032,44 @@ function actionButton(label, className, onClick) {
   button.textContent = label;
   button.addEventListener("click", onClick);
   return button;
+}
+
+function isHostPrePartyView() {
+  if (!eventRecord?.countdownEnabled || !eventRecord.eventStartAt) return false;
+  const target = new Date(eventRecord.eventStartAt);
+  return !Number.isNaN(target.getTime()) && target.getTime() > Date.now();
+}
+
+function getHostPartyViewLabel() {
+  return isHostPrePartyView() ? "Pre-Party View" : "Party View";
+}
+
+function updateHostPartyViewLanguage() {
+  const preParty = isHostPrePartyView();
+  const title = getHostPartyViewLabel();
+  const tabLabel = qs("#hostPostsTabLabel");
+  const panelTitle = qs("#hostPostsPanelTitle");
+  const panelCopy = qs("#hostPostsPanelCopy");
+  const panelPill = qs("#hostPostsPanelPill");
+  const feedTitle = qs("#hostPostsFeedTitle");
+  const feedCopy = qs("#hostPostsFeedCopy");
+  const createButton = qs("#createHostPostButton");
+
+  if (tabLabel) tabLabel.textContent = title;
+  if (panelTitle) panelTitle.textContent = preParty ? "Build the Pre-Party View" : "Post as Host";
+  if (panelCopy) {
+    panelCopy.textContent = preParty
+      ? "Add host-only warmup moments guests can see before uploads unlock. Guest media buttons stay locked until the countdown ends."
+      : "Add party updates that guests can see right away. These are approved and added to the Time Capsule automatically.";
+  }
+  if (panelPill) panelPill.textContent = preParty ? "Host-only before start" : "Live to guests";
+  if (feedTitle) feedTitle.textContent = title;
+  if (feedCopy) {
+    feedCopy.textContent = preParty
+      ? "What guests can see before the party starts."
+      : "What guests can see from the QR link.";
+  }
+  if (createButton) createButton.textContent = preParty ? "Post to Pre-Party View" : "Post to Party View";
 }
 
 async function approveSubmission(submission, { addToCapsule = false } = {}) {

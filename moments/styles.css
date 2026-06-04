@@ -331,6 +331,32 @@ a {
   border-color: rgba(63, 109, 88, 0.3);
 }
 
+.countdown-unlock-hint {
+  justify-self: center;
+  max-width: 34rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.unlock-tease {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: min(100%, 520px);
+  margin: 0.85rem auto 0;
+  border: 1px dashed rgba(119, 86, 71, 0.26);
+  border-radius: 999px;
+  padding: 0.7rem 0.95rem;
+  color: var(--muted);
+  background: rgba(255, 250, 245, 0.68);
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
 .countdown-form {
   display: grid;
   gap: 0.9rem;
@@ -636,6 +662,7 @@ a {
 }
 
 .guest-page .memory-mode-card {
+  position: relative;
   justify-items: center;
   align-content: center;
   gap: 0.4rem;
@@ -644,6 +671,45 @@ a {
   border-radius: 16px;
   text-align: center;
   box-shadow: 0 12px 28px rgba(47, 43, 40, 0.08);
+}
+
+.guest-page.is-countdown-locked .memory-mode-card {
+  cursor: not-allowed;
+  border-color: rgba(119, 86, 71, 0.18);
+  background:
+    linear-gradient(135deg, rgba(255, 250, 245, 0.84), rgba(247, 241, 234, 0.7)),
+    rgba(255, 250, 245, 0.8);
+  box-shadow: none;
+  transform: none;
+}
+
+.guest-page.is-countdown-locked .memory-mode-card .mode-title,
+.guest-page.is-countdown-locked .memory-mode-card .mode-detail {
+  opacity: 0.58;
+}
+
+.mode-lock {
+  display: none;
+  border: 1px solid rgba(119, 86, 71, 0.18);
+  border-radius: 999px;
+  padding: 0.28rem 0.58rem;
+  color: var(--accent-deep);
+  background: rgba(255, 255, 255, 0.68);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.guest-page.is-countdown-locked .mode-lock,
+.guest-page.is-countdown-locked .unlock-tease {
+  display: inline-flex;
+}
+
+.guest-page .host-post-feed-heading .muted {
+  margin-top: 0.24rem;
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
 .guest-page .memory-mode-card::before {
@@ -3453,6 +3519,10 @@ tr:last-child td {
 
   .countdown-timer {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .unlock-tease {
+    border-radius: 18px;
   }
 
   .guest-flow-card {
