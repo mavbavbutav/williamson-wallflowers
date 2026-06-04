@@ -30,11 +30,9 @@ let countdownInterval = 0;
 init();
 
 function init() {
-  qsa("[data-status]").forEach((button) => {
-    button.addEventListener("click", () => {
-      currentStatus = button.dataset.status;
-      render();
-    });
+  qs("#submissionStatusFilter").addEventListener("change", (event) => {
+    currentStatus = event.target.value;
+    render();
   });
   qs("#countdownForm").addEventListener("submit", saveCountdownSettings);
   bindDirtySaveButton(qs("#countdownForm"), "input, select, textarea", "button[type='submit']");
@@ -177,18 +175,18 @@ function setHostStat(name, value) {
 function renderWorkspaceTabs() {
   const capsuleEnabled = Boolean(eventRecord?.timeCapsule?.enabled);
   const counts = getSubmissionCounts();
+  if (currentView === "share") currentView = "capsule";
+
   const workspaceCounts = {
     submissions: counts.pending || submissions.length || 0,
     "host-posts": getPartyViewItems().length,
-    capsule: capsuleItems.length,
-    share: timeCapsule?.status === "published" ? "Live" : "Draft"
+    capsule: capsuleItems.length
   };
   updateHostPartyViewLanguage();
 
   qs("#submissionsPanel").hidden = currentView !== "submissions";
   qs("#hostPostsPanel").hidden = !capsuleEnabled || currentView !== "host-posts";
   qs("#capsulePanel").hidden = !capsuleEnabled || currentView !== "capsule";
-  qs("#sharePanel").hidden = !capsuleEnabled || currentView !== "share";
 
   qsa("[data-view]").forEach((tab) => {
     const isActive = tab.dataset.view === currentView;
@@ -205,7 +203,7 @@ function renderSubmissions() {
   const grid = qs("#mediaGrid");
   const visible = submissions.filter((item) => item.status === currentStatus);
   grid.innerHTML = "";
-  updateSubmissionTabs();
+  updateSubmissionFilter();
   qs("#countLabel").textContent = `${visible.length} ${visible.length === 1 ? "submission" : "submissions"}`;
   qs("#emptyState").textContent = getEmptyMessage(currentStatus);
   qs("#emptyState").hidden = visible.length > 0;
@@ -351,10 +349,9 @@ function renderSubmissionCard(submission) {
   actions.className = "host-decision-actions";
 
   if (submission.status !== "approved") {
-    actions.append(actionButton("Approve", "is-success is-featured", () => approveSubmission(submission)));
-    if (eventRecord?.timeCapsule?.enabled && !inCapsule) {
-      actions.append(actionButton("Approve + Time Capsule", "is-primary is-featured", () => approveSubmission(submission, { addToCapsule: true })));
-    }
+    const approvalOptions = renderApprovalOptions(submission, inCapsule, inPartyView);
+    if (approvalOptions) actions.append(approvalOptions);
+    actions.append(actionButton("Approve", "is-success is-featured", () => approveSubmission(submission, getApprovalOptions(actions))));
   } else if (eventRecord?.timeCapsule?.enabled && !inCapsule) {
     actions.append(actionButton("Add to Time Capsule", "is-success is-featured", () => addSubmissionToCapsule(submission)));
   } else if (inCapsule) {
@@ -382,6 +379,42 @@ function renderSubmissionCard(submission) {
 
   card.append(thumb, body);
   return card;
+}
+
+function renderApprovalOptions(submission, inCapsule, inPartyView) {
+  const group = document.createElement("div");
+  group.className = "approval-options";
+  group.setAttribute("aria-label", "Approval options");
+
+  if (submission.source !== "host" && !inPartyView) {
+    group.append(renderApprovalOption("party", getHostPartyViewLabel(), "Guest view"));
+  }
+
+  if (eventRecord?.timeCapsule?.enabled && !inCapsule) {
+    group.append(renderApprovalOption("capsule", "Time Capsule", "Keepsake"));
+  }
+
+  return group.children.length ? group : null;
+}
+
+function renderApprovalOption(name, label, detail) {
+  const option = document.createElement("label");
+  option.className = "approval-option";
+  option.innerHTML = `
+    <input type="checkbox" data-approval-option="${name}" />
+    <span>
+      <strong>${escapeHtml(label)}</strong>
+      <em>${escapeHtml(detail)}</em>
+    </span>
+  `;
+  return option;
+}
+
+function getApprovalOptions(root) {
+  return {
+    addToCapsule: Boolean(root.querySelector('[data-approval-option="capsule"]')?.checked),
+    showInPartyView: Boolean(root.querySelector('[data-approval-option="party"]')?.checked)
+  };
 }
 
 function renderCardMoreActions(submission, downloadUrl, mediaItem = submission, mediaUrl = "") {
@@ -930,16 +963,17 @@ function createCapsuleItem(submission) {
   });
 }
 
-async function setSubmissionPartyView(submission, visible) {
+async function setSubmissionPartyView(submission, visible, { reload = true, celebrate = true, notify = true, throwOnError = false } = {}) {
   try {
     await hostRequest(`/host/submissions/${encodeURIComponent(submission.id)}/party-view`, {
       method: "PATCH",
       body: JSON.stringify({ visible })
     });
-    await loadGallery();
-    showHostCelebration(visible ? "Moment is now visible in the guest Party View." : "Moment hidden from the guest Party View.");
+    if (reload) await loadGallery();
+    if (celebrate) showHostCelebration(visible ? `Moment is now visible in the guest ${getHostPartyViewLabel()}.` : `Moment hidden from the guest ${getHostPartyViewLabel()}.`);
   } catch (error) {
-    setNotice(qs("#hostNotice"), error.message || "Could not update the guest Party View.", "error");
+    if (notify) setNotice(qs("#hostNotice"), error.message || "Could not update the guest Party View.", "error");
+    if (throwOnError) throw error;
   }
 }
 
@@ -1179,8 +1213,9 @@ function updateHostPartyViewLanguage() {
   if (createButton) createButton.textContent = preParty ? "Post to Pre-Party View" : "Post to Party View";
 }
 
-async function approveSubmission(submission, { addToCapsule = false } = {}) {
+async function approveSubmission(submission, { addToCapsule = false, showInPartyView = false } = {}) {
   let capsuleAddFailed = false;
+  let partyViewAddFailed = false;
 
   try {
     await hostRequest(`/host/submissions/${encodeURIComponent(submission.id)}`, {
@@ -1196,13 +1231,22 @@ async function approveSubmission(submission, { addToCapsule = false } = {}) {
       }
     }
 
+    if (showInPartyView && submission.source !== "host" && !(submission.guestVisible || submission.guestVisibleAt)) {
+      try {
+        await setSubmissionPartyView({ ...submission, status: "approved" }, true, { reload: false, celebrate: false, notify: false, throwOnError: true });
+      } catch {
+        partyViewAddFailed = true;
+      }
+    }
+
     await loadGallery();
-    const message = capsuleAddFailed
-      ? "Submission approved, but could not add it to the Time Capsule. Add it later from the Approved tab."
-      : addToCapsule
-        ? "Submission approved and added to the Time Capsule."
-        : "Submission approved. Another memory is saved.";
-    if (capsuleAddFailed) {
+    const message = getApprovalMessage({
+      addToCapsule,
+      showInPartyView,
+      capsuleAddFailed,
+      partyViewAddFailed
+    });
+    if (capsuleAddFailed || partyViewAddFailed) {
       setNotice(qs("#hostNotice"), message, "error");
     } else {
       showHostCelebration(message);
@@ -1210,6 +1254,37 @@ async function approveSubmission(submission, { addToCapsule = false } = {}) {
   } catch (error) {
     setNotice(qs("#hostNotice"), error.message || "Could not approve this submission.", "error");
   }
+}
+
+function getApprovalMessage({ addToCapsule, showInPartyView, capsuleAddFailed, partyViewAddFailed }) {
+  const partyLabel = getHostPartyViewLabel();
+  const failed = [];
+  if (partyViewAddFailed) failed.push(partyLabel);
+  if (capsuleAddFailed) failed.push("Time Capsule");
+
+  if (failed.length) {
+    return `Submission approved, but could not add it to ${formatJoinedList(failed)}.`;
+  }
+
+  if (showInPartyView && addToCapsule) {
+    return `Submission approved and added to ${partyLabel} and the Time Capsule.`;
+  }
+
+  if (showInPartyView) {
+    return `Submission approved and added to ${partyLabel}.`;
+  }
+
+  if (addToCapsule) {
+    return "Submission approved and added to the Time Capsule.";
+  }
+
+  return "Submission approved. Another memory is saved.";
+}
+
+function formatJoinedList(items) {
+  if (items.length <= 1) return items[0] || "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
 async function updateSubmission(submissionId, status) {
@@ -1250,17 +1325,19 @@ function hostRequest(path, options = {}) {
   });
 }
 
-function updateSubmissionTabs() {
+function updateSubmissionFilter() {
   const counts = getSubmissionCounts();
+  const labels = {
+    pending: "Needs approval",
+    approved: "Approved",
+    rejected: "Rejected"
+  };
 
-  qsa("[data-status]").forEach((tab) => {
-    const isActive = tab.dataset.status === currentStatus;
-    tab.classList.toggle("is-active", isActive);
-    tab.setAttribute("aria-pressed", String(isActive));
-  });
+  const filter = qs("#submissionStatusFilter");
+  filter.value = currentStatus;
 
-  qsa("[data-count]").forEach((count) => {
-    count.textContent = counts[count.dataset.count] || 0;
+  qsa("#submissionStatusFilter option").forEach((option) => {
+    option.textContent = `${labels[option.value] || option.value} (${counts[option.value] || 0})`;
   });
 }
 

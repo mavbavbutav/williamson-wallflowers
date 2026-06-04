@@ -31,7 +31,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260604-media-aspect-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260604-approval-options-1" />
 </head>
 <body class="host-page">
   <main class="app-shell">
@@ -116,7 +116,7 @@
       <div class="toolbar" id="workspaceToolbar" hidden>
         <div class="tabs" aria-label="Host workspace">
           <button class="tab-button is-active" type="button" data-view="submissions" aria-pressed="true">
-            <span>Submissions</span>
+            <span>Review</span>
             <span class="tab-count" data-workspace-count="submissions">0</span>
           </button>
           <button class="tab-button" type="button" data-view="host-posts" aria-pressed="false">
@@ -127,28 +127,18 @@
             <span>Time Capsule</span>
             <span class="tab-count" data-workspace-count="capsule">0</span>
           </button>
-          <button class="tab-button" type="button" data-view="share" aria-pressed="false">
-            <span>Share</span>
-            <span class="tab-count" data-workspace-count="share">Draft</span>
-          </button>
         </div>
       </div>
 
       <section class="dashboard" id="submissionsPanel">
         <div class="toolbar">
-          <div class="tabs" aria-label="Submission status">
-            <button class="tab-button is-active" type="button" data-status="pending" aria-pressed="true">
-              <span>Pending</span>
-              <span class="tab-count" data-count="pending">0</span>
-            </button>
-            <button class="tab-button" type="button" data-status="approved" aria-pressed="false">
-              <span>Approved</span>
-              <span class="tab-count" data-count="approved">0</span>
-            </button>
-            <button class="tab-button" type="button" data-status="rejected" aria-pressed="false">
-              <span>Rejected</span>
-              <span class="tab-count" data-count="rejected">0</span>
-            </button>
+          <div class="host-review-filter">
+            <label for="submissionStatusFilter">Show</label>
+            <select id="submissionStatusFilter">
+              <option value="pending">Needs approval</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
           </div>
           <span class="muted" id="countLabel">0 submissions</span>
         </div>
@@ -249,11 +239,6 @@
           </div>
         </div>
         <div id="capsuleNotice" class="notice" role="status" aria-live="polite" hidden></div>
-        <div class="media-grid capsule-grid" id="capsuleGrid"></div>
-        <div class="empty-state" id="capsuleEmpty" hidden>No moments in the Time Capsule yet. Approve a submission, then add it from the Approved tab.</div>
-      </section>
-
-      <section class="dashboard" id="sharePanel" hidden>
         <div class="share-card" id="shareCard">
           <div class="panel-heading">
             <div>
@@ -271,6 +256,8 @@
             <button class="small-button is-primary" type="button" id="openCapsuleLinkButton">Open capsule</button>
           </div>
         </div>
+        <div class="media-grid capsule-grid" id="capsuleGrid"></div>
+        <div class="empty-state" id="capsuleEmpty" hidden>No moments in the Time Capsule yet. Use the Review approval options to add moments here.</div>
       </section>
     </section>
   </main>
@@ -286,6 +273,6 @@
     <div class="media-modal-stage" id="modalStage"></div>
   </div>
 
-  <script type="module" src="host.js?v=20260604-pre-countdown-uploads-1"></script>
+  <script type="module" src="host.js?v=20260604-approval-options-1"></script>
 </body>
 </html>
