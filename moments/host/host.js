@@ -36,6 +36,8 @@ function init() {
   });
   qs("#countdownForm").addEventListener("submit", saveCountdownSettings);
   bindDirtySaveButton(qs("#countdownForm"), "input, select, textarea", "button[type='submit']");
+  qs("#partyViewSettingsForm").addEventListener("submit", savePartyViewSettings);
+  bindDirtySaveButton(qs("#partyViewSettingsForm"), "input, select, textarea", "button[type='submit']");
 
   qsa("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -93,6 +95,7 @@ async function loadGallery() {
     submissions = payload.submissions || [];
     qs("#eventName").textContent = eventRecord.name;
     applyCountdownDefaults();
+    applyPartyViewDefaults();
     updateCountdownState();
     qs("#eventMeta").textContent = `${formatDate(eventRecord.eventDate)}. Pending guest moments stay private until approved.`;
 
@@ -220,6 +223,12 @@ function applyCountdownDefaults() {
   qs("#countdownEnabled").checked = !!eventRecord.countdownEnabled;
   qs("#guestUploadsBeforeCountdownEnabled").checked = !!eventRecord.guestUploadsBeforeCountdownEnabled;
   resetDirtySaveButton(qs("#countdownForm"));
+}
+
+function applyPartyViewDefaults() {
+  if (!eventRecord) return;
+  qs("#partyViewSwipeEnabled").checked = !!eventRecord.partyViewSwipeEnabled;
+  resetDirtySaveButton(qs("#partyViewSettingsForm"));
 }
 
 function updateCountdownState() {
@@ -1152,6 +1161,48 @@ async function saveCountdownSettings(event) {
   }
 }
 
+async function savePartyViewSettings(event) {
+  event.preventDefault();
+  const formElement = qs("#partyViewSettingsForm");
+  const submitButton = formElement.querySelector("button[type='submit']");
+
+  if (submitButton?.dataset.hasUnsavedChanges !== "true") return;
+
+  const form = {
+    partyViewSwipeEnabled: qs("#partyViewSwipeEnabled").checked
+  };
+
+  try {
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.dataset.originalLabel = submitButton.textContent;
+      submitButton.textContent = "Saving...";
+    }
+
+    setNotice(qs("#partyViewSettingsNotice"), "", "");
+    const payload = await hostRequest(`/host/events/${encodeURIComponent(eventId)}/party-view-settings`, {
+      method: "PATCH",
+      body: JSON.stringify(form)
+    });
+
+    if (payload?.event) {
+      eventRecord = payload.event;
+    } else {
+      eventRecord = { ...eventRecord, ...form };
+    }
+    applyPartyViewDefaults();
+    resetDirtySaveButton(formElement);
+    setNotice(qs("#partyViewSettingsNotice"), "Party View settings updated.", "success");
+  } catch (error) {
+    setNotice(qs("#partyViewSettingsNotice"), error.message || "Could not update Party View settings.", "error");
+  } finally {
+    if (submitButton) {
+      submitButton.disabled = false;
+      updateDirtySaveButton(formElement);
+    }
+  }
+}
+
 function closeMediaModal() {
   const modal = qs("#mediaModal");
   const stage = qs("#modalStage");
@@ -1440,6 +1491,15 @@ function getLocalDemoHostPayload(path, options = {}) {
     return { event: localDemoHostState.event };
   }
 
+  if (path.endsWith("/party-view-settings") && options.method === "PATCH") {
+    const form = JSON.parse(options.body || "{}");
+    localDemoHostState.event = {
+      ...localDemoHostState.event,
+      partyViewSwipeEnabled: form.partyViewSwipeEnabled
+    };
+    return { event: localDemoHostState.event };
+  }
+
   if (path.endsWith("/posts") && options.method === "POST") {
     const item = createLocalDemoHostItem({
       id: `demo-host-${Date.now()}`,
@@ -1467,6 +1527,7 @@ function createLocalDemoHostState(id) {
     countdownEnabled: !empty,
     countdownMessage: "Party starts in",
     guestUploadsBeforeCountdownEnabled: false,
+    partyViewSwipeEnabled: started,
     timeCapsule: {
       enabled: true,
       status: "draft"

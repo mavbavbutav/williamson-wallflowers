@@ -174,6 +174,10 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
       return updateHostEventCountdown(request, env, url, corsHeaders, parts[2]);
     }
 
+    if (request.method === 'PATCH' && parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'party-view-settings') {
+      return updateHostPartyViewSettings(request, env, url, corsHeaders, parts[2]);
+    }
+
     if (parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'time-capsule') {
       if (request.method === 'GET') {
         return getHostTimeCapsule(request, env, url, corsHeaders, parts[2]);
@@ -267,6 +271,7 @@ async function getTagEvent(request, tagCode, env, corsHeaders) {
       e.countdown_enabled AS countdownEnabled,
       e.countdown_message AS countdownMessage,
       e.guest_uploads_before_countdown_enabled AS guestUploadsBeforeCountdownEnabled,
+      e.party_view_swipe_enabled AS partyViewSwipeEnabled,
       e.status AS eventStatus,
       e.retention_expires_at AS retentionExpiresAt
     FROM tags t
@@ -301,6 +306,7 @@ async function getTagEvent(request, tagCode, env, corsHeaders) {
       countdownEnabled: row.countdownEnabled,
       countdownMessage: row.countdownMessage,
       guestUploadsBeforeCountdownEnabled: Number(row.guestUploadsBeforeCountdownEnabled || 0) === 1,
+      partyViewSwipeEnabled: Number(row.partyViewSwipeEnabled || 0) === 1,
       hostName: row.hostName
     },
     uploadToken
@@ -469,7 +475,8 @@ async function listGuestHostPosts(request, env, url, corsHeaders, eventId) {
         id: event.id,
         name: event.name,
         eventDate: event.eventDate,
-        hostName: event.hostName
+        hostName: event.hostName,
+        partyViewSwipeEnabled: Number(event.partyViewSwipeEnabled || 0) === 1
       },
       items: []
     }, 200, corsHeaders);
@@ -488,7 +495,8 @@ async function listGuestHostPosts(request, env, url, corsHeaders, eventId) {
       id: event.id,
       name: event.name,
       eventDate: event.eventDate,
-      hostName: event.hostName
+      hostName: event.hostName,
+      partyViewSwipeEnabled: Number(event.partyViewSwipeEnabled || 0) === 1
     },
     items
   }, 200, corsHeaders);
@@ -973,6 +981,45 @@ async function updateHostEventCountdown(request, env, url, corsHeaders, eventId)
       countdownEnabled: enabled ? 1 : 0,
       countdownMessage: finalMessage,
       guestUploadsBeforeCountdownEnabled,
+      updatedAt: now
+    }, env)
+  }, 200, corsHeaders);
+}
+
+async function updateHostPartyViewSettings(request, env, url, corsHeaders, eventId) {
+  const token = getAccessToken(request, url);
+  const event = await getHostEvent(env, eventId, token);
+
+  if (!event) {
+    return json({ ok: false, message: 'This host gallery link is not valid.' }, 403, corsHeaders);
+  }
+
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    return json({ ok: false, message: 'Invalid Party View settings payload.' }, 400, corsHeaders);
+  }
+
+  const partyViewSwipeEnabled = normalizeBoolean(body.partyViewSwipeEnabled) ? 1 : 0;
+  const now = new Date().toISOString();
+
+  await env.MOMENTS_DB.prepare(`
+    UPDATE events
+    SET party_view_swipe_enabled = ?, updated_at = ?
+    WHERE id = ? AND host_token = ?
+  `).bind(
+    partyViewSwipeEnabled,
+    now,
+    event.id,
+    token
+  ).run();
+
+  return json({
+    ok: true,
+    event: toEventClient({
+      ...event,
+      partyViewSwipeEnabled,
       updatedAt: now
     }, env)
   }, 200, corsHeaders);
@@ -2787,6 +2834,7 @@ async function getEventById(env, eventId) {
       countdown_enabled AS countdownEnabled,
       countdown_message AS countdownMessage,
       guest_uploads_before_countdown_enabled AS guestUploadsBeforeCountdownEnabled,
+      party_view_swipe_enabled AS partyViewSwipeEnabled,
       host_name AS hostName,
       host_email AS hostEmail,
       host_token AS hostToken,
@@ -2819,6 +2867,7 @@ async function getHostEvent(env, eventId, token) {
       countdown_enabled AS countdownEnabled,
       countdown_message AS countdownMessage,
       guest_uploads_before_countdown_enabled AS guestUploadsBeforeCountdownEnabled,
+      party_view_swipe_enabled AS partyViewSwipeEnabled,
       host_name AS hostName,
       host_email AS hostEmail,
       host_token AS hostToken,
@@ -3402,6 +3451,7 @@ function toEventClient(row, env) {
     countdownEnabled: Number(row.countdownEnabled || 0) === 1,
     countdownMessage: row.countdownMessage || "",
     guestUploadsBeforeCountdownEnabled: Number(row.guestUploadsBeforeCountdownEnabled || 0) === 1,
+    partyViewSwipeEnabled: Number(row.partyViewSwipeEnabled || 0) === 1,
     hostName: row.hostName,
     status: row.status,
     retentionExpiresAt: row.retentionExpiresAt,
@@ -3438,6 +3488,7 @@ function toAdminEventClient(row, env) {
     timeCapsuleTitle: row.time_capsule_title || '',
     timeCapsuleShareToken: row.time_capsule_share_token || '',
     timeCapsulePublishedAt: row.time_capsule_published_at || '',
+    partyViewSwipeEnabled: Number(row.party_view_swipe_enabled || 0) === 1,
     capsuleShareUrl: row.time_capsule_enabled && row.time_capsule_share_token
       ? buildTimeCapsuleShareUrl(env, row.id, row.time_capsule_share_token)
       : '',

@@ -31,7 +31,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260604-approval-options-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260604-party-swipe-1" />
 </head>
 <body class="host-page">
   <main class="app-shell">
@@ -203,6 +203,27 @@
           </form>
         </div>
 
+        <form id="partyViewSettingsForm" class="panel party-view-settings">
+          <div class="panel-heading">
+            <div>
+              <h3>Guest Party View</h3>
+              <p class="muted">Let guests switch this feed into the Time Capsule swipe layout from their QR link.</p>
+            </div>
+            <span class="status-pill">Swipe option</span>
+          </div>
+          <label class="settings-toggle" for="partyViewSwipeEnabled">
+            <input id="partyViewSwipeEnabled" name="partyViewSwipeEnabled" type="checkbox" />
+            <span>
+              <strong>Enable swipe view for guests</strong>
+              <span class="muted">Guests can use Grid or Swipe Feed when Party View has visible media.</span>
+            </span>
+          </label>
+          <div id="partyViewSettingsNotice" class="notice" role="status" aria-live="polite" hidden></div>
+          <div class="row-actions">
+            <button class="small-button is-primary" type="submit">Save Party View settings</button>
+          </div>
+        </form>
+
         <div class="toolbar host-post-feed-heading">
           <div>
             <h2 id="hostPostsFeedTitle">Party View</h2>
@@ -273,6 +294,6 @@
     <div class="media-modal-stage" id="modalStage"></div>
   </div>
 
-  <script type="module" src="host.js?v=20260604-approval-options-1"></script>
+  <script type="module" src="host.js?v=20260604-party-swipe-1"></script>
 </body>
 </html>

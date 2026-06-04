@@ -130,6 +130,42 @@ test('guest can read Host Posts from the scanned event link with the upload toke
   assert.equal(payload.items[0].mediaUrl.includes('share-token'), false);
 });
 
+test('host can enable the guest Party View swipe feed', async () => {
+  const db = new HostPostsFakeDb();
+  const env = envWithDb(db, new FakeBucket());
+
+  const updateResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-host/party-view-settings', {
+    method: 'PATCH',
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      Authorization: 'Bearer host-token'
+    },
+    body: JSON.stringify({ partyViewSwipeEnabled: true })
+  }), env);
+  const updatePayload = await updateResponse.json();
+
+  assert.equal(updateResponse.status, 200);
+  assert.equal(updatePayload.event.partyViewSwipeEnabled, true);
+  assert.equal(db.events[0].partyViewSwipeEnabled, 1);
+
+  const tokenResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/tags/host-tag', {
+    headers: { Origin: 'https://williamsonwallflowers.com' }
+  }), env);
+  const tokenPayload = await tokenResponse.json();
+  assert.equal(tokenPayload.event.partyViewSwipeEnabled, true);
+
+  const feedResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/events/event-host/host-posts', {
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      Authorization: `Bearer ${tokenPayload.uploadToken}`
+    }
+  }), env);
+  const feedPayload = await feedResponse.json();
+
+  assert.equal(feedResponse.status, 200);
+  assert.equal(feedPayload.event.partyViewSwipeEnabled, true);
+});
+
 test('host can push an approved guest submission to Party View', async () => {
   const db = new HostPostsFakeDb({
     submissions: [guestSubmission({ id: 'guest-approved', status: 'approved' })]
@@ -214,17 +250,27 @@ test('host and guest frontends expose Host Posts controls and party view', async
   assert.match(hostHtml, /id="hostPostsPanel"/);
   assert.match(hostHtml, />Party View</);
   assert.match(hostHtml, /id="hostPostsTabLabel"/);
+  assert.match(hostHtml, /id="partyViewSettingsForm"/);
+  assert.match(hostHtml, /id="partyViewSwipeEnabled"/);
   assert.match(hostJs, /createHostPost/);
   assert.match(hostJs, /getHostPartyViewLabel/);
   assert.match(hostJs, /Pre-Party View/);
+  assert.match(hostJs, /savePartyViewSettings/);
+  assert.match(hostJs, /partyViewSwipeEnabled/);
+  assert.match(hostJs, /\/host\/events\/\$\{encodeURIComponent\(eventId\)\}\/party-view-settings/);
   assert.match(hostJs, /setSubmissionPartyView/);
   assert.match(hostJs, /\/host\/events\/\$\{encodeURIComponent\(eventId\)\}\/posts/);
   assert.match(hostJs, /\/host\/submissions\/\$\{encodeURIComponent\(submission\.id\)\}\/party-view/);
   assert.match(hostJs, /capturedAt: submission\.createdAt/);
   assert.match(guestHtml, /id="hostPostsView"/);
+  assert.match(guestHtml, /id="guestPartyViewTabs"/);
+  assert.match(guestHtml, /id="guestPartySwipeFeed"/);
   assert.match(guestHtml, /Party View/);
   assert.match(guestHtml, /Unlocks when the party starts/);
   assert.match(guestJs, /loadHostPosts/);
+  assert.match(guestJs, /renderGuestPartySwipeFeed/);
+  assert.match(guestJs, /isGuestPartySwipeEnabled/);
+  assert.match(guestJs, /data-guest-party-view/);
   assert.match(guestJs, /applyGuestUploadLock/);
   assert.match(guestJs, /Pre-Party View/);
   assert.match(guestJs, /getLocalDemoGuestPayload/);
@@ -237,6 +283,8 @@ test('host and guest frontends expose Host Posts controls and party view', async
   assert.match(hostJs, /bindMediaFrameAspect\(thumb, image\)/);
   assert.match(hostJs, /bindMediaFrameAspect\(thumb, video\)/);
   assert.match(styles, /\.host-posts-panel/);
+  assert.match(styles, /\.party-view-settings/);
+  assert.match(styles, /\.guest-page \.guest-party-swipe-feed/);
   assert.match(styles, /\.guest-page\.is-countdown-locked \.memory-mode-card/);
   assert.match(styles, /\.countdown-banner\.is-live \.countdown-timer/);
   assert.match(hostJs, /getLocalDemoHostPayload/);
@@ -261,6 +309,12 @@ test('party view migration adds a persisted guest visibility flag', async () => 
 
   assert.match(migration, /guest_visible_at TEXT/);
   assert.match(migration, /idx_submissions_party_view/);
+});
+
+test('party view swipe migration adds a host-controlled event flag', async () => {
+  const migration = await readText('../../worker/migrations/0012_wallflower_party_view_swipe.sql');
+
+  assert.match(migration, /party_view_swipe_enabled INTEGER NOT NULL DEFAULT 0/);
 });
 
 async function readText(path) {
@@ -412,7 +466,8 @@ class HostPostsFakeDb {
       timeCapsuleStatus: 'published',
       timeCapsuleTitle: 'Host Post Test Time Capsule',
       timeCapsuleShareToken: 'share-token',
-      timeCapsulePublishedAt: '2026-05-01T00:00:00.000Z'
+      timeCapsulePublishedAt: '2026-05-01T00:00:00.000Z',
+      partyViewSwipeEnabled: 0
     }];
     this.tags = [{
       id: 'tag-host',
@@ -485,6 +540,11 @@ class HostPostsFakeStatement {
           eventName: event.name,
           eventDate: event.eventDate,
           hostName: event.hostName,
+          eventStartAt: event.eventStartAt,
+          countdownEnabled: event.countdownEnabled,
+          countdownMessage: event.countdownMessage,
+          guestUploadsBeforeCountdownEnabled: event.guestUploadsBeforeCountdownEnabled,
+          partyViewSwipeEnabled: event.partyViewSwipeEnabled,
           eventStatus: event.status,
           retentionExpiresAt: event.retentionExpiresAt
         }
@@ -687,6 +747,15 @@ class HostPostsFakeStatement {
         }
         submission.updated_at = updatedAt;
         submission.updatedAt = updatedAt;
+      }
+    }
+
+    if (this.sql.includes('UPDATE events') && this.sql.includes('party_view_swipe_enabled = ?')) {
+      const [partyViewSwipeEnabled, updatedAt, id, hostToken] = this.params;
+      const event = this.db.events.find((item) => item.id === id && item.hostToken === hostToken);
+      if (event) {
+        event.partyViewSwipeEnabled = partyViewSwipeEnabled;
+        event.updatedAt = updatedAt;
       }
     }
 

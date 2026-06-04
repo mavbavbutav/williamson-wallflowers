@@ -30,7 +30,9 @@ const state = {
   isLocalDemo: false,
   hostPostsTimerId: 0,
   countdownTimerId: 0,
-  isCountdownLocked: false
+  isCountdownLocked: false,
+  guestPartyViewMode: "grid",
+  guestPartyViewModeSelected: false
 };
 
 const views = {
@@ -105,6 +107,9 @@ function bindEvents() {
   qs("#addAnotherButton").addEventListener("click", resetFlow);
   qs("#submissionForm").addEventListener("submit", submitMoment);
   qs("#refreshHostPostsButton").addEventListener("click", () => loadHostPosts());
+  qsa("[data-guest-party-view]").forEach((button) => {
+    button.addEventListener("click", () => setGuestPartyViewMode(button.dataset.guestPartyView, { userInitiated: true }));
+  });
 
   fileInput.addEventListener("change", async () => {
     const file = fileInput.files && fileInput.files[0];
@@ -132,6 +137,12 @@ async function loadHostPosts({ silent = false } = {}) {
       headers: { Authorization: `Bearer ${state.uploadToken}` },
       timeoutMs: 6000
     });
+    if (payload.event) {
+      state.event = {
+        ...state.event,
+        ...payload.event
+      };
+    }
     state.hostPosts = payload.items || [];
     renderHostPosts();
     if (!silent && state.hostPosts.length === 0) {
@@ -158,17 +169,137 @@ function startHostPostsPolling() {
 function renderHostPosts() {
   const view = qs("#hostPostsView");
   const grid = qs("#guestHostPostsGrid");
+  const tabs = qs("#guestPartyViewTabs");
+  const swipeFeed = qs("#guestPartySwipeFeed");
   updateGuestPartyViewLanguage();
   const posts = state.hostPosts
     .slice()
     .sort((a, b) => new Date(b.capturedAt || b.createdAt || 0) - new Date(a.capturedAt || a.createdAt || 0));
+  const swipeEnabled = isGuestPartySwipeEnabled() && posts.length > 0;
 
   view.hidden = posts.length === 0;
   grid.innerHTML = "";
+  swipeFeed.innerHTML = "";
+  tabs.hidden = !swipeEnabled;
 
-  posts.forEach((item) => {
-    grid.append(renderHostPostCard(item));
+  syncGuestPartyViewMode(swipeEnabled);
+
+  qsa("[data-guest-party-view]").forEach((button) => {
+    const isActive = button.dataset.guestPartyView === state.guestPartyViewMode;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
   });
+
+  if (posts.length === 0) {
+    grid.hidden = false;
+    swipeFeed.hidden = true;
+    return;
+  }
+
+  const showSwipe = swipeEnabled && state.guestPartyViewMode === "swipe";
+  grid.hidden = showSwipe;
+  swipeFeed.hidden = !showSwipe;
+
+  if (showSwipe) {
+    renderGuestPartySwipeFeed(posts);
+  } else {
+    posts.forEach((item) => {
+      grid.append(renderHostPostCard(item));
+    });
+  }
+}
+
+function setGuestPartyViewMode(mode, options = {}) {
+  if (!["grid", "swipe"].includes(mode)) return;
+  state.guestPartyViewMode = mode;
+  state.guestPartyViewModeSelected = Boolean(options.userInitiated);
+  renderHostPosts();
+}
+
+function syncGuestPartyViewMode(swipeEnabled) {
+  if (!swipeEnabled) {
+    state.guestPartyViewMode = "grid";
+    return;
+  }
+
+  if (!state.guestPartyViewModeSelected) {
+    state.guestPartyViewMode = "swipe";
+  }
+}
+
+function isGuestPartySwipeEnabled() {
+  return Boolean(state.event?.partyViewSwipeEnabled);
+}
+
+function renderGuestPartySwipeFeed(posts) {
+  const feed = qs("#guestPartySwipeFeed");
+  posts.forEach((item) => {
+    feed.append(renderGuestPartySwipeCard(item));
+  });
+}
+
+function renderGuestPartySwipeCard(item) {
+  const card = document.createElement("article");
+  card.className = `capsule-feed-card guest-party-swipe-card is-${item.mediaType}`;
+  const partyViewName = getGuestPartyViewName();
+  const mediaUrl = inlineMediaUrl(item.mediaUrl);
+
+  const media = document.createElement("div");
+  media.className = "capsule-feed-media";
+
+  if (item.mediaType === "photo") {
+    const image = document.createElement("img");
+    image.src = mediaUrl;
+    image.alt = item.title || `${partyViewName} photo`;
+    image.loading = "lazy";
+    media.append(image);
+  } else if (item.mediaType === "audio") {
+    const audioPanel = document.createElement("div");
+    audioPanel.className = "capsule-feed-audio";
+    audioPanel.innerHTML = `
+      <div class="voice-memo-panel">
+        <div class="voice-memo-header">
+          <div class="voice-memo-copy">
+            <span class="voice-memo-kicker">${item.source === "host" ? "Host voice memo" : "Guest voice memo"}</span>
+            <strong>${escapeHtml(item.title || `${partyViewName} voice memo`)}</strong>
+            <span class="voice-memo-detail">${escapeHtml(item.durationSeconds ? formatTimer(item.durationSeconds) : "Tap play to listen")}</span>
+          </div>
+        </div>
+        <div class="voice-waveform" aria-hidden="true">
+          ${[34, 62, 48, 78, 42, 90, 56, 70, 38, 82, 50, 66].map((height) => `<span style="--bar-height: ${height}%"></span>`).join("")}
+        </div>
+      </div>
+    `;
+    const audio = document.createElement("audio");
+    audio.src = mediaUrl;
+    audio.controls = true;
+    audio.preload = "metadata";
+    audioPanel.querySelector(".voice-memo-panel").append(audio);
+    media.append(audioPanel);
+  } else {
+    const video = document.createElement("video");
+    video.src = mediaUrl;
+    if (item.thumbnailUrl) video.poster = item.thumbnailUrl;
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    media.append(video);
+  }
+
+  const copy = document.createElement("div");
+  copy.className = "capsule-feed-copy guest-party-swipe-copy";
+  copy.innerHTML = `
+    <div class="button-row">
+      <span class="status-pill">${item.source === "host" ? "Host Post" : "Guest Moment"}</span>
+      <span class="status-pill">${escapeHtml(getMediaTypeLabel(item.mediaType))}</span>
+    </div>
+    <strong>${escapeHtml(item.title || (item.source === "host" ? "Host Post" : "Guest moment"))}</strong>
+    <p>${escapeHtml(item.caption || item.guestNote || "")}</p>
+    <span>${escapeHtml(formatDateTime(item.capturedAt || item.createdAt))}</span>
+  `;
+
+  card.append(media, copy);
+  return card;
 }
 
 function renderHostPostCard(item) {
@@ -176,7 +307,7 @@ function renderHostPostCard(item) {
   card.className = `party-card is-${item.mediaType}`;
   const partyViewName = getGuestPartyViewName();
 
-  const mediaUrl = `${item.mediaUrl}&disposition=inline`;
+  const mediaUrl = inlineMediaUrl(item.mediaUrl);
   const media = document.createElement("div");
   media.className = `party-card-media is-${item.mediaType}`;
 
@@ -1075,6 +1206,12 @@ function getMediaTypeLabel(mediaType) {
   return "Photo";
 }
 
+function inlineMediaUrl(value) {
+  const url = String(value || "");
+  if (!url || url.includes("disposition=")) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}disposition=inline`;
+}
+
 function formatTimer(seconds) {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
@@ -1119,7 +1256,8 @@ function getLocalDemoParty(id) {
       eventStartAt: start.toISOString(),
       countdownEnabled: !empty,
       countdownMessage: "Party starts in",
-      guestUploadsBeforeCountdownEnabled: false
+      guestUploadsBeforeCountdownEnabled: false,
+      partyViewSwipeEnabled: !empty
     },
     hostPosts: empty ? [] : [
       localDemoHostPost({
