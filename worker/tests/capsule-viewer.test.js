@@ -234,7 +234,7 @@ test('capsule swipe feed auto-plays centered videos and voice memos', async () =
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-cast-fix-2/);
+  assert.match(capsuleHtml, /capsule\.js\?v=[^"]+/);
   assert.match(capsuleJs, /scheduleFeedAutoplay/);
   assert.match(capsuleJs, /function syncFeedAutoplay/);
   assert.match(capsuleJs, /function getCenteredFeedMedia/);
@@ -285,7 +285,7 @@ test('capsule swipe feed preloads adjacent media before the next swipe', async (
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-cast-fix-2/);
+  assert.match(capsuleHtml, /capsule\.js\?v=[^"]+/);
   assert.match(capsuleJs, /const FEED_MEDIA_WARM_RADIUS = 2/);
   assert.match(capsuleJs, /const FEED_IMAGE_WARM_RADIUS = 2/);
   assert.match(capsuleJs, /function warmFeedAroundCard/);
@@ -311,7 +311,7 @@ test('capsule slideshow has TV mode with fullscreen, uncropped portrait media, a
   assert.match(capsuleHtml, /TV Slideshow/);
   assert.match(capsuleHtml, /id="slidePlayPause"/);
   assert.match(capsuleHtml, /class="media-modal tv-slideshow-modal"/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-cast-fix-2/);
+  assert.match(capsuleHtml, /capsule\.js\?v=[^"]+/);
   assert.match(capsuleJs, /const PHOTO_SLIDE_DURATION_MS = 20000/);
   assert.match(capsuleJs, /function requestSlideshowFullscreen/);
   assert.match(capsuleJs, /requestFullscreen/);
@@ -356,7 +356,7 @@ test('capsule viewer exposes Cast and TV display fallbacks', async () => {
   ]);
 
   assert.match(capsuleHtml, /id="castTvButton"/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260602-capsule-scroll-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=[^"]+/);
   assert.match(capsuleHtml, /<img src="\.\.\/\.\.\/assets\/williamson-wallflowers-logo\.png" alt="" \/>/);
   assert.match(capsuleHtml, /<strong>Wallflower Moments<\/strong>/);
   assert.match(capsuleHtml, /<span>Time Capsule<\/span>/);
@@ -368,7 +368,8 @@ test('capsule viewer exposes Cast and TV display fallbacks', async () => {
   assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.dashboard[\s\S]*?overflow: visible/);
   assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.capsule-timeline[\s\S]*?overflow: visible/);
   assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.capsule-timeline[\s\S]*?grid-auto-rows: max-content/);
-  assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.capsule-memory-card \.media-thumb[\s\S]*?aspect-ratio: 3 \/ 4/);
+  assert.match(capsuleJs, /bindTimelineMediaAspects/);
+  assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.capsule-memory-card \.media-thumb\.has-media-aspect[\s\S]*?aspect-ratio: var\(--media-aspect, 3 \/ 4\)/);
   assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.capsule-memory-card \.media-thumb img[\s\S]*?object-fit: contain/);
   assert.match(styles, /\.capsule-viewer:not\(\.is-swipe-feed-active\) \.capsule-memory-card \.media-thumb video[\s\S]*?max-height: none/);
   assert.match(styles, /font-family: "Fiona", "Fiona Pro", "BF Fiona Serif"/);

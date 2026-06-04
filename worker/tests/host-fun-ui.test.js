@@ -15,9 +15,13 @@ test('host page has the fun pass dashboard, cleaner actions, and share card', as
   assert.match(hostHtml, /<link rel="stylesheet" href="\.\.\/styles\.css\?v=[^"]+" \/>/);
   assert.match(hostHtml, /data-workspace-count="submissions"/);
   assert.match(hostHtml, /data-workspace-count="capsule"/);
+  assert.match(hostHtml, /id="guestUploadsBeforeCountdownEnabled"/);
+  assert.match(hostHtml, /Allow guest uploads before the countdown ends/);
 
   assert.match(hostJs, /function renderHostPulse/);
   assert.match(hostJs, /const workspaceCounts/);
+  assert.match(hostJs, /guestUploadsBeforeCountdownEnabled: qs\("#guestUploadsBeforeCountdownEnabled"\)\.checked/);
+  assert.match(hostJs, /qs\("#guestUploadsBeforeCountdownEnabled"\)\.checked = !!eventRecord\.guestUploadsBeforeCountdownEnabled/);
   assert.match(hostJs, /function showHostCelebration/);
   assert.match(hostJs, /function renderCardMoreActions/);
   assert.match(hostJs, /function copyCapsuleLink/);
@@ -30,7 +34,7 @@ test('host page has the fun pass dashboard, cleaner actions, and share card', as
   assert.match(styles, /\.card-more-actions/);
   assert.match(styles, /\.host-decision-actions/);
   assert.match(styles, /\.host-page #mediaGrid \.media-card\.is-media-video[\s\S]*?grid-template-columns/);
-  assert.match(styles, /\.host-page \.media-thumb\.is-video[\s\S]*?aspect-ratio: 9 \/ 16/);
+  assert.match(styles, /\.host-page \.media-thumb\.has-media-aspect[\s\S]*?aspect-ratio: var\(--media-aspect, 4 \/ 3\)/);
   assert.match(styles, /\.host-page \.media-thumb\.is-video video[\s\S]*?object-fit: contain/);
   assert.match(styles, /\.host-celebration/);
 });

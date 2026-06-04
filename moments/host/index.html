@@ -31,7 +31,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260604-local-demo-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260604-media-aspect-1" />
 </head>
 <body class="host-page">
   <main class="app-shell">
@@ -74,6 +74,10 @@
           <label class="checkbox-row">
             <input id="countdownEnabled" name="countdownEnabled" type="checkbox" />
             <span>Show countdown to guests before the event starts.</span>
+          </label>
+          <label class="checkbox-row">
+            <input id="guestUploadsBeforeCountdownEnabled" name="guestUploadsBeforeCountdownEnabled" type="checkbox" />
+            <span>Allow guest uploads before the countdown ends.</span>
           </label>
           <div class="button-row">
             <button class="button button-primary" type="submit">Save countdown settings</button>
@@ -282,6 +286,6 @@
     <div class="media-modal-stage" id="modalStage"></div>
   </div>
 
-  <script type="module" src="host.js?v=20260604-host-video-preview-1"></script>
+  <script type="module" src="host.js?v=20260604-pre-countdown-uploads-1"></script>
 </body>
 </html>

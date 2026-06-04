@@ -35,6 +35,8 @@ test('guest link keeps the memory booth flow minimal', async () => {
   assert.match(guestJs, /fileInput\.removeAttribute\("capture"\)/);
   assert.doesNotMatch(guestJs, /fileInput\.capture\s*=/);
   assert.match(guestJs, /chooseMode\(button\.dataset\.mode\)/);
+  assert.match(guestJs, /function allowsGuestUploadsBeforeCountdown/);
+  assert.match(guestJs, /state\.event\?\.guestUploadsBeforeCountdownEnabled/);
   assert.match(guestJs, /Voice memo ready/);
   assert.doesNotMatch(guestJs, /guestEncouragement/);
 

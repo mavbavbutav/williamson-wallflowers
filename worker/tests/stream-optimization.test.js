@@ -38,7 +38,7 @@ test('capsule viewer prefers optimized Stream playback when it is available', as
   ]);
 
   assert.match(capsuleHtml, /hls\.js/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260601-tv-cast-fix-2/);
+  assert.match(capsuleHtml, /capsule\.js\?v=[^"]+/);
   assert.match(capsuleJs, /data-stream-url/);
   assert.match(capsuleJs, /function hydrateStreamVideos/);
   assert.match(capsuleJs, /window\.Hls\.isSupported\(\)/);

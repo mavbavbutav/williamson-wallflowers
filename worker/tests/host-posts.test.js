@@ -182,9 +182,13 @@ test('host and guest frontends expose Host Posts controls and party view', async
   assert.match(guestJs, /Pre-Party View/);
   assert.match(guestJs, /getLocalDemoGuestPayload/);
   assert.match(guestJs, /party-card is-\$\{item\.mediaType\}/);
+  assert.match(guestJs, /bindMediaFrameAspect\(media, image\)/);
+  assert.match(guestJs, /bindMediaFrameAspect\(media, video\)/);
   assert.match(guestJs, /bindPartyVideoOverlay\(card, video\)/);
   assert.match(guestJs, /is-overlay-muted/);
   assert.match(guestJs, /\/events\/\$\{encodeURIComponent\(state\.event\.id\)\}\/host-posts/);
+  assert.match(hostJs, /bindMediaFrameAspect\(thumb, image\)/);
+  assert.match(hostJs, /bindMediaFrameAspect\(thumb, video\)/);
   assert.match(styles, /\.host-posts-panel/);
   assert.match(styles, /\.guest-page\.is-countdown-locked \.memory-mode-card/);
   assert.match(styles, /\.countdown-banner\.is-live \.countdown-timer/);
@@ -193,8 +197,9 @@ test('host and guest frontends expose Host Posts controls and party view', async
   assert.match(localTestHtml, /demo-live/);
   assert.match(localTestHtml, /demo-empty/);
   assert.match(styles, /\.party-feed/);
-  assert.match(styles, /\.party-card\.is-video[\s\S]*?width: min\(100%, 420px\)/);
-  assert.match(styles, /\.party-card\.is-video \.party-card-media[\s\S]*?aspect-ratio: 9 \/ 16/);
+  assert.match(styles, /\.party-card-media\.has-media-aspect[\s\S]*?aspect-ratio: var\(--media-aspect, 4 \/ 3\)/);
+  assert.match(styles, /\.party-card\.is-video \.party-card-media\.has-media-aspect[\s\S]*?aspect-ratio: var\(--media-aspect, 9 \/ 16\)/);
+  assert.doesNotMatch(styles, /\.party-card\.is-video \.party-card-media\s*\{[\s\S]*?aspect-ratio: 9 \/ 16[\s\S]*?\}/);
   assert.match(styles, /\.party-card\.is-video\.is-overlay-muted[\s\S]*?opacity: 0/);
   assert.match(styles, /\.party-card-media[\s\S]*?grid-area: 1 \/ 1/);
   assert.match(styles, /\.party-card-body[\s\S]*?grid-area: 1 \/ 1/);

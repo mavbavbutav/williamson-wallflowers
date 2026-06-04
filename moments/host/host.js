@@ -220,6 +220,7 @@ function applyCountdownDefaults() {
   qs("#eventStartAt").value = toDatetimeLocal(eventRecord.eventStartAt || "");
   qs("#countdownMessage").value = eventRecord.countdownMessage || "";
   qs("#countdownEnabled").checked = !!eventRecord.countdownEnabled;
+  qs("#guestUploadsBeforeCountdownEnabled").checked = !!eventRecord.guestUploadsBeforeCountdownEnabled;
   resetDirtySaveButton(qs("#countdownForm"));
 }
 
@@ -663,6 +664,7 @@ async function acceptHostPostFile(file) {
 function renderHostPostPreview() {
   const frame = qs("#hostPostPreview");
   revokeHostPostPreviewUrl();
+  resetMediaFrameAspect(frame);
   frame.innerHTML = "";
 
   if (!hostPostState.mediaFile) {
@@ -678,6 +680,7 @@ function renderHostPostPreview() {
     image.src = url;
     image.alt = "Host post preview";
     frame.append(image);
+    bindMediaFrameAspect(frame, image);
   } else if (hostPostState.mediaType === "audio") {
     const audio = document.createElement("audio");
     audio.src = url;
@@ -695,6 +698,7 @@ function renderHostPostPreview() {
       video.poster = posterUrl;
     }
     frame.append(video);
+    bindMediaFrameAspect(frame, video);
   }
 }
 
@@ -842,6 +846,7 @@ function renderThumb(item, mediaUrl) {
     image.src = mediaUrl;
     image.alt = item.guestName ? `Photo from ${item.guestName}` : "Guest photo";
     thumb.append(image);
+    bindMediaFrameAspect(thumb, image);
   } else if (item.mediaType === "audio") {
     renderVoiceMemoThumb(thumb, item, mediaUrl);
   } else {
@@ -852,6 +857,7 @@ function renderThumb(item, mediaUrl) {
     video.playsInline = true;
     video.preload = "metadata";
     thumb.append(video);
+    bindMediaFrameAspect(thumb, video);
   }
 
   return thumb;
@@ -1035,6 +1041,37 @@ function openMediaModal(submission, mediaUrl) {
   qs("#modalClose").focus();
 }
 
+function bindMediaFrameAspect(frame, media) {
+  if (!frame || !media) return;
+
+  const apply = () => {
+    const width = media.videoWidth || media.naturalWidth || 0;
+    const height = media.videoHeight || media.naturalHeight || 0;
+    if (!width || !height) return;
+    const aspect = width / height;
+
+    frame.style.setProperty("--media-aspect", `${width} / ${height}`);
+    frame.classList.add("has-media-aspect");
+    frame.classList.toggle("is-media-portrait", aspect < 0.92);
+    frame.classList.toggle("is-media-landscape", aspect > 1.08);
+    frame.classList.toggle("is-media-square", aspect >= 0.92 && aspect <= 1.08);
+  };
+
+  if (media.tagName === "VIDEO") {
+    media.addEventListener("loadedmetadata", apply, { once: true });
+  } else if (media.complete) {
+    apply();
+  } else {
+    media.addEventListener("load", apply, { once: true });
+  }
+}
+
+function resetMediaFrameAspect(frame) {
+  if (!frame) return;
+  frame.style.removeProperty("--media-aspect");
+  frame.classList.remove("has-media-aspect", "is-media-portrait", "is-media-landscape", "is-media-square");
+}
+
 async function saveCountdownSettings(event) {
   event.preventDefault();
   const formElement = qs("#countdownForm");
@@ -1045,7 +1082,8 @@ async function saveCountdownSettings(event) {
   const form = {
     eventStartAt: datetimeLocalToIso(qs("#eventStartAt").value),
     countdownMessage: qs("#countdownMessage").value.trim(),
-    countdownEnabled: qs("#countdownEnabled").checked
+    countdownEnabled: qs("#countdownEnabled").checked,
+    guestUploadsBeforeCountdownEnabled: qs("#guestUploadsBeforeCountdownEnabled").checked
   };
 
   try {
@@ -1319,7 +1357,8 @@ function getLocalDemoHostPayload(path, options = {}) {
       ...localDemoHostState.event,
       eventStartAt: form.eventStartAt,
       countdownMessage: form.countdownMessage,
-      countdownEnabled: form.countdownEnabled
+      countdownEnabled: form.countdownEnabled,
+      guestUploadsBeforeCountdownEnabled: form.guestUploadsBeforeCountdownEnabled
     };
     return { event: localDemoHostState.event };
   }
@@ -1350,6 +1389,7 @@ function createLocalDemoHostState(id) {
     eventStartAt: start.toISOString(),
     countdownEnabled: !empty,
     countdownMessage: "Party starts in",
+    guestUploadsBeforeCountdownEnabled: false,
     timeCapsule: {
       enabled: true,
       status: "draft"

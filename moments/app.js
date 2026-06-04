@@ -186,6 +186,7 @@ function renderHostPostCard(item) {
     image.alt = item.title || `${partyViewName} photo`;
     image.loading = "lazy";
     media.append(image);
+    bindMediaFrameAspect(media, image);
   } else if (item.mediaType === "audio") {
     media.innerHTML = `
       <div class="voice-memo-panel">
@@ -214,6 +215,7 @@ function renderHostPostCard(item) {
     video.playsInline = true;
     video.preload = "metadata";
     media.append(video);
+    bindMediaFrameAspect(media, video);
     bindPartyVideoOverlay(card, video);
   }
 
@@ -480,11 +482,12 @@ function startCountdown() {
 
   const render = () => {
     const remaining = target - Date.now();
-    const locked = remaining > 0;
+    const beforeStart = remaining > 0;
+    const locked = beforeStart && !allowsGuestUploadsBeforeCountdown();
     countdownBanner.hidden = false;
-    countdownBanner.classList.toggle("is-live", !locked);
+    countdownBanner.classList.toggle("is-live", !beforeStart);
     applyGuestUploadLock(locked);
-    if (!locked) {
+    if (!beforeStart) {
       countdownBadge.textContent = "Now live";
       countdownMessage.textContent = "Party is underway";
       countdownTimer.innerHTML = `<span class="countdown-live-message">Guests can send moments now.</span>`;
@@ -524,14 +527,24 @@ function getCountdownTarget() {
 
 function isCountdownLocked() {
   const target = getCountdownTarget();
-  return Boolean(state.event?.countdownEnabled && target && target > Date.now());
+  return Boolean(state.event?.countdownEnabled && !allowsGuestUploadsBeforeCountdown() && target && target > Date.now());
+}
+
+function allowsGuestUploadsBeforeCountdown() {
+  return Boolean(state.event?.guestUploadsBeforeCountdownEnabled);
 }
 
 function applyGuestUploadLock(locked) {
   const wasLocked = state.isCountdownLocked;
   state.isCountdownLocked = Boolean(locked);
   document.body.classList.toggle("is-countdown-locked", state.isCountdownLocked);
-  if (countdownUnlockHint) countdownUnlockHint.hidden = !state.isCountdownLocked;
+  if (countdownUnlockHint) {
+    const showOpenHint = !state.isCountdownLocked && state.event?.countdownEnabled && allowsGuestUploadsBeforeCountdown() && getCountdownTarget() > Date.now();
+    countdownUnlockHint.textContent = state.isCountdownLocked
+      ? "Photo, video, and voice uploads unlock when the party starts."
+      : "Guest uploads are open before the party starts.";
+    countdownUnlockHint.hidden = !(state.isCountdownLocked || showOpenHint);
+  }
   if (countdownLockedNotice) countdownLockedNotice.hidden = !state.isCountdownLocked;
   updateGuestPartyViewLanguage();
 
@@ -720,6 +733,7 @@ function readMediaDuration(file, mediaType) {
 function renderPreview() {
   const frame = qs("#previewFrame");
   revokePreviewUrl();
+  resetMediaFrameAspect(frame);
   const url = URL.createObjectURL(state.mediaBlob);
   state.previewUrl = url;
   frame.innerHTML = "";
@@ -729,6 +743,7 @@ function renderPreview() {
     image.src = url;
     image.alt = "Preview of your photo";
     frame.append(image);
+    bindMediaFrameAspect(frame, image);
   } else if (state.mediaType === "audio") {
     const audio = document.createElement("audio");
     audio.src = url;
@@ -740,6 +755,7 @@ function renderPreview() {
     video.controls = true;
     video.playsInline = true;
     frame.append(video);
+    bindMediaFrameAspect(frame, video);
   }
 
   renderSendSummary();
@@ -936,6 +952,37 @@ function revokePreviewUrl() {
   state.previewUrl = "";
 }
 
+function bindMediaFrameAspect(frame, media) {
+  if (!frame || !media) return;
+
+  const apply = () => {
+    const width = media.videoWidth || media.naturalWidth || 0;
+    const height = media.videoHeight || media.naturalHeight || 0;
+    if (!width || !height) return;
+    const aspect = width / height;
+
+    frame.style.setProperty("--media-aspect", `${width} / ${height}`);
+    frame.classList.add("has-media-aspect");
+    frame.classList.toggle("is-media-portrait", aspect < 0.92);
+    frame.classList.toggle("is-media-landscape", aspect > 1.08);
+    frame.classList.toggle("is-media-square", aspect >= 0.92 && aspect <= 1.08);
+  };
+
+  if (media.tagName === "VIDEO") {
+    media.addEventListener("loadedmetadata", apply, { once: true });
+  } else if (media.complete) {
+    apply();
+  } else {
+    media.addEventListener("load", apply, { once: true });
+  }
+}
+
+function resetMediaFrameAspect(frame) {
+  if (!frame) return;
+  frame.style.removeProperty("--media-aspect");
+  frame.classList.remove("has-media-aspect", "is-media-portrait", "is-media-landscape", "is-media-square");
+}
+
 function updateSwitchCameraButton(disabled = false) {
   if (!switchCameraButton) return;
   const isRecording = state.recorder && state.recorder.state === "recording";
@@ -1065,7 +1112,8 @@ function getLocalDemoParty(id) {
       eventDate,
       eventStartAt: start.toISOString(),
       countdownEnabled: !empty,
-      countdownMessage: "Party starts in"
+      countdownMessage: "Party starts in",
+      guestUploadsBeforeCountdownEnabled: false
     },
     hostPosts: empty ? [] : [
       localDemoHostPost({

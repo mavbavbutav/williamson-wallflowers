@@ -971,6 +971,11 @@ textarea:focus-visible {
   background: #2f2b28;
 }
 
+.preview-frame.has-media-aspect {
+  min-height: 0;
+  aspect-ratio: var(--media-aspect, 4 / 3);
+}
+
 .camera-frame video {
   max-height: none;
   object-fit: cover;
@@ -1359,6 +1364,13 @@ textarea:focus-visible {
   object-fit: contain;
 }
 
+.media-thumb.has-media-aspect {
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  aspect-ratio: var(--media-aspect, 4 / 3);
+}
+
 .media-thumb.is-video,
 .media-thumb.is-video video,
 .capsule-feed-card.is-video .capsule-feed-media,
@@ -1424,7 +1436,7 @@ textarea:focus-visible {
   height: auto;
   min-height: clamp(360px, 52vw, 680px);
   max-height: 72vh;
-  aspect-ratio: 9 / 16;
+  aspect-ratio: var(--media-aspect, 9 / 16);
 }
 
 .host-page .media-thumb.is-audio {
@@ -1445,6 +1457,20 @@ textarea:focus-visible {
   height: 100%;
   max-height: 72vh;
   object-fit: contain;
+}
+
+.host-page .media-thumb.has-media-aspect,
+.host-page .media-thumb.is-video.has-media-aspect {
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  aspect-ratio: var(--media-aspect, 4 / 3);
+}
+
+.host-page .media-thumb.has-media-aspect img,
+.host-page .media-thumb.has-media-aspect video,
+.host-page .media-thumb.is-video.has-media-aspect video {
+  max-height: none;
 }
 
 @media (min-width: 900px) {
@@ -1478,7 +1504,7 @@ textarea:focus-visible {
     height: auto;
     min-height: 0;
     max-height: none;
-    aspect-ratio: 9 / 16;
+    aspect-ratio: var(--media-aspect, 9 / 16);
   }
 
   .host-page #mediaGrid .media-thumb.is-video video {
@@ -1741,7 +1767,16 @@ textarea:focus-visible {
 
 .party-card.is-video .party-card-media {
   min-height: 0;
-  aspect-ratio: 9 / 16;
+  aspect-ratio: var(--media-aspect, 9 / 16);
+}
+
+.party-card-media.has-media-aspect {
+  min-height: 0;
+  aspect-ratio: var(--media-aspect, 4 / 3);
+}
+
+.party-card.is-video .party-card-media.has-media-aspect {
+  aspect-ratio: var(--media-aspect, 9 / 16);
 }
 
 .party-card-media img,
@@ -2062,6 +2097,10 @@ textarea:focus-visible {
   min-height: 0;
   aspect-ratio: 3 / 4;
   background: #2f2b28;
+}
+
+.capsule-viewer:not(.is-swipe-feed-active) .capsule-memory-card .media-thumb.has-media-aspect {
+  aspect-ratio: var(--media-aspect, 3 / 4);
 }
 
 .capsule-viewer:not(.is-swipe-feed-active) .capsule-memory-card .media-thumb img,

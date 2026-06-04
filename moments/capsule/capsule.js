@@ -241,6 +241,7 @@ function renderTimeline() {
   qsaSlides().forEach((button) => {
     button.addEventListener("click", () => openSlide(Number(button.dataset.slide || 0), { autoPlay: false }));
   });
+  bindTimelineMediaAspects();
 }
 
 function renderSwipeFeed() {
@@ -564,6 +565,38 @@ function warmFeedAroundCard(feed, activeCard) {
       coolFeedMedia(media);
     }
   });
+}
+
+function bindTimelineMediaAspects() {
+  document.querySelectorAll(".capsule-memory-card .media-thumb").forEach((frame) => {
+    const media = frame.querySelector("img, video");
+    bindMediaFrameAspect(frame, media);
+  });
+}
+
+function bindMediaFrameAspect(frame, media) {
+  if (!frame || !media) return;
+
+  const apply = () => {
+    const width = media.videoWidth || media.naturalWidth || 0;
+    const height = media.videoHeight || media.naturalHeight || 0;
+    if (!width || !height) return;
+    const aspect = width / height;
+
+    frame.style.setProperty("--media-aspect", `${width} / ${height}`);
+    frame.classList.add("has-media-aspect");
+    frame.classList.toggle("is-media-portrait", aspect < 0.92);
+    frame.classList.toggle("is-media-landscape", aspect > 1.08);
+    frame.classList.toggle("is-media-square", aspect >= 0.92 && aspect <= 1.08);
+  };
+
+  if (media.tagName === "VIDEO") {
+    media.addEventListener("loadedmetadata", apply, { once: true });
+  } else if (media.complete) {
+    apply();
+  } else {
+    media.addEventListener("load", apply, { once: true });
+  }
 }
 
 function warmFeedMedia(media) {

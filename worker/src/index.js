@@ -265,6 +265,7 @@ async function getTagEvent(request, tagCode, env, corsHeaders) {
       e.event_start_at AS eventStartAt,
       e.countdown_enabled AS countdownEnabled,
       e.countdown_message AS countdownMessage,
+      e.guest_uploads_before_countdown_enabled AS guestUploadsBeforeCountdownEnabled,
       e.status AS eventStatus,
       e.retention_expires_at AS retentionExpiresAt
     FROM tags t
@@ -298,6 +299,7 @@ async function getTagEvent(request, tagCode, env, corsHeaders) {
       eventStartAt: row.eventStartAt,
       countdownEnabled: row.countdownEnabled,
       countdownMessage: row.countdownMessage,
+      guestUploadsBeforeCountdownEnabled: Number(row.guestUploadsBeforeCountdownEnabled || 0) === 1,
       hostName: row.hostName
     },
     uploadToken
@@ -309,6 +311,10 @@ async function createSubmission(request, env, corsHeaders, eventId) {
 
   if (!event || !isActiveEvent(event)) {
     return json({ ok: false, message: 'This event is no longer accepting moments.' }, 410, corsHeaders);
+  }
+
+  if (isGuestUploadBlockedBeforeCountdown(event)) {
+    return json({ ok: false, message: 'The party has not started yet. Guest uploads unlock when the countdown ends.' }, 403, corsHeaders);
   }
 
   const uploadRate = await consumeRateLimit(
@@ -903,6 +909,7 @@ async function updateHostEventCountdown(request, env, url, corsHeaders, eventId)
 
   const countdownEnabled = Boolean(body.countdownEnabled);
   const countdownMessage = cleanText(body.countdownMessage || '', 140);
+  const guestUploadsBeforeCountdownEnabled = normalizeBoolean(body.guestUploadsBeforeCountdownEnabled) ? 1 : 0;
   const eventStartAt = normalizeCountdownStartAt(body.eventStartAt);
   const enabled = countdownEnabled && Boolean(eventStartAt);
   const finalMessage = countdownMessage || 'Party starts in';
@@ -914,12 +921,14 @@ async function updateHostEventCountdown(request, env, url, corsHeaders, eventId)
 
   await env.MOMENTS_DB.prepare(`
     UPDATE events
-    SET event_start_at = ?, countdown_enabled = ?, countdown_message = ?, updated_at = ?
+    SET event_start_at = ?, countdown_enabled = ?, countdown_message = ?,
+      guest_uploads_before_countdown_enabled = ?, updated_at = ?
     WHERE id = ? AND host_token = ?
   `).bind(
     eventStartAt || null,
     enabled ? 1 : 0,
     finalMessage || null,
+    guestUploadsBeforeCountdownEnabled,
     now,
     event.id,
     token
@@ -932,6 +941,7 @@ async function updateHostEventCountdown(request, env, url, corsHeaders, eventId)
       eventStartAt,
       countdownEnabled: enabled ? 1 : 0,
       countdownMessage: finalMessage,
+      guestUploadsBeforeCountdownEnabled,
       updatedAt: now
     }, env)
   }, 200, corsHeaders);
@@ -2687,6 +2697,7 @@ async function getEventById(env, eventId) {
       event_start_at AS eventStartAt,
       countdown_enabled AS countdownEnabled,
       countdown_message AS countdownMessage,
+      guest_uploads_before_countdown_enabled AS guestUploadsBeforeCountdownEnabled,
       host_name AS hostName,
       host_email AS hostEmail,
       host_token AS hostToken,
@@ -2718,6 +2729,7 @@ async function getHostEvent(env, eventId, token) {
       event_start_at AS eventStartAt,
       countdown_enabled AS countdownEnabled,
       countdown_message AS countdownMessage,
+      guest_uploads_before_countdown_enabled AS guestUploadsBeforeCountdownEnabled,
       host_name AS hostName,
       host_email AS hostEmail,
       host_token AS hostToken,
@@ -2935,6 +2947,15 @@ function isActiveEvent(event) {
   return event.eventStatus === 'active' || event.status === 'active'
     ? new Date(event.retentionExpiresAt) > new Date()
     : false;
+}
+
+function isGuestUploadBlockedBeforeCountdown(event) {
+  if (Number(event.guestUploadsBeforeCountdownEnabled || 0) === 1) return false;
+  if (Number(event.countdownEnabled || 0) !== 1) return false;
+  if (!event.eventStartAt) return false;
+
+  const start = new Date(event.eventStartAt);
+  return !Number.isNaN(start.getTime()) && start.getTime() > Date.now();
 }
 
 function isAuthorizedForSubmission(submission, token, env) {
@@ -3291,6 +3312,7 @@ function toEventClient(row, env) {
     eventStartAt: row.eventStartAt || null,
     countdownEnabled: Number(row.countdownEnabled || 0) === 1,
     countdownMessage: row.countdownMessage || "",
+    guestUploadsBeforeCountdownEnabled: Number(row.guestUploadsBeforeCountdownEnabled || 0) === 1,
     hostName: row.hostName,
     status: row.status,
     retentionExpiresAt: row.retentionExpiresAt,

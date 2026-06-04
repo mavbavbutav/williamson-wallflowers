@@ -96,6 +96,76 @@ test('guest video upload stores a reusable thumbnail and returns a thumbnail URL
   assert.equal(payload.submissions[0].thumbnailUrl.includes('host-token'), false);
 });
 
+test('guest upload is blocked before the countdown unless the host allows it', async () => {
+  const db = new UploadFakeDb({
+    eventStartAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    countdownEnabled: 1,
+    guestUploadsBeforeCountdownEnabled: 0
+  });
+  const bucket = new FakeBucket();
+  const env = envWithDb(db, bucket);
+
+  const tokenResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/tags/voice-tag', {
+    headers: { Origin: 'https://williamsonwallflowers.com' }
+  }), env);
+  const tagPayload = await tokenResponse.json();
+
+  assert.equal(tagPayload.event.guestUploadsBeforeCountdownEnabled, false);
+
+  const formData = new FormData();
+  formData.set('media', new File(['photo-bytes'], 'before-party.jpg', { type: 'image/jpeg' }));
+  formData.set('mediaType', 'photo');
+  formData.set('durationSeconds', '0');
+  formData.set('consent', 'true');
+  formData.set('uploadToken', tagPayload.uploadToken);
+
+  const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/events/event-voice/submissions', {
+    method: 'POST',
+    headers: { Origin: 'https://williamsonwallflowers.com' },
+    body: formData
+  }), env);
+  const payload = await response.json();
+
+  assert.equal(response.status, 403);
+  assert.match(payload.message, /party has not started/i);
+  assert.equal(db.submissions.length, 0);
+  assert.equal(bucket.puts.length, 0);
+});
+
+test('guest upload is accepted before the countdown when the host allows it', async () => {
+  const db = new UploadFakeDb({
+    eventStartAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    countdownEnabled: 1,
+    guestUploadsBeforeCountdownEnabled: 1
+  });
+  const bucket = new FakeBucket();
+  const env = envWithDb(db, bucket);
+
+  const tokenResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/tags/voice-tag', {
+    headers: { Origin: 'https://williamsonwallflowers.com' }
+  }), env);
+  const tagPayload = await tokenResponse.json();
+
+  assert.equal(tagPayload.event.guestUploadsBeforeCountdownEnabled, true);
+
+  const formData = new FormData();
+  formData.set('media', new File(['photo-bytes'], 'before-party.jpg', { type: 'image/jpeg' }));
+  formData.set('mediaType', 'photo');
+  formData.set('durationSeconds', '0');
+  formData.set('consent', 'true');
+  formData.set('uploadToken', tagPayload.uploadToken);
+
+  const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/events/event-voice/submissions', {
+    method: 'POST',
+    headers: { Origin: 'https://williamsonwallflowers.com' },
+    body: formData
+  }), env);
+
+  assert.equal(response.status, 201);
+  assert.equal(db.submissions.length, 1);
+  assert.equal(bucket.puts.length, 1);
+});
+
 test('viewer-generated video thumbnails can be saved once for older videos', async () => {
   const db = new UploadFakeDb();
   const bucket = new FakeBucket();
@@ -193,6 +263,13 @@ test('video thumbnail migration adds reusable thumbnail metadata', async () => {
   assert.match(migration, /thumbnail_created_at TEXT/);
 });
 
+test('countdown guest upload migration stores the host pre-party choice', async () => {
+  const migration = await readText('../../worker/migrations/0011_wallflower_guest_pre_countdown_uploads.sql');
+
+  assert.match(migration, /ALTER TABLE events/);
+  assert.match(migration, /guest_uploads_before_countdown_enabled INTEGER NOT NULL DEFAULT 0/);
+});
+
 test('guest, host, and capsule frontends expose audio-only moments', async () => {
   const [guestHtml, guestJs, hostJs, capsuleJs] = await Promise.all([
     readText('../../moments/index.html'),
@@ -279,12 +356,16 @@ class FakeBucket {
 }
 
 class UploadFakeDb {
-  constructor() {
+  constructor(eventOverrides = {}) {
     this.rateLimits = new Map();
     this.events = [{
       id: 'event-voice',
       name: 'Voice Memo Test',
       eventDate: '2026-09-19',
+      eventStartAt: null,
+      countdownEnabled: 0,
+      countdownMessage: 'Party starts in',
+      guestUploadsBeforeCountdownEnabled: 0,
       hostName: 'Taylor',
       hostEmail: 'taylor@example.com',
       hostToken: 'host-token',
@@ -297,7 +378,8 @@ class UploadFakeDb {
       timeCapsuleStatus: 'published',
       timeCapsuleTitle: 'Voice Memo Test Time Capsule',
       timeCapsuleShareToken: 'share-token',
-      timeCapsulePublishedAt: '2026-05-01T00:00:00.000Z'
+      timeCapsulePublishedAt: '2026-05-01T00:00:00.000Z',
+      ...eventOverrides
     }];
     this.tags = [{
       id: 'tag-voice',
@@ -339,6 +421,10 @@ class UploadFakeStatement {
           eventId: event.id,
           eventName: event.name,
           eventDate: event.eventDate,
+          eventStartAt: event.eventStartAt,
+          countdownEnabled: event.countdownEnabled,
+          countdownMessage: event.countdownMessage,
+          guestUploadsBeforeCountdownEnabled: event.guestUploadsBeforeCountdownEnabled,
           hostName: event.hostName,
           eventStatus: event.status,
           retentionExpiresAt: event.retentionExpiresAt
