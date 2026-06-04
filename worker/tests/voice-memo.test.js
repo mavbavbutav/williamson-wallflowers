@@ -49,6 +49,58 @@ test('guest upload accepts an audio-only voice memo', async () => {
   assert.equal(bucket.puts[0].metadata.customMetadata.mediaType, 'audio');
 });
 
+test('guest media upload sends an internal Resend notification email', async () => {
+  const db = new UploadFakeDb();
+  const bucket = new FakeBucket();
+  const sentEmails = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    sentEmails.push({ url, body: JSON.parse(init.body), headers: init.headers });
+    return new Response('', { status: 202 });
+  };
+
+  try {
+    const env = envWithDb(db, bucket, {
+      resend: 'resend-test-key',
+      FROM_EMAIL: 'Williamson Wallflowers <noreply@example.com>'
+    });
+
+    const tokenResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/tags/voice-tag', {
+      headers: { Origin: 'https://williamsonwallflowers.com' }
+    }), env);
+    const { uploadToken } = await tokenResponse.json();
+
+    const formData = new FormData();
+    formData.set('media', new File(['photo-bytes'], 'flower-wall.jpg', { type: 'image/jpeg' }));
+    formData.set('mediaType', 'photo');
+    formData.set('durationSeconds', '0');
+    formData.set('guestName', 'Jordan');
+    formData.set('guestNote', 'Loved this wall');
+    formData.set('consent', 'true');
+    formData.set('uploadToken', uploadToken);
+
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/events/event-voice/submissions', {
+      method: 'POST',
+      headers: { Origin: 'https://williamsonwallflowers.com' },
+      body: formData
+    }), env);
+
+    assert.equal(response.status, 201);
+    assert.equal(sentEmails.length, 1);
+    assert.equal(sentEmails[0].url, 'https://api.resend.com/emails');
+    assert.equal(sentEmails[0].headers.Authorization, 'Bearer resend-test-key');
+    assert.deepEqual(sentEmails[0].body.to, ['contact@jjentertainmentsolutions.com']);
+    assert.match(sentEmails[0].body.subject, /Guest photo upload/i);
+    assert.match(sentEmails[0].body.text, /Event: Voice Memo Test/);
+    assert.match(sentEmails[0].body.text, /Source: Guest upload/);
+    assert.match(sentEmails[0].body.text, /Media type: photo/);
+    assert.match(sentEmails[0].body.text, /Guest name: Jordan/);
+    assert.match(sentEmails[0].body.text, /Note: Loved this wall/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('guest video upload stores a reusable thumbnail and returns a thumbnail URL', async () => {
   const db = new UploadFakeDb();
   const bucket = new FakeBucket();
@@ -327,11 +379,12 @@ async function readText(path) {
   return readFile(new URL(path, import.meta.url), 'utf8');
 }
 
-function envWithDb(db, bucket) {
+function envWithDb(db, bucket, overrides = {}) {
   return {
     ...BASE_ENV,
     MOMENTS_DB: db,
-    MOMENTS_BUCKET: bucket
+    MOMENTS_BUCKET: bucket,
+    ...overrides
   };
 }
 

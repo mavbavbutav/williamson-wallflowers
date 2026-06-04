@@ -37,6 +37,7 @@ const STREAM_BACKFILL_DEFAULT_LIMIT = 10;
 const STREAM_BACKFILL_MAX_LIMIT = 25;
 const STANDARD_RETENTION_DAYS = 90;
 const TIME_CAPSULE_RETENTION_DAYS = 365;
+const UPLOAD_NOTIFICATION_RECIPIENT = 'contact@jjentertainmentsolutions.com';
 const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 const THUMBNAIL_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const VIDEO_TYPES = new Set([
@@ -150,7 +151,7 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
     }
 
     if (request.method === 'POST' && parts[0] === 'events' && parts[1] && parts[2] === 'submissions') {
-      return createSubmission(request, env, corsHeaders, parts[1]);
+      return createSubmission(request, env, corsHeaders, parts[1], ctx);
     }
 
     if (parts[0] === 'bridge') {
@@ -306,7 +307,7 @@ async function getTagEvent(request, tagCode, env, corsHeaders) {
   }, 200, corsHeaders);
 }
 
-async function createSubmission(request, env, corsHeaders, eventId) {
+async function createSubmission(request, env, corsHeaders, eventId, ctx) {
   const event = await getEventById(env, eventId);
 
   if (!event || !isActiveEvent(event)) {
@@ -378,6 +379,8 @@ async function createSubmission(request, env, corsHeaders, eventId) {
   const originalFilename = sanitizeFilename(media.name || `${mediaType}-${id}`);
   const storedMimeType = getStoredMimeType(media.type, originalFilename, mediaType);
   const objectKey = `moments/${eventId}/${id}.${extensionFor(storedMimeType, originalFilename)}`;
+  const guestName = cleanText(formData.get('guestName'), 90);
+  const guestNote = cleanText(formData.get('guestNote'), 220);
 
   await env.MOMENTS_BUCKET.put(objectKey, media.stream(), {
     httpMetadata: {
@@ -415,12 +418,26 @@ async function createSubmission(request, env, corsHeaders, eventId) {
     thumbnailRecord.size,
     thumbnailRecord.createdAt,
     Number.isFinite(durationSeconds) ? durationSeconds : 0,
-    cleanText(formData.get('guestName'), 90),
-    cleanText(formData.get('guestNote'), 220),
+    guestName,
+    guestNote,
     now,
     now,
     now
   ).run();
+
+  await queueUploadNotification(env, ctx, {
+    event,
+    sourceLabel: 'Guest upload',
+    mediaType,
+    originalFilename,
+    size: media.size,
+    title: '',
+    caption: '',
+    guestName,
+    guestNote,
+    status: 'pending',
+    createdAt: now
+  });
 
   await safeQueueEventLightTrigger(env, eventId, 'submission_received');
 
@@ -608,6 +625,20 @@ async function createHostPost(request, env, url, corsHeaders, eventId, ctx) {
   ).run();
 
   const item = await getTimeCapsuleItemById(env, itemId, request);
+
+  await queueUploadNotification(env, ctx, {
+    event,
+    sourceLabel: 'Host post',
+    mediaType,
+    originalFilename,
+    size: media.size,
+    title,
+    caption,
+    guestName: 'Host',
+    guestNote: '',
+    status: 'approved',
+    createdAt: now
+  });
 
   return json({
     ok: true,
@@ -2586,6 +2617,37 @@ async function sendApplicantConfirmation(submission, env) {
   });
 }
 
+async function queueUploadNotification(env, ctx, details) {
+  const work = sendUploadNotification(env, details).catch((error) => {
+    console.error('Wallflower Moments upload notification failed', error?.message || error);
+  });
+
+  if (ctx && typeof ctx.waitUntil === 'function') {
+    ctx.waitUntil(work);
+    return;
+  }
+
+  await work;
+}
+
+async function sendUploadNotification(env, details) {
+  const resendApiKey = env.resend || env.RESEND_API_KEY || env.RESEND;
+  if (!resendApiKey || !env.FROM_EMAIL) return;
+
+  const subject = `Wallflower Moments ${getUploadNotificationSubjectSource(details.sourceLabel)} ${details.mediaType} upload`;
+  const result = await sendEmail({
+    env,
+    to: UPLOAD_NOTIFICATION_RECIPIENT,
+    subject,
+    text: buildUploadNotificationEmail(details)
+  });
+
+  if (!result.ok) {
+    const detail = await result.text();
+    throw new Error(`Resend upload notification failed: ${result.status} ${detail}`);
+  }
+}
+
 function sendEmail({ env, to, subject, text }) {
   const resendApiKey = env.resend || env.RESEND_API_KEY || env.RESEND;
 
@@ -2645,6 +2707,33 @@ Preferred Wall: ${submission['preferred-wall'] || 'Not provided'}${timeCapsuleLi
 Williamson Wallflowers
 Luxury flower wall rentals for Nashville, Williamson County, and Middle Tennessee
 jamicarswell@gmail.com`;
+}
+
+function buildUploadNotificationEmail(details) {
+  const lines = [
+    'A new Wallflower Moments media upload was received.',
+    '',
+    `Event: ${details.event?.name || 'Unknown event'}`,
+    `Event ID: ${details.event?.id || 'Unknown event ID'}`,
+    `Source: ${details.sourceLabel}`,
+    `Media type: ${details.mediaType}`,
+    `Filename: ${details.originalFilename || 'Not provided'}`,
+    `Size: ${details.size || 0} bytes`,
+    `Status: ${details.status || 'pending'}`,
+    `Uploaded at: ${details.createdAt || new Date().toISOString()}`
+  ];
+
+  if (details.title) lines.push(`Title: ${details.title}`);
+  if (details.caption) lines.push(`Caption: ${details.caption}`);
+  if (details.guestName) lines.push(`Guest name: ${details.guestName}`);
+  if (details.guestNote) lines.push(`Note: ${details.guestNote}`);
+  if (details.event?.hostName) lines.push(`Event host: ${details.event.hostName}`);
+
+  return lines.join('\n');
+}
+
+function getUploadNotificationSubjectSource(sourceLabel) {
+  return sourceLabel === 'Host post' ? 'Host' : 'Guest';
 }
 
 function formatSubmissionField(key, value) {

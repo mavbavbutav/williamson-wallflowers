@@ -47,6 +47,53 @@ test('host can create an approved Host Post that is added to the Time Capsule', 
   assert.equal(bucket.puts[0].metadata.customMetadata.source, 'host');
 });
 
+test('host media upload sends an internal Resend notification email', async () => {
+  const db = new HostPostsFakeDb();
+  const bucket = new FakeBucket();
+  const sentEmails = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    sentEmails.push({ url, body: JSON.parse(init.body), headers: init.headers });
+    return new Response('', { status: 202 });
+  };
+
+  try {
+    const env = envWithDb(db, bucket, {
+      resend: 'resend-test-key',
+      FROM_EMAIL: 'Williamson Wallflowers <noreply@example.com>'
+    });
+
+    const formData = new FormData();
+    formData.set('media', new File(['photo-bytes'], 'host-photo.jpg', { type: 'image/jpeg' }));
+    formData.set('mediaType', 'photo');
+    formData.set('title', 'Host Post');
+    formData.set('caption', 'First dance is starting.');
+
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-host/posts', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://williamsonwallflowers.com',
+        Authorization: 'Bearer host-token'
+      },
+      body: formData
+    }), env);
+
+    assert.equal(response.status, 201);
+    assert.equal(sentEmails.length, 1);
+    assert.equal(sentEmails[0].url, 'https://api.resend.com/emails');
+    assert.equal(sentEmails[0].headers.Authorization, 'Bearer resend-test-key');
+    assert.deepEqual(sentEmails[0].body.to, ['contact@jjentertainmentsolutions.com']);
+    assert.match(sentEmails[0].body.subject, /Host photo upload/i);
+    assert.match(sentEmails[0].body.text, /Event: Host Post Test/);
+    assert.match(sentEmails[0].body.text, /Source: Host post/);
+    assert.match(sentEmails[0].body.text, /Media type: photo/);
+    assert.match(sentEmails[0].body.text, /Title: Host Post/);
+    assert.match(sentEmails[0].body.text, /Caption: First dance is starting\./);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('guest can read Host Posts from the scanned event link with the upload token', async () => {
   const db = new HostPostsFakeDb({
     submissions: [hostSubmission()],
@@ -220,11 +267,12 @@ async function readText(path) {
   return readFile(new URL(path, import.meta.url), 'utf8');
 }
 
-function envWithDb(db, bucket) {
+function envWithDb(db, bucket, overrides = {}) {
   return {
     ...BASE_ENV,
     MOMENTS_DB: db,
-    MOMENTS_BUCKET: bucket
+    MOMENTS_BUCKET: bucket,
+    ...overrides
   };
 }
 
