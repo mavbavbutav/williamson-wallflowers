@@ -257,6 +257,26 @@ function toDatetimeLocal(value) {
   return offsetAdjusted.toISOString().slice(0, 16);
 }
 
+function datetimeLocalToIso(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) return raw;
+
+  const [, year, month, day, hour, minute, second = "0"] = match;
+  const localDate = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second)
+  );
+
+  return Number.isNaN(localDate.getTime()) ? raw : localDate.toISOString();
+}
+
 function parseCountdownStart(value) {
   if (!value) return null;
   const parsed = new Date(value);
@@ -941,7 +961,7 @@ async function saveCountdownSettings(event) {
   event.preventDefault();
   const submitButton = qs("#countdownForm").querySelector("button[type='submit']");
   const form = {
-    eventStartAt: qs("#eventStartAt").value.trim(),
+    eventStartAt: datetimeLocalToIso(qs("#eventStartAt").value),
     countdownMessage: qs("#countdownMessage").value.trim(),
     countdownEnabled: qs("#countdownEnabled").checked
   };
