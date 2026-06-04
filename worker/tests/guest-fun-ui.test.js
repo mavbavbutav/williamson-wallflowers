@@ -48,6 +48,28 @@ test('guest link keeps the memory booth flow minimal', async () => {
   assert.match(styles, /\.guest-celebration/);
 });
 
+test('guest upload flow stays above Party View media when host posts exist', async () => {
+  const [guestHtml, guestJs] = await Promise.all([
+    readText('../../moments/index.html'),
+    readText('../../moments/app.js')
+  ]);
+
+  const partyViewIndex = guestHtml.indexOf('id="hostPostsView"');
+  const captureIndex = guestHtml.indexOf('id="captureView"');
+  const reviewIndex = guestHtml.indexOf('id="reviewView"');
+  const successIndex = guestHtml.indexOf('id="successView"');
+
+  assert.ok(captureIndex > -1, 'capture view should exist');
+  assert.ok(reviewIndex > -1, 'review view should exist');
+  assert.ok(successIndex > -1, 'success view should exist');
+  assert.ok(partyViewIndex > -1, 'Party View should exist');
+  assert.ok(captureIndex < partyViewIndex, 'capture UI should render before Party View media');
+  assert.ok(reviewIndex < partyViewIndex, 'review UI should render before Party View media');
+  assert.ok(successIndex < partyViewIndex, 'success UI should render before Party View media');
+  assert.match(guestJs, /function scrollActiveGuestViewIntoPlace/);
+  assert.match(guestJs, /scrollIntoView/);
+});
+
 async function readText(path) {
   return readFile(new URL(path, import.meta.url), 'utf8');
 }

@@ -392,6 +392,13 @@ a {
   align-items: center;
 }
 
+.guest-page #welcomeView,
+.guest-page #captureView,
+.guest-page #reviewView,
+.guest-page #successView {
+  scroll-margin-top: 1rem;
+}
+
 .guest-page .hero-main {
   min-height: min(580px, calc(100vh - 8rem));
   text-align: center;

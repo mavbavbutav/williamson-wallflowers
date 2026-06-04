@@ -31,7 +31,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20260604-media-aspect-1" />
+  <link rel="stylesheet" href="styles.css?v=20260604-guest-party-order-1" />
 </head>
 <body class="guest-page">
   <main class="app-shell">
@@ -91,18 +91,6 @@
         </div>
         <p class="unlock-tease" id="countdownLockedNotice" role="status" aria-live="polite" hidden>Guest uploads are warming up. The buttons unlock when the countdown ends.</p>
       </div>
-    </section>
-
-    <section class="dashboard host-posts-view" id="hostPostsView" hidden>
-      <div class="toolbar host-post-feed-heading">
-        <div>
-          <h2 id="hostPostsTitle">Party View</h2>
-          <p class="muted" id="hostPostsSubtitle">Moments the host shares for everyone to enjoy during the event.</p>
-        </div>
-        <button class="small-button" type="button" id="refreshHostPostsButton">Refresh</button>
-      </div>
-      <div id="hostPostsNotice" class="notice" role="status" aria-live="polite" hidden></div>
-      <div class="party-feed" id="guestHostPostsGrid"></div>
     </section>
 
     <section class="dashboard" id="captureView" hidden>
@@ -193,8 +181,20 @@
         </div>
       </div>
     </section>
+
+    <section class="dashboard host-posts-view" id="hostPostsView" hidden>
+      <div class="toolbar host-post-feed-heading">
+        <div>
+          <h2 id="hostPostsTitle">Party View</h2>
+          <p class="muted" id="hostPostsSubtitle">Moments the host shares for everyone to enjoy during the event.</p>
+        </div>
+        <button class="small-button" type="button" id="refreshHostPostsButton">Refresh</button>
+      </div>
+      <div id="hostPostsNotice" class="notice" role="status" aria-live="polite" hidden></div>
+      <div class="party-feed" id="guestHostPostsGrid"></div>
+    </section>
   </main>
 
-  <script type="module" src="app.js?v=20260604-pre-countdown-uploads-1"></script>
+  <script type="module" src="app.js?v=20260604-guest-party-order-1"></script>
 </body>
 </html>

@@ -908,6 +908,7 @@ function showView(name) {
   window.requestAnimationFrame(() => {
     const activeView = views[name];
     const heading = activeView && activeView.querySelector("h1");
+    scrollActiveGuestViewIntoPlace(name, activeView);
     if (!heading) return;
     try {
       heading.focus({ preventScroll: true });
@@ -915,6 +916,11 @@ function showView(name) {
       heading.focus();
     }
   });
+}
+
+function scrollActiveGuestViewIntoPlace(name, activeView) {
+  if (!activeView || !["welcome", "capture", "review", "success"].includes(name)) return;
+  activeView.scrollIntoView({ block: "start", inline: "nearest", behavior: "auto" });
 }
 
 function updateGuestFlow(viewName) {
