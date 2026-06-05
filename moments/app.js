@@ -12,6 +12,8 @@ const GUEST_PARTY_SWIPE_QUERY = "(max-width: 767px)";
 const guestPartySwipeMedia = window.matchMedia(GUEST_PARTY_SWIPE_QUERY);
 const HOST_POSTS_POLL_INTERVAL_MS = 10000;
 const MOMENT_COMMENT_MAX_LENGTH = 320;
+const MOMENT_PRIMARY_REACTION_ID = "like";
+const MOMENT_REACTION_LONG_PRESS_MS = 420;
 const MOMENT_REACTIONS = [
   { id: "like", emoji: "&#x1F44D;", label: "Like" },
   { id: "dislike", emoji: "&#x1F44E;", label: "Dislike" },
@@ -19,6 +21,10 @@ const MOMENT_REACTIONS = [
   { id: "cry", emoji: "&#x1F622;", label: "Aww" },
   { id: "surprised", emoji: "&#x1F62E;", label: "Surprised" }
 ];
+const MOMENT_REACTION_PIVOT_OPTIONS = MOMENT_REACTIONS.filter((reaction) => reaction.id !== MOMENT_PRIMARY_REACTION_ID);
+
+const momentReactionPressStates = new WeakMap();
+let activeMomentLongPressButton = null;
 
 const state = {
   tagCode: getParam("t"),
@@ -134,6 +140,9 @@ function bindEvents() {
     fileInput.value = "";
   });
 
+  document.addEventListener("pointerdown", handleMomentReactionPointerDown);
+  document.addEventListener("pointerup", handleMomentReactionPointerUp);
+  document.addEventListener("pointercancel", handleMomentReactionPointerCancel);
   document.addEventListener("click", handleMomentInteractionAction);
   document.addEventListener("submit", handleMomentCommentSubmit);
 }
@@ -479,9 +488,9 @@ function renderHostPostCard(item) {
 
 function buildMomentInteractionsMarkup(item) {
   const interactions = normalizeMomentInteractions(item.interactions);
-  const reactionButtons = MOMENT_REACTIONS.map((reaction) => `
+  const reactionPickerButtons = MOMENT_REACTION_PIVOT_OPTIONS.map((reaction) => `
     <button
-      class="moment-action-button"
+      class="moment-action-button moment-reaction-option"
       type="button"
       data-moment-action="reaction"
       data-reaction="${reaction.id}"
@@ -502,9 +511,33 @@ function buildMomentInteractionsMarkup(item) {
   return `
     <div class="moment-interactions">
       <div class="moment-reaction-row" role="group" aria-label="Add reactions">
-        ${reactionButtons}
+        <div class="moment-reaction-pivot">
+          <button
+            class="moment-action-button moment-reaction-primary"
+            type="button"
+            data-moment-action="reaction"
+            data-reaction="${MOMENT_PRIMARY_REACTION_ID}"
+            data-moment-primary-reaction="1"
+            aria-label="Like"
+            aria-expanded="false"
+            aria-controls="moment-reaction-picker-${item.submissionId}"
+          >
+            <span class="moment-reaction-emoji" aria-hidden="true">&#x1F44D;</span>
+            <span class="moment-reaction-count" data-moment-reaction-count="${MOMENT_PRIMARY_REACTION_ID}">
+              ${interactions.counts[MOMENT_PRIMARY_REACTION_ID]}
+            </span>
+          </button>
+          <div
+            class="moment-reaction-picker"
+            id="moment-reaction-picker-${item.submissionId}"
+            data-moment-reaction-picker
+            hidden
+          >
+            ${reactionPickerButtons}
+          </div>
+        </div>
         <button
-          class="moment-action-button"
+          class="moment-action-button moment-comment-action"
           type="button"
           data-moment-action="toggle-comment-form"
           aria-label="Write a comment"
@@ -549,7 +582,10 @@ function normalizeMomentInteractions(interactions = {}) {
 
 function handleMomentInteractionAction(event) {
   const target = event.target instanceof Element ? event.target.closest("[data-moment-action]") : null;
-  if (!target) return;
+  if (!target) {
+    closeAllMomentReactionPickers();
+    return;
+  }
 
   const card = target.closest("[data-submission-id]");
   if (!card) return;
@@ -564,11 +600,22 @@ function handleMomentInteractionAction(event) {
   if (action === "reaction") {
     const reaction = target.dataset.reaction;
     if (!reaction) return;
+    const isPrimaryReaction = target.matches("[data-moment-primary-reaction='1']");
+    if (isPrimaryReaction) {
+      const pressState = momentReactionPressStates.get(target);
+      if (pressState?.suppressLikeClick) {
+        pressState.suppressLikeClick = false;
+        pressState.timerId = 0;
+        return;
+      }
+    }
     submitMomentReaction(card, submissionId, reaction, target);
+    closeMomentReactionPicker(card);
     return;
   }
 
   if (action === "toggle-comment-form") {
+    closeMomentReactionPicker(card);
     const wrap = card.querySelector('[data-moment-comment-wrap]');
     if (!wrap) return;
 
@@ -580,6 +627,142 @@ function handleMomentInteractionAction(event) {
       requestAnimationFrame(() => commentInput.focus());
     }
   }
+}
+
+function handleMomentReactionPointerDown(event) {
+  const target = getMomentPrimaryReactionButton(event.target);
+  if (!target) return;
+  if (!state.event?.id || !state.uploadToken) return;
+  if (event.button !== undefined && event.button !== 0) return;
+
+  const existing = momentReactionPressStates.get(target);
+  if (existing?.timerId) {
+    window.clearTimeout(existing.timerId);
+  }
+
+  const pressState = {
+    timerId: 0,
+    pickerOpen: false,
+    suppressLikeClick: false
+  };
+  activeMomentLongPressButton = target;
+
+  pressState.timerId = window.setTimeout(() => {
+    const current = momentReactionPressStates.get(target);
+    if (!current) return;
+    current.pickerOpen = true;
+    current.suppressLikeClick = true;
+    openMomentReactionPicker(target.closest("[data-submission-id]"), target);
+  }, MOMENT_REACTION_LONG_PRESS_MS);
+
+  momentReactionPressStates.set(target, pressState);
+}
+
+function handleMomentReactionPointerUp(event) {
+  const target = getMomentPrimaryReactionButton(event.target);
+  if (target) {
+    completeMomentReactionPress(target);
+    return;
+  }
+
+  if (activeMomentLongPressButton) {
+    completeMomentReactionPress(activeMomentLongPressButton);
+  }
+}
+
+function handleMomentReactionPointerCancel(event) {
+  const target = getMomentPrimaryReactionButton(event.target);
+  if (target) {
+    cancelMomentReactionPress(target);
+    return;
+  }
+
+  if (activeMomentLongPressButton) {
+    cancelMomentReactionPress(activeMomentLongPressButton);
+  }
+}
+
+function getMomentPrimaryReactionButton(target) {
+  return target instanceof Element
+    ? target.closest('[data-moment-action="reaction"][data-reaction="like"][data-moment-primary-reaction="1"]')
+    : null;
+}
+
+function completeMomentReactionPress(button) {
+  const pressState = momentReactionPressStates.get(button);
+  if (!pressState) return;
+
+  window.clearTimeout(pressState.timerId);
+  pressState.timerId = 0;
+  if (!pressState.pickerOpen) {
+    momentReactionPressStates.delete(button);
+  } else {
+    pressState.suppressLikeClick = true;
+  }
+
+  activeMomentLongPressButton = null;
+}
+
+function cancelMomentReactionPress(button) {
+  const pressState = momentReactionPressStates.get(button);
+  if (!pressState) return;
+
+  window.clearTimeout(pressState.timerId);
+  pressState.pickerOpen = false;
+  pressState.suppressLikeClick = false;
+  momentReactionPressStates.delete(button);
+  activeMomentLongPressButton = null;
+}
+
+function openMomentReactionPicker(card, primaryButton) {
+  if (!card || !primaryButton) return;
+  const picker = card.querySelector("[data-moment-reaction-picker]");
+  if (!picker) return;
+
+  closeAllMomentReactionPickers(card);
+  picker.hidden = false;
+  requestAnimationFrame(() => picker.classList.add("is-open"));
+  primaryButton.setAttribute("aria-expanded", "true");
+}
+
+function closeMomentReactionPicker(card) {
+  if (!card) return;
+  const picker = card.querySelector("[data-moment-reaction-picker]");
+  const primary = card.querySelector('[data-moment-primary-reaction="1"]');
+
+  if (picker) {
+    picker.hidden = true;
+    picker.classList.remove("is-open");
+  }
+
+  if (primary) {
+    primary.setAttribute("aria-expanded", "false");
+    const pressState = momentReactionPressStates.get(primary);
+    if (pressState) {
+      pressState.pickerOpen = false;
+      pressState.suppressLikeClick = false;
+    }
+    momentReactionPressStates.delete(primary);
+  }
+}
+
+function closeAllMomentReactionPickers(excludeCard = null) {
+  qsa("[data-moment-reaction-picker]").forEach((picker) => {
+    const card = picker.closest("[data-submission-id]");
+    if (excludeCard && card === excludeCard) return;
+    picker.hidden = true;
+    picker.classList.remove("is-open");
+    const primary = card ? card.querySelector('[data-moment-primary-reaction="1"]') : null;
+    if (primary) {
+      primary.setAttribute("aria-expanded", "false");
+      const pressState = momentReactionPressStates.get(primary);
+      if (pressState) {
+        pressState.pickerOpen = false;
+        pressState.suppressLikeClick = false;
+      }
+      momentReactionPressStates.delete(primary);
+    }
+  });
 }
 
 async function submitMomentReaction(card, submissionId, reaction, button) {
