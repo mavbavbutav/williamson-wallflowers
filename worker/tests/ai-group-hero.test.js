@@ -33,6 +33,8 @@ test('approving an AI-consented photo generates a ready group hero from the late
     id: `guest-${String(index + 1).padStart(2, '0')}`,
     object_key: `moments/event-hero/guest-${String(index + 1).padStart(2, '0')}.jpg`,
     objectKey: `moments/event-hero/guest-${String(index + 1).padStart(2, '0')}.jpg`,
+    guest_name: `Guest ${String(index + 1).padStart(2, '0')}`,
+    guestName: `Guest ${String(index + 1).padStart(2, '0')}`,
     status: index === 17 ? 'pending' : 'approved',
     ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
     aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
@@ -82,6 +84,8 @@ test('group hero uses approved video thumbnails and an event-specific likeness p
     id: 'guest-photo',
     object_key: 'moments/event-hero/guest-photo.jpg',
     objectKey: 'moments/event-hero/guest-photo.jpg',
+    guest_name: 'Photo Guest',
+    guestName: 'Photo Guest',
     status: 'approved',
     ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
     aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
@@ -96,6 +100,8 @@ test('group hero uses approved video thumbnails and an event-specific likeness p
     objectKey: 'moments/event-hero/guest-video.mp4',
     original_filename: 'guest-video.mp4',
     originalFilename: 'guest-video.mp4',
+    guest_name: 'Video Guest',
+    guestName: 'Video Guest',
     mime_type: 'video/mp4',
     mimeType: 'video/mp4',
     thumbnail_object_key: 'moments/event-hero/thumbnails/guest-video.jpg',
@@ -144,6 +150,65 @@ test('group hero uses approved video thumbnails and an event-specific likeness p
     assert.match(calls[0].prompt, /recognizable/i);
     assert.doesNotMatch(calls[0].prompt, /Williamson Wallflowers/);
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-video', 'guest-photo']);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('group hero dedupes repeated guest names before generating artwork', async () => {
+  const duplicateOld = guestSubmission({
+    id: 'guest-linda-old',
+    object_key: 'moments/event-hero/guest-linda-old.jpg',
+    objectKey: 'moments/event-hero/guest-linda-old.jpg',
+    guest_name: 'Aunt Linda',
+    guestName: 'Aunt Linda',
+    status: 'approved',
+    created_at: '2026-09-19T20:01:00.000Z',
+    createdAt: '2026-09-19T20:01:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:01:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:01:00.000Z'
+  });
+  const unique = guestSubmission({
+    id: 'guest-mike',
+    object_key: 'moments/event-hero/guest-mike.jpg',
+    objectKey: 'moments/event-hero/guest-mike.jpg',
+    guest_name: 'Uncle Mike',
+    guestName: 'Uncle Mike',
+    status: 'approved',
+    created_at: '2026-09-19T20:02:00.000Z',
+    createdAt: '2026-09-19T20:02:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:02:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:02:00.000Z'
+  });
+  const duplicateNew = guestSubmission({
+    id: 'guest-linda-new',
+    object_key: 'moments/event-hero/guest-linda-new.jpg',
+    objectKey: 'moments/event-hero/guest-linda-new.jpg',
+    guest_name: 'Aunt Linda',
+    guestName: 'Aunt Linda',
+    status: 'pending',
+    created_at: '2026-09-19T20:03:00.000Z',
+    createdAt: '2026-09-19T20:03:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:03:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:03:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({ submissions: [duplicateOld, unique, duplicateNew] });
+  const bucket = new FakeBucket([
+    [duplicateOld.object_key, 'source-linda-old'],
+    [unique.object_key, 'source-mike'],
+    [duplicateNew.object_key, 'source-linda-new']
+  ]);
+  mockOpenAi();
+
+  try {
+    const response = await approveSubmission(envWithDb(db, bucket), duplicateNew.id);
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.status, 'approved');
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.equal(db.groupHeroes[0].participant_count, 2);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-linda-new', 'guest-mike']);
   } finally {
     restoreFetch();
   }
@@ -661,6 +726,8 @@ class GroupHeroFakeStatement {
           .map((item) => ({
             id: item.id,
             eventId: item.event_id || item.eventId,
+            mediaType: item.media_type || item.mediaType,
+            guestName: item.guest_name || item.guestName,
             objectKey: (item.media_type || item.mediaType) === 'video'
               ? item.thumbnail_object_key || item.thumbnailObjectKey
               : item.object_key || item.objectKey,

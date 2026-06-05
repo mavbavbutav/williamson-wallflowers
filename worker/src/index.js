@@ -37,6 +37,7 @@ const RETENTION_CLEANUP_LIMIT = 100;
 const STREAM_BACKFILL_DEFAULT_LIMIT = 10;
 const STREAM_BACKFILL_MAX_LIMIT = 25;
 const GROUP_HERO_MAX_INPUTS = 16;
+const GROUP_HERO_SOURCE_LOOKBACK_LIMIT = GROUP_HERO_MAX_INPUTS * 4;
 const GROUP_HERO_TOKEN_TTL_SECONDS = 6 * 60 * 60;
 const GROUP_HERO_FORCE_RATE_LIMIT = 6;
 const GROUP_HERO_FORCE_RATE_WINDOW_SECONDS = 60 * 60;
@@ -1530,6 +1531,7 @@ async function getGroupHeroSourceSubmissions(env, eventId) {
       id,
       event_id AS eventId,
       media_type AS mediaType,
+      guest_name AS guestName,
       object_key AS photoObjectKey,
       thumbnail_object_key AS objectKey,
       original_filename AS originalFilename,
@@ -1548,9 +1550,9 @@ async function getGroupHeroSourceSubmissions(env, eventId) {
       )
     ORDER BY created_at DESC
     LIMIT ?
-  `).bind(eventId, GROUP_HERO_MAX_INPUTS).all();
+  `).bind(eventId, GROUP_HERO_SOURCE_LOOKBACK_LIMIT).all();
 
-  return (result.results || []).map((row) => {
+  const compatibleSources = (result.results || []).map((row) => {
     if ((row.mediaType || row.media_type) === 'video') {
       const mimeType = row.mimeType || row.mime_type || 'image/jpeg';
       return {
@@ -1566,6 +1568,37 @@ async function getGroupHeroSourceSubmissions(env, eventId) {
       mimeType: row.photoMimeType || row.mimeType || row.mime_type
     };
   });
+
+  return selectDistinctGroupHeroSources(compatibleSources);
+}
+
+function selectDistinctGroupHeroSources(sources) {
+  const selected = [];
+  const seenGuestKeys = new Set();
+
+  for (const source of sources) {
+    if (selected.length >= GROUP_HERO_MAX_INPUTS) break;
+
+    const guestKey = getGroupHeroGuestKey(source.guestName || source.guest_name || '');
+    if (guestKey) {
+      if (seenGuestKeys.has(guestKey)) continue;
+      seenGuestKeys.add(guestKey);
+    }
+
+    selected.push(source);
+  }
+
+  return selected;
+}
+
+function getGroupHeroGuestKey(value) {
+  return cleanText(value, 120)
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 async function storeEventGroupHeroState(env, state) {
@@ -1624,7 +1657,8 @@ function buildGroupHeroPrompt(eventName) {
   const eventLabel = cleanText(eventName, 90).replace(/["<>]/g, '').trim() || 'the event';
   return [
     `Create a warm editorial cartoon group portrait for the event "${eventLabel}".`,
-    'Use every uploaded photo or video thumbnail as an approved real-person likeness reference for one participant in the group scene.',
+    'Use the curated uploaded photos and video thumbnails as approved real-person likeness references for the group scene.',
+    'If the same visible guest appears across multiple references, draw that guest once rather than repeating them; use the clearest single appearance as the likeness anchor.',
     'Prioritize recognizable cartoon likeness over generic character design: preserve facial structure, hairstyle, age cues, skin tone, eyewear, expression, posture, and clothing color or style from each source image.',
     'Use family-friendly, age-appropriate, respectful caricature styling without exaggerating sensitive traits.',
     'Place the people together in one cohesive celebratory portrait with premium floral wall decor and warm event lighting.',
