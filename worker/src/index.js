@@ -433,6 +433,7 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
 
   await queueUploadNotification(env, ctx, {
     event,
+    submissionId: id,
     sourceLabel: 'Guest upload',
     mediaType,
     originalFilename,
@@ -636,6 +637,7 @@ async function createHostPost(request, env, url, corsHeaders, eventId, ctx) {
 
   await queueUploadNotification(env, ctx, {
     event,
+    submissionId,
     sourceLabel: 'Host post',
     mediaType,
     originalFilename,
@@ -2704,12 +2706,20 @@ async function sendUploadNotification(env, details) {
   const resendApiKey = env.resend || env.RESEND_API_KEY || env.RESEND;
   if (!resendApiKey || !env.FROM_EMAIL) return;
 
+  const notification = {
+    ...details,
+    reviewUrl: buildUploadReviewUrl(env, details)
+  };
+  const recipients = getUploadNotificationRecipients(notification);
+  if (recipients.length === 0) return;
+
   const subject = `Wallflower Moments ${getUploadNotificationSubjectSource(details.sourceLabel)} ${details.mediaType} upload`;
   const result = await sendEmail({
     env,
-    to: UPLOAD_NOTIFICATION_RECIPIENT,
+    to: recipients,
     subject,
-    text: buildUploadNotificationEmail(details)
+    text: buildUploadNotificationEmail(notification),
+    html: buildUploadNotificationHtml(notification)
   });
 
   if (!result.ok) {
@@ -2718,12 +2728,26 @@ async function sendUploadNotification(env, details) {
   }
 }
 
-function sendEmail({ env, to, subject, text }) {
+function sendEmail({ env, to, subject, text, html }) {
   const resendApiKey = env.resend || env.RESEND_API_KEY || env.RESEND;
 
   if (!resendApiKey || !env.FROM_EMAIL) {
     throw new Error('Missing resend, RESEND_API_KEY, RESEND, or FROM_EMAIL.');
   }
+
+  const recipients = normalizeEmailRecipients(to);
+  if (recipients.length === 0) {
+    throw new Error('Email requires at least one valid recipient.');
+  }
+
+  const body = {
+    from: env.FROM_EMAIL,
+    to: recipients,
+    subject,
+    text
+  };
+
+  if (html) body.html = html;
 
   return fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -2731,12 +2755,7 @@ function sendEmail({ env, to, subject, text }) {
       Authorization: `Bearer ${resendApiKey}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({
-      from: env.FROM_EMAIL,
-      to: [to],
-      subject,
-      text
-    })
+    body: JSON.stringify(body)
   });
 }
 
@@ -2748,6 +2767,36 @@ function getInternalRecipients(env) {
     .filter(Boolean);
 
   return [...new Set(recipients)];
+}
+
+function getUploadNotificationRecipients(details) {
+  const recipients = [UPLOAD_NOTIFICATION_RECIPIENT];
+
+  if (details.sourceLabel === 'Guest upload' && details.event?.hostEmail) {
+    recipients.push(details.event.hostEmail);
+  }
+
+  return normalizeEmailRecipients(recipients);
+}
+
+function normalizeEmailRecipients(value) {
+  const values = Array.isArray(value) ? value : [value];
+  const seen = new Set();
+  const recipients = [];
+
+  values
+    .filter(Boolean)
+    .flatMap((entry) => String(entry).split(','))
+    .map((email) => email.trim())
+    .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    .forEach((email) => {
+      const key = email.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      recipients.push(email);
+    });
+
+  return recipients;
 }
 
 function buildInternalEmail(submission) {
@@ -2798,12 +2847,123 @@ function buildUploadNotificationEmail(details) {
   if (details.guestName) lines.push(`Guest name: ${details.guestName}`);
   if (details.guestNote) lines.push(`Note: ${details.guestNote}`);
   if (details.event?.hostName) lines.push(`Event host: ${details.event.hostName}`);
+  if (details.reviewUrl) {
+    lines.push(
+      '',
+      'Review this submission:',
+      details.reviewUrl,
+      '',
+      'Open the host dashboard to approve it, add it to Party View, add it to the Time Capsule, or reject it.'
+    );
+  }
 
   return lines.join('\n');
 }
 
+function buildUploadNotificationHtml(details) {
+  const eventName = details.event?.name || 'Unknown event';
+  const isGuestUpload = details.sourceLabel === 'Guest upload';
+  const mediaLabel = getUploadMediaLabel(details.mediaType);
+  const headline = isGuestUpload
+    ? `A new ${mediaLabel} is waiting for review`
+    : `A new host ${mediaLabel} was posted`;
+  const intro = isGuestUpload
+    ? 'A guest just shared a moment. Open the host dashboard to review it and choose where it belongs.'
+    : 'A host post was added to this event.';
+  const detailRows = [
+    ['Event', eventName],
+    ['Event ID', details.event?.id || 'Unknown event ID'],
+    ['Source', details.sourceLabel || 'Unknown source'],
+    ['Media type', details.mediaType || 'Unknown media'],
+    ['Filename', details.originalFilename || 'Not provided'],
+    ['Size', `${details.size || 0} bytes`],
+    ['Status', details.status || 'pending'],
+    ['Uploaded at', details.createdAt || new Date().toISOString()]
+  ];
+
+  if (details.title) detailRows.push(['Title', details.title]);
+  if (details.caption) detailRows.push(['Caption', details.caption]);
+  if (details.guestName) detailRows.push(['Guest name', details.guestName]);
+  if (details.guestNote) detailRows.push(['Note', details.guestNote]);
+  if (details.event?.hostName) detailRows.push(['Event host', details.event.hostName]);
+
+  const rows = detailRows
+    .map(([label, value]) => `
+      <tr>
+        <td style="padding:8px 0;color:#7a6d66;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0;">${escapeEmailHtml(label)}</td>
+        <td style="padding:8px 0;color:#2f2b28;font-size:15px;font-weight:700;text-align:right;">${escapeEmailHtml(value)}</td>
+      </tr>`)
+    .join('');
+
+  const reviewButton = details.reviewUrl
+    ? `<a href="${escapeEmailAttribute(details.reviewUrl)}" style="display:inline-block;margin-top:20px;border-radius:8px;background:#2f6f5f;color:#fffaf5;font-size:16px;font-weight:800;line-height:1;text-decoration:none;padding:15px 20px;">Review submission</a>
+      <p style="margin:14px 0 0;color:#7a6d66;font-size:13px;line-height:1.5;">This opens the private host dashboard for approval, Party View, Time Capsule, or rejection.</p>`
+    : '';
+
+  return `<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f7f1eb;font-family:Arial,Helvetica,sans-serif;color:#2f2b28;">
+    <div style="display:none;max-height:0;overflow:hidden;">${escapeEmailHtml(headline)} for ${escapeEmailHtml(eventName)}.</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f7f1eb;padding:28px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#fffaf5;border:1px solid #eadfd6;border-radius:14px;overflow:hidden;">
+            <tr>
+              <td style="padding:24px 26px;background:#2f2b28;color:#fffaf5;">
+                <div style="font-size:12px;font-weight:800;letter-spacing:0;text-transform:uppercase;color:#f7d8c7;">Wallflower Moments</div>
+                <h1 style="margin:10px 0 0;font-size:26px;line-height:1.15;">${escapeEmailHtml(headline)}</h1>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px 26px;">
+                <p style="margin:0 0 18px;color:#4f4742;font-size:16px;line-height:1.6;">${escapeEmailHtml(intro)}</p>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-top:1px solid #eadfd6;border-bottom:1px solid #eadfd6;padding:8px 0;">
+                  ${rows}
+                </table>
+                ${reviewButton}
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
+function buildUploadReviewUrl(env, details) {
+  if (details.sourceLabel !== 'Guest upload') return '';
+  const eventId = details.event?.id;
+  const hostToken = details.event?.hostToken;
+  const submissionId = details.submissionId;
+
+  if (!eventId || !hostToken || !submissionId) return '';
+
+  return `${getSiteUrl(env)}/moments/host/?event=${encodeURIComponent(eventId)}&submission=${encodeURIComponent(submissionId)}#token=${encodeURIComponent(hostToken)}`;
+}
+
 function getUploadNotificationSubjectSource(sourceLabel) {
   return sourceLabel === 'Host post' ? 'Host' : 'Guest';
+}
+
+function getUploadMediaLabel(mediaType) {
+  if (mediaType === 'audio') return 'voice memo';
+  if (mediaType === 'video') return 'video';
+  return 'photo';
+}
+
+function escapeEmailHtml(value) {
+  return String(value || '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[char]);
+}
+
+function escapeEmailAttribute(value) {
+  return escapeEmailHtml(value).replace(/`/g, '&#96;');
 }
 
 function formatSubmissionField(key, value) {

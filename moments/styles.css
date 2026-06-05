@@ -1468,6 +1468,12 @@ textarea:focus-visible {
   border-color: rgba(63, 109, 88, 0.28);
 }
 
+.host-page .media-card.is-focused-submission {
+  scroll-margin: 2rem;
+  border-color: rgba(47, 111, 95, 0.62);
+  box-shadow: 0 0 0 4px rgba(47, 111, 95, 0.16), var(--shadow-card);
+}
+
 .host-page .media-thumb {
   height: clamp(190px, 22vw, 260px);
   aspect-ratio: auto;

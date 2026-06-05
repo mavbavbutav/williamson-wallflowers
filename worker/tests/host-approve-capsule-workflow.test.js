@@ -28,6 +28,11 @@ test('host can choose approval destinations in one step from a guest submission 
   assert.match(hostJs, /Submission approved and added to the Time Capsule/);
   assert.match(hostJs, /Add to Time Capsule/);
   assert.match(hostJs, /Already in Time Capsule/);
+  assert.match(hostJs, /const focusSubmissionId = getParam\("submission"\)/);
+  assert.match(hostJs, /function applySubmissionDeepLink/);
+  assert.match(hostJs, /currentStatus = target\.status \|\| "pending"/);
+  assert.match(hostJs, /data-submission-id/);
+  assert.match(hostJs, /scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/);
   assert.doesNotMatch(hostJs, /data-approve-capsule/);
   assert.doesNotMatch(hostJs, /shouldAddToCapsuleOnApprove/);
   assert.doesNotMatch(hostJs, /Approved tab/);
@@ -35,6 +40,7 @@ test('host can choose approval destinations in one step from a guest submission 
   assert.match(styles, /\.approval-options/);
   assert.match(styles, /\.host-review-filter/);
   assert.match(styles, /\.decision-status/);
+  assert.match(styles, /\.host-page \.media-card\.is-focused-submission/);
   assert.match(hostHtml, /<script type="module" src="host\.js\?v=[^"]+"><\/script>/);
   assert.match(hostHtml, /<link rel="stylesheet" href="\.\.\/styles\.css\?v=[^"]+" \/>/);
 });

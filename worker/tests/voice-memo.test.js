@@ -65,37 +65,53 @@ test('guest media upload sends an internal Resend notification email', async () 
       FROM_EMAIL: 'Williamson Wallflowers <noreply@example.com>'
     });
 
-    const tokenResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/tags/voice-tag', {
-      headers: { Origin: 'https://williamsonwallflowers.com' }
-    }), env);
-    const { uploadToken } = await tokenResponse.json();
-
-    const formData = new FormData();
-    formData.set('media', new File(['photo-bytes'], 'flower-wall.jpg', { type: 'image/jpeg' }));
-    formData.set('mediaType', 'photo');
-    formData.set('durationSeconds', '0');
-    formData.set('guestName', 'Jordan');
-    formData.set('guestNote', 'Loved this wall');
-    formData.set('consent', 'true');
-    formData.set('uploadToken', uploadToken);
-
-    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/events/event-voice/submissions', {
-      method: 'POST',
-      headers: { Origin: 'https://williamsonwallflowers.com' },
-      body: formData
-    }), env);
+    const response = await submitGuestPhoto(env);
 
     assert.equal(response.status, 201);
     assert.equal(sentEmails.length, 1);
+    const submissionId = db.submissions[0].id;
     assert.equal(sentEmails[0].url, 'https://api.resend.com/emails');
     assert.equal(sentEmails[0].headers.Authorization, 'Bearer resend-test-key');
-    assert.deepEqual(sentEmails[0].body.to, ['contact@jjentertainmentsolutions.com']);
+    assert.deepEqual(sentEmails[0].body.to, ['contact@jjentertainmentsolutions.com', 'taylor@example.com']);
     assert.match(sentEmails[0].body.subject, /Guest photo upload/i);
     assert.match(sentEmails[0].body.text, /Event: Voice Memo Test/);
     assert.match(sentEmails[0].body.text, /Source: Guest upload/);
     assert.match(sentEmails[0].body.text, /Media type: photo/);
     assert.match(sentEmails[0].body.text, /Guest name: Jordan/);
     assert.match(sentEmails[0].body.text, /Note: Loved this wall/);
+    assert.match(sentEmails[0].body.text, /Review this submission:/);
+    assert.match(sentEmails[0].body.text, new RegExp(`submission=${submissionId}`));
+    assert.match(sentEmails[0].body.text, /#token=host-token/);
+    assert.match(sentEmails[0].body.html, /A new photo is waiting for review/);
+    assert.match(sentEmails[0].body.html, /Review submission/);
+    assert.match(sentEmails[0].body.html, new RegExp(`submission=${submissionId}`));
+    assert.match(sentEmails[0].body.html, /#token=host-token/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('guest media upload dedupes support and host notification recipients', async () => {
+  const db = new UploadFakeDb({ hostEmail: 'contact@jjentertainmentsolutions.com' });
+  const bucket = new FakeBucket();
+  const sentEmails = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    sentEmails.push({ url, body: JSON.parse(init.body), headers: init.headers });
+    return new Response('', { status: 202 });
+  };
+
+  try {
+    const env = envWithDb(db, bucket, {
+      resend: 'resend-test-key',
+      FROM_EMAIL: 'Williamson Wallflowers <noreply@example.com>'
+    });
+
+    const response = await submitGuestPhoto(env);
+
+    assert.equal(response.status, 201);
+    assert.equal(sentEmails.length, 1);
+    assert.deepEqual(sentEmails[0].body.to, ['contact@jjentertainmentsolutions.com']);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -386,6 +402,28 @@ function envWithDb(db, bucket, overrides = {}) {
     MOMENTS_BUCKET: bucket,
     ...overrides
   };
+}
+
+async function submitGuestPhoto(env, overrides = {}) {
+  const tokenResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/tags/voice-tag', {
+    headers: { Origin: 'https://williamsonwallflowers.com' }
+  }), env);
+  const { uploadToken } = await tokenResponse.json();
+
+  const formData = new FormData();
+  formData.set('media', overrides.media || new File(['photo-bytes'], 'flower-wall.jpg', { type: 'image/jpeg' }));
+  formData.set('mediaType', overrides.mediaType || 'photo');
+  formData.set('durationSeconds', String(overrides.durationSeconds || 0));
+  formData.set('guestName', overrides.guestName || 'Jordan');
+  formData.set('guestNote', overrides.guestNote || 'Loved this wall');
+  formData.set('consent', 'true');
+  formData.set('uploadToken', uploadToken);
+
+  return worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/events/event-voice/submissions', {
+    method: 'POST',
+    headers: { Origin: 'https://williamsonwallflowers.com' },
+    body: formData
+  }), env);
 }
 
 class FakeBucket {

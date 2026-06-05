@@ -7,6 +7,7 @@ const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "webm", "3gp", "3gpp", "3g2"];
 const AUDIO_EXTENSIONS = ["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav", "weba", "webm"];
 
 const eventId = getParam("event");
+const focusSubmissionId = getParam("submission");
 const token = getHostToken(eventId);
 let currentStatus = "pending";
 let currentView = "submissions";
@@ -16,6 +17,8 @@ let timeCapsule = null;
 let capsuleItems = [];
 let lastFocusedElement = null;
 let localDemoHostState = null;
+let pendingFocusSubmissionId = focusSubmissionId;
+let focusedSubmissionId = focusSubmissionId;
 const hostPostState = {
   mediaFile: null,
   thumbnailFile: null,
@@ -111,6 +114,7 @@ async function loadGallery() {
       capsuleItems = [];
     }
 
+    applySubmissionDeepLink();
     render();
   } catch (error) {
     setNotice(qs("#hostNotice"), error.message || "Could not load this host gallery.", "error");
@@ -138,6 +142,7 @@ function render() {
   renderHostPosts();
   renderCapsule();
   renderShare();
+  focusLinkedSubmission();
 }
 
 function renderHostPulse() {
@@ -255,6 +260,37 @@ function renderSubmissions() {
   });
 }
 
+function applySubmissionDeepLink() {
+  if (!pendingFocusSubmissionId) return;
+
+  currentView = "submissions";
+  const target = submissions.find((submission) => submission.id === pendingFocusSubmissionId);
+
+  if (!target) {
+    focusedSubmissionId = "";
+    pendingFocusSubmissionId = "";
+    setNotice(qs("#hostNotice"), "That submission is no longer available in this host gallery.", "error");
+    return;
+  }
+
+  currentStatus = target.status || "pending";
+  focusedSubmissionId = target.id;
+}
+
+function focusLinkedSubmission() {
+  if (!pendingFocusSubmissionId || currentView !== "submissions") return;
+
+  const submissionId = pendingFocusSubmissionId;
+  const card = qs(`[data-submission-id="${cssEscape(submissionId)}"]`);
+  if (!card) return;
+
+  pendingFocusSubmissionId = "";
+  window.requestAnimationFrame(() => {
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    card.focus({ preventScroll: true });
+  });
+}
+
 function applyCountdownDefaults() {
   if (!eventRecord) return;
   qs("#eventStartAt").value = toDatetimeLocal(eventRecord.eventStartAt || "");
@@ -367,6 +403,11 @@ function formatCountdownParts(totalMs) {
 function renderSubmissionCard(submission) {
   const card = document.createElement("article");
   card.className = `media-card is-status-${submission.status} is-media-${submission.mediaType}`;
+  card.dataset.submissionId = submission.id;
+  card.tabIndex = -1;
+  if (submission.id === focusedSubmissionId) {
+    card.classList.add("is-focused-submission");
+  }
 
   const mediaUrl = `${submission.mediaUrl}&disposition=inline`;
   const downloadUrl = `${submission.downloadUrl}&disposition=attachment`;
