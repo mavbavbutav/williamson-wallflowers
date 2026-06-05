@@ -794,7 +794,9 @@ async function createHostPost(request, env, url, corsHeaders, eventId, ctx) {
     now
   ).run();
 
-  await queueStreamOptimization(env, request, await getSubmissionWithEvent(env, submissionId), ctx);
+  const hostSubmission = await getSubmissionWithEvent(env, submissionId);
+  await queueStreamOptimization(env, request, hostSubmission, ctx);
+  await queueEventGroupHeroGenerationForSubmission(env, request, hostSubmission, ctx);
 
   const itemId = crypto.randomUUID();
   await env.MOMENTS_DB.prepare(`
@@ -1924,10 +1926,13 @@ async function getGroupHeroSourceSubmissions(env, eventId) {
       created_at AS createdAt
     FROM submissions
     WHERE event_id = ?
-      AND source = 'guest'
+      AND source IN ('guest', 'host')
       AND status = 'approved'
       AND deleted_at IS NULL
-      AND ai_artwork_consent_at IS NOT NULL
+      AND (
+        source = 'host'
+        OR (source = 'guest' AND ai_artwork_consent_at IS NOT NULL)
+      )
       AND (
         (
           media_type = 'photo'
@@ -2109,7 +2114,8 @@ function isGroupHeroEligibleSubmission(submission) {
   const thumbnailObjectKey = submission.thumbnailObjectKey || submission.thumbnail_object_key || '';
   const thumbnailMimeType = submission.thumbnailMimeType || submission.thumbnail_mime_type || '';
   const consentAt = submission.aiArtworkConsentAt || submission.ai_artwork_consent_at || '';
-  if (source !== 'guest' || !consentAt) return false;
+  if (source !== 'guest' && source !== 'host') return false;
+  if (source === 'guest' && !consentAt) return false;
   if (mediaType === 'photo') {
     return isGroupHeroPhotoCandidate(mimeType, submission.originalFilename || submission.original_filename || submission.objectKey || submission.object_key || '');
   }

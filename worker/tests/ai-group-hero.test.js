@@ -34,6 +34,85 @@ test('guest upload stores AI artwork consent only when provided', async () => {
   assert.equal(aiReferencePut.metadata.customMetadata.mediaType, 'ai-reference');
 });
 
+test('scheduled task includes approved host posts and AI-consented guest posts in the group hero', async () => {
+  const hostPhoto = guestSubmission({
+    id: 'host-photo',
+    source: 'host',
+    object_key: 'moments/event-hero/host-photo.jpg',
+    objectKey: 'moments/event-hero/host-photo.jpg',
+    guest_name: 'Host',
+    guestName: 'Host',
+    status: 'approved',
+    ai_artwork_consent_at: null,
+    aiArtworkConsentAt: null,
+    created_at: '2026-09-19T20:03:00.000Z',
+    createdAt: '2026-09-19T20:03:00.000Z'
+  });
+  const guestPhoto = guestSubmission({
+    id: 'guest-photo',
+    object_key: 'moments/event-hero/guest-photo.jpg',
+    objectKey: 'moments/event-hero/guest-photo.jpg',
+    guest_name: 'Guest',
+    guestName: 'Guest',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:02:00.000Z',
+    createdAt: '2026-09-19T20:02:00.000Z'
+  });
+  const privateGuest = guestSubmission({
+    id: 'guest-private',
+    object_key: 'moments/event-hero/guest-private.jpg',
+    objectKey: 'moments/event-hero/guest-private.jpg',
+    guest_name: 'Private Guest',
+    guestName: 'Private Guest',
+    status: 'approved',
+    ai_artwork_consent_at: null,
+    aiArtworkConsentAt: null,
+    created_at: '2026-09-19T20:01:00.000Z',
+    createdAt: '2026-09-19T20:01:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [hostPhoto, guestPhoto, privateGuest],
+    groupHeroes: [readyHero({
+      status: 'queued',
+      source_submission_ids: JSON.stringify(['host-photo', 'guest-photo']),
+      sourceSubmissionIds: JSON.stringify(['host-photo', 'guest-photo'])
+    })]
+  });
+  const bucket = new FakeBucket([
+    [hostPhoto.object_key, 'host-photo-bytes'],
+    [guestPhoto.object_key, 'guest-photo-bytes'],
+    [privateGuest.object_key, 'private-guest-bytes']
+  ]);
+  const env = envWithDb(db, bucket);
+  const calls = mockOpenAi();
+
+  try {
+    await runScheduled(env);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].imageCount, 2);
+    assert.match(calls[0].imageNames[0], /host-photo/);
+    assert.match(calls[0].imageNames[1], /guest-photo/);
+    assert.equal(db.groupHeroes[0].participant_count, 2);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['host-photo', 'guest-photo']);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('host post creation queues group hero generation for eligible host media', async () => {
+  const source = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('async function createHostPost');
+  const end = source.indexOf('async function', start + 1);
+  const createHostPost = source.slice(start, end);
+
+  assert.match(createHostPost, /const hostSubmission = await getSubmissionWithEvent\(env, submissionId\);/);
+  assert.match(createHostPost, /queueStreamOptimization\(env, request, hostSubmission, ctx\);/);
+  assert.match(createHostPost, /queueEventGroupHeroGenerationForSubmission\(env, request, hostSubmission, ctx\);/);
+});
+
 test('scheduled task generates a ready group hero from a queued approval using the latest 16 sources', async () => {
   const submissions = Array.from({ length: 18 }, (_, index) => guestSubmission({
     id: `guest-${String(index + 1).padStart(2, '0')}`,
@@ -1663,13 +1742,23 @@ class GroupHeroFakeStatement {
 
     if (this.sql.includes('FROM submissions') && this.sql.includes('ai_artwork_consent_at IS NOT NULL')) {
       const [eventId, limit] = this.params;
+      const includesHostSources = this.sql.includes("source IN ('guest', 'host')");
       return {
         results: this.db.submissions
           .filter((item) => (item.event_id || item.eventId) === eventId)
-          .filter((item) => item.source === 'guest')
+          .filter((item) => {
+            const source = item.source || 'guest';
+            return includesHostSources
+              ? source === 'guest' || source === 'host'
+              : source === 'guest';
+          })
           .filter((item) => item.status === 'approved')
           .filter((item) => !(item.deleted_at || item.deletedAt))
-          .filter((item) => item.ai_artwork_consent_at || item.aiArtworkConsentAt)
+          .filter((item) => {
+            const source = item.source || 'guest';
+            if (includesHostSources && source === 'host') return true;
+            return Boolean(item.ai_artwork_consent_at || item.aiArtworkConsentAt);
+          })
           .filter((item) => {
             const mediaType = item.media_type || item.mediaType;
             if (mediaType === 'photo') {
@@ -1692,6 +1781,7 @@ class GroupHeroFakeStatement {
           .map((item) => ({
             id: item.id,
             eventId: item.event_id || item.eventId,
+            source: item.source || 'guest',
             mediaType: item.media_type || item.mediaType,
             guestName: item.guest_name || item.guestName,
             objectKey: (item.media_type || item.mediaType) === 'video'
