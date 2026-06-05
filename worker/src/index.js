@@ -1501,10 +1501,42 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
       imageBytes = await requestOpenAiGroupHeroImage(env, apiKey, activeSources, prompt);
       break;
     } catch (error) {
-      const invalidImageIndex = getOpenAiInvalidImageIndex(error.message || '');
+      const errorMessage = error.message || '';
+      const invalidImageIndex = getOpenAiInvalidImageIndex(errorMessage, activeSources.length);
       const rejectedSource = invalidImageIndex === null ? null : activeSources[invalidImageIndex];
 
       if (!rejectedSource) {
+        const isolatedResult = await tryOpenAiGroupHeroWithoutRejectedSource(env, apiKey, activeSources, prompt, errorMessage);
+        if (isolatedResult) {
+          console.warn('AI group hero source isolated after unindexed OpenAI rejection', eventId, isolatedResult.rejectedSource.id);
+          activeSources = isolatedResult.sources;
+          activeSourceIds = activeSources.map((source) => source.id);
+
+          const nextUpdatedAt = await updateEventGroupHeroStateIfCurrent(env, {
+            eventId,
+            status: 'generating',
+            objectKey: previousObjectKey || null,
+            mimeType: previousMimeType || 'image/png',
+            size: previousSize,
+            participantCount: activeSources.length,
+            sourceIds: activeSourceIds,
+            model: getOpenAiImageModel(env),
+            prompt,
+            errorMessage: '',
+            generatedAt: previousGeneratedAt
+          }, generationUpdatedAt, currentSourceIds);
+          if (!nextUpdatedAt) {
+            console.warn('Skipped superseded AI group hero generation after source isolation', eventId);
+            return;
+          }
+          currentSourceIds = activeSourceIds;
+          generationUpdatedAt = nextUpdatedAt;
+          generationContext.updatedAt = generationUpdatedAt;
+          generationContext.sourceIds = currentSourceIds;
+          imageBytes = isolatedResult.imageBytes;
+          break;
+        }
+
         throw error;
       }
 
@@ -1678,6 +1710,32 @@ async function requestOpenAiGroupHeroImage(env, apiKey, sources, prompt) {
   }
 
   return getOpenAiImageBytes(payload);
+}
+
+async function tryOpenAiGroupHeroWithoutRejectedSource(env, apiKey, sources, prompt, errorMessage) {
+  if (sources.length <= 1 || !isOpenAiSourceImageError(errorMessage)) return null;
+
+  for (let index = 0; index < sources.length; index += 1) {
+    const candidateSources = sources.filter((_, sourceIndex) => sourceIndex !== index);
+    if (candidateSources.length === 0) continue;
+
+    try {
+      const imageBytes = await requestOpenAiGroupHeroImage(env, apiKey, candidateSources, prompt);
+      return {
+        imageBytes,
+        sources: candidateSources,
+        rejectedSource: sources[index]
+      };
+    } catch (candidateError) {
+      const candidateMessage = candidateError.message || '';
+      if (getOpenAiInvalidImageIndex(candidateMessage, candidateSources.length) !== null || isOpenAiSourceImageError(candidateMessage)) {
+        continue;
+      }
+      throw candidateError;
+    }
+  }
+
+  return null;
 }
 
 async function getGroupHeroSourceObject(env, source) {
@@ -2070,12 +2128,35 @@ function getOpenAiErrorMessage(payload, status) {
   return cleanText(message, 500);
 }
 
-function getOpenAiInvalidImageIndex(message) {
-  const match = String(message || '').match(/\binvalid image file or mode for image\s+(\d+)/i);
-  if (!match) return null;
+function getOpenAiInvalidImageIndex(message, imageCount = Number.POSITIVE_INFINITY) {
+  const text = String(message || '');
+  const patterns = [
+    { regex: /\binvalid image file or mode for image\s+(\d+)/i, base: 1 },
+    { regex: /\binput[_\s-]*image\s*\[(\d+)\]/i, base: 0 },
+    { regex: /\bimage\s*\[(\d+)\]/i, base: 0 },
+    { regex: /\bimage\s+at\s+index\s+(\d+)/i, base: 0 },
+    { regex: /\bimage\s+index\s+(\d+)/i, base: 0 },
+    { regex: /\binput[_\s-]*image\s+(\d+)/i, base: 1 },
+    { regex: /\bimage\s+#(\d+)/i, base: 1 }
+  ];
 
-  const index = Number(match[1]) - 1;
-  return Number.isInteger(index) && index >= 0 ? index : null;
+  for (const pattern of patterns) {
+    const match = text.match(pattern.regex);
+    if (!match) continue;
+
+    const rawIndex = Number(match[1]);
+    const index = rawIndex - pattern.base;
+    if (Number.isInteger(index) && index >= 0 && index < imageCount) return index;
+  }
+
+  return null;
+}
+
+function isOpenAiSourceImageError(message) {
+  const text = String(message || '').toLowerCase();
+  if (!text.includes('image') && !text.includes('file')) return false;
+  if (/\b(rate limit|quota|billing|server|internal|unavailable|timeout|timed out|policy|safety)\b/.test(text)) return false;
+  return /\b(invalid|unsupported|corrupt|corrupted|decode|decoded|format|mode|file|too large|exceeds|process|processed)\b/.test(text);
 }
 
 async function deleteHostSubmission(request, env, url, corsHeaders, submissionId, ctx) {

@@ -474,6 +474,117 @@ test('group hero retries without an OpenAI-rejected input image', async () => {
   }
 });
 
+test('group hero handles alternate OpenAI rejected-image index wording', async () => {
+  const invalid = guestSubmission({
+    id: 'guest-alt-invalid',
+    object_key: 'moments/event-hero/guest-alt-invalid.jpg',
+    objectKey: 'moments/event-hero/guest-alt-invalid.jpg',
+    guest_name: 'Alternate Invalid Source',
+    guestName: 'Alternate Invalid Source',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:02:00.000Z',
+    createdAt: '2026-09-19T20:02:00.000Z'
+  });
+  const valid = guestSubmission({
+    id: 'guest-alt-valid',
+    object_key: 'moments/event-hero/guest-alt-valid.jpg',
+    objectKey: 'moments/event-hero/guest-alt-valid.jpg',
+    guest_name: 'Alternate Valid Source',
+    guestName: 'Alternate Valid Source',
+    status: 'pending',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:01:00.000Z',
+    createdAt: '2026-09-19T20:01:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({ submissions: [valid, invalid] });
+  const bucket = new FakeBucket([
+    [invalid.object_key, 'bad-image-bytes'],
+    [valid.object_key, 'good-image-bytes']
+  ]);
+  const calls = mockOpenAi({
+    responses: [
+      {
+        status: 400,
+        body: { error: { message: 'Invalid input_image[0]: unsupported image format.' } }
+      },
+      { status: 200, body: { data: [{ b64_json: btoa('generated-png') }] } }
+    ]
+  });
+
+  try {
+    const response = await approveSubmission(envWithDb(db, bucket), valid.id);
+
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].imageCount, 2);
+    assert.equal(calls[1].imageCount, 1);
+    assert.match(calls[1].imageNames[0], /guest-alt-valid/);
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-alt-valid']);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('group hero isolates an unindexed OpenAI source-image rejection', async () => {
+  const invalid = guestSubmission({
+    id: 'guest-unindexed-invalid',
+    object_key: 'moments/event-hero/guest-unindexed-invalid.jpg',
+    objectKey: 'moments/event-hero/guest-unindexed-invalid.jpg',
+    guest_name: 'Unindexed Invalid Source',
+    guestName: 'Unindexed Invalid Source',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:02:00.000Z',
+    createdAt: '2026-09-19T20:02:00.000Z'
+  });
+  const valid = guestSubmission({
+    id: 'guest-unindexed-valid',
+    object_key: 'moments/event-hero/guest-unindexed-valid.jpg',
+    objectKey: 'moments/event-hero/guest-unindexed-valid.jpg',
+    guest_name: 'Unindexed Valid Source',
+    guestName: 'Unindexed Valid Source',
+    status: 'pending',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:01:00.000Z',
+    createdAt: '2026-09-19T20:01:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({ submissions: [valid, invalid] });
+  const bucket = new FakeBucket([
+    [invalid.object_key, 'bad-image-bytes'],
+    [valid.object_key, 'good-image-bytes']
+  ]);
+  const calls = mockOpenAi({
+    responses: [
+      {
+        status: 400,
+        body: { error: { message: 'One of the uploaded input images could not be decoded. Use a supported image file.' } }
+      },
+      { status: 200, body: { data: [{ b64_json: btoa('generated-png') }] } }
+    ]
+  });
+
+  try {
+    const response = await approveSubmission(envWithDb(db, bucket), valid.id);
+
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].imageCount, 2);
+    assert.equal(calls[1].imageCount, 1);
+    assert.match(calls[1].imageNames[0], /guest-unindexed-valid/);
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.equal(db.groupHeroes[0].participant_count, 1);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-unindexed-valid']);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('group hero tries to normalize an OpenAI-rejected photo before excluding it', async () => {
   const invalid = guestSubmission({
     id: 'guest-invalid',
