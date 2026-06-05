@@ -10,6 +10,11 @@ test('admin page prioritizes event operations and setup workflow', async () => {
   ]);
 
   assert.match(adminHtml, /id="attentionPanel"/);
+  assert.match(adminHtml, /id="eventEditPanel"/);
+  assert.match(adminHtml, /id="eventEditForm"/);
+  assert.match(adminHtml, /id="editHostName"/);
+  assert.match(adminHtml, /id="editHostEmail"/);
+  assert.match(adminHtml, /id="editTimeCapsuleEnabled"/);
   assert.match(adminHtml, /id="assignTagForm"/);
   assert.match(adminHtml, /id="lightingPanel"/);
   assert.match(adminHtml, /id="wallDeviceForm"/);
@@ -21,6 +26,10 @@ test('admin page prioritizes event operations and setup workflow', async () => {
 
   assert.match(adminJs, /function renderAttention/);
   assert.match(adminJs, /function renderAssignTagForm/);
+  assert.match(adminJs, /function renderEventEditForm/);
+  assert.match(adminJs, /function updateSelectedEventDetails/);
+  assert.match(adminJs, /data-edit-event/);
+  assert.match(adminJs, /timeCapsuleEnabled: qs\("#editTimeCapsuleEnabled"\)\.checked/);
   assert.match(adminJs, /data-open/);
   assert.match(adminJs, /Copy guest link/);
   assert.match(adminJs, /Open host/);

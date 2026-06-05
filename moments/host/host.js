@@ -38,6 +38,7 @@ function init() {
     render();
   });
   qs("#countdownForm").addEventListener("submit", saveCountdownSettings);
+  qs("#countdownEnabled").addEventListener("change", applyCountdownStartDefault);
   bindDirtySaveButton(qs("#countdownForm"), "input, select, textarea", "button[type='submit']");
   qs("#partyViewSettingsForm").addEventListener("submit", savePartyViewSettings);
   bindDirtySaveButton(qs("#partyViewSettingsForm"), "input, select, textarea", "button[type='submit']");
@@ -293,7 +294,9 @@ function focusLinkedSubmission() {
 
 function applyCountdownDefaults() {
   if (!eventRecord) return;
-  qs("#eventStartAt").value = toDatetimeLocal(eventRecord.eventStartAt || "");
+  qs("#eventStartAt").value = eventRecord.eventStartAt
+    ? toDatetimeLocal(eventRecord.eventStartAt)
+    : (eventRecord.countdownEnabled ? getEventDateMidnightLocalValue() : "");
   qs("#countdownMessage").value = eventRecord.countdownMessage || "";
   qs("#countdownEnabled").checked = !!eventRecord.countdownEnabled;
   qs("#guestUploadsBeforeCountdownEnabled").checked = !!eventRecord.guestUploadsBeforeCountdownEnabled;
@@ -369,6 +372,22 @@ function datetimeLocalToIso(value) {
   );
 
   return Number.isNaN(localDate.getTime()) ? raw : localDate.toISOString();
+}
+
+function getEventDateMidnightLocalValue() {
+  const eventDate = String(eventRecord?.eventDate || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(eventDate) ? `${eventDate}T00:00` : "";
+}
+
+function applyCountdownStartDefault() {
+  const startInput = qs("#eventStartAt");
+  if (!qs("#countdownEnabled").checked || startInput.value) return;
+
+  const defaultStart = getEventDateMidnightLocalValue();
+  if (!defaultStart) return;
+
+  startInput.value = defaultStart;
+  updateDirtySaveButton(qs("#countdownForm"));
 }
 
 function parseCountdownStart(value) {
@@ -1211,6 +1230,8 @@ async function saveCountdownSettings(event) {
   event.preventDefault();
   const formElement = qs("#countdownForm");
   const submitButton = qs("#countdownForm").querySelector("button[type='submit']");
+
+  applyCountdownStartDefault();
 
   if (submitButton?.dataset.hasUnsavedChanges !== "true") return;
 

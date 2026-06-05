@@ -32,6 +32,8 @@ function init() {
   qs("#cleanupButton").addEventListener("click", runCleanup);
   qs("#signOutButton").addEventListener("click", signOut);
   qs("#eventForm").addEventListener("submit", createEvent);
+  qs("#eventEditForm").addEventListener("submit", updateSelectedEventDetails);
+  qs("#editEventSelect").addEventListener("change", () => populateEventEditForm(qs("#editEventSelect").value));
   qs("#tagForm").addEventListener("submit", createTag);
   qs("#assignTagForm").addEventListener("submit", assignTag);
   qs("#wallDeviceForm").addEventListener("submit", createWallDevice);
@@ -61,6 +63,7 @@ async function loadAdmin() {
     renderGuide();
     renderAssignTagForm();
     renderEvents();
+    renderEventEditForm();
     renderTags();
     renderWallDeviceForm();
     renderWallDevices();
@@ -447,6 +450,7 @@ function renderEvents() {
         <td><span class="status-pill">${event.status}</span></td>
         <td>
           <div class="row-actions">
+            <button class="small-button" type="button" data-edit-event>Edit details</button>
             <button class="small-button" type="button" data-event-status="${nextStatus}">${statusButton}</button>
             ${renderMoreActions(event)}
           </div>
@@ -460,6 +464,54 @@ function renderEvents() {
   qs("#eventsTable").innerHTML = rows || `<tr><td colspan="5">No events created yet.</td></tr>`;
   qs("#eventsCards").innerHTML = cards || `<div class="empty-state">No events created yet.</div>`;
   bindEventActions();
+}
+
+function renderEventEditForm(selectedEventId = qs("#editEventSelect")?.value || "") {
+  const form = qs("#eventEditForm");
+  const select = qs("#editEventSelect");
+
+  if (!form || !select) return;
+
+  const submitButton = form.querySelector("button[type='submit']");
+  if (!submitButton) return;
+
+  select.innerHTML = events.length
+    ? events.map((event) => `<option value="${escapeAttribute(event.id)}">${escapeHtml(event.name)}</option>`).join("")
+    : `<option value="">No events created</option>`;
+
+  const nextEventId = events.some((event) => event.id === selectedEventId)
+    ? selectedEventId
+    : events[0]?.id || "";
+  select.value = nextEventId;
+  populateEventEditForm(nextEventId, { resetDirty: false });
+
+  const hasEvents = events.length > 0;
+  Array.from(form.elements).forEach((field) => {
+    field.disabled = !hasEvents;
+  });
+  submitButton.disabled = !hasEvents;
+  bindDirtySaveButton(form, "input, select", "button[type='submit']");
+  resetDirtySaveButton(form);
+}
+
+function populateEventEditForm(eventId, { resetDirty = true } = {}) {
+  const form = qs("#eventEditForm");
+  if (!form) return;
+
+  const event = events.find((item) => item.id === eventId);
+  qs("#editEventName").value = event?.name || "";
+  qs("#editEventDate").value = event?.eventDate || "";
+  qs("#editHostName").value = event?.hostName || "";
+  qs("#editHostEmail").value = event?.hostEmail || "";
+  qs("#editTimeCapsuleEnabled").checked = Boolean(event?.timeCapsuleEnabled);
+
+  if (resetDirty) resetDirtySaveButton(form);
+}
+
+function selectEventForEdit(eventId) {
+  if (!eventId) return;
+  renderEventEditForm(eventId);
+  scrollToTarget("#eventEditPanel");
 }
 
 function getOperationalEvents() {
@@ -571,6 +623,13 @@ function bindTagActions() {
 }
 
 function bindEventActions() {
+  qsaWithin("#eventsTable, #eventsCards", "[data-edit-event]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const row = button.closest("[data-event-id]");
+      selectEventForEdit(row?.dataset.eventId || "");
+    });
+  });
+
   qsaWithin("#eventsTable, #eventsCards", "[data-event-status]").forEach((button) => {
     button.addEventListener("click", async () => {
       const row = button.closest("[data-event-id]");
@@ -701,6 +760,44 @@ async function updateEvent(eventId, body) {
     showAdminNotice("Event updated.", "success");
   } catch (error) {
     showAdminNotice(error.message || "Could not update event.", "error");
+  }
+}
+
+async function updateSelectedEventDetails(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submitButton = form.querySelector("button[type='submit']");
+
+  if (submitButton?.dataset.hasUnsavedChanges !== "true") return;
+
+  const eventId = qs("#editEventSelect").value;
+  if (!eventId) {
+    showAdminNotice("Choose an event before saving details.", "error");
+    return;
+  }
+
+  const body = {
+    name: qs("#editEventName").value.trim(),
+    eventDate: qs("#editEventDate").value,
+    hostName: qs("#editHostName").value.trim(),
+    hostEmail: qs("#editHostEmail").value.trim(),
+    timeCapsuleEnabled: qs("#editTimeCapsuleEnabled").checked
+  };
+
+  try {
+    setButtonBusy(submitButton, true, "Saving details...");
+    await adminRequest(`/admin/events/${encodeURIComponent(eventId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body)
+    });
+    await loadAdmin();
+    renderEventEditForm(eventId);
+    showAdminNotice("Event details updated.", "success");
+  } catch (error) {
+    showAdminNotice(error.message || "Could not update event details.", "error");
+  } finally {
+    setButtonBusy(submitButton, false);
+    updateDirtySaveButton(form);
   }
 }
 
@@ -863,6 +960,7 @@ function renderEventCard(event) {
       </div>
       ${renderLinkActions(buildEventLinkActions(event, hostUrl, capsuleUrl))}
       <div class="row-actions">
+        <button class="small-button" type="button" data-edit-event>Edit details</button>
         <button class="small-button" type="button" data-event-status="${nextStatus}">${statusButton}</button>
         ${renderMoreActions(event)}
       </div>
@@ -952,6 +1050,8 @@ function bindDirtySaveButton(root, fieldSelector, buttonSelector) {
   if (!button || fields.length === 0) return;
 
   root.dataset.dirtyTrackerBound = "true";
+  root.dataset.dirtyFieldSelector = fieldSelector;
+  root.dataset.dirtyButtonSelector = buttonSelector;
   button.dataset.cleanLabel = button.dataset.cleanLabel || button.textContent.trim();
   button.dataset.dirtyLabel = button.dataset.dirtyLabel || "Save changes";
   root.dataset.cleanSnapshot = getDirtySnapshot(fields);
@@ -964,6 +1064,14 @@ function bindDirtySaveButton(root, fieldSelector, buttonSelector) {
 }
 
 function updateDirtySaveButton(root, fields, button) {
+  if (!root) return;
+
+  const fieldSelector = root.dataset.dirtyFieldSelector;
+  const buttonSelector = root.dataset.dirtyButtonSelector;
+  fields = fields || (fieldSelector ? Array.from(root.querySelectorAll(fieldSelector)) : []);
+  button = button || (buttonSelector ? root.querySelector(buttonSelector) : null);
+  if (!button) return;
+
   const isDirty = getDirtySnapshot(fields) !== root.dataset.cleanSnapshot;
   button.classList.toggle("is-dirty", isDirty);
   button.hidden = !isDirty;
@@ -976,6 +1084,15 @@ function getDirtySnapshot(fields) {
     if (field.type === "checkbox") return field.checked;
     return field.value;
   }));
+}
+
+function resetDirtySaveButton(root) {
+  if (!root?.dataset.dirtyTrackerBound) return;
+  const fields = Array.from(root.querySelectorAll(root.dataset.dirtyFieldSelector));
+  const button = root.querySelector(root.dataset.dirtyButtonSelector);
+  if (!button) return;
+  root.dataset.cleanSnapshot = getDirtySnapshot(fields);
+  updateDirtySaveButton(root, fields, button);
 }
 
 function buildEventOptions(activeEventId) {

@@ -31,7 +31,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260604-media-aspect-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260605-admin-event-edit-1" />
 </head>
 <body class="admin-page">
   <main class="app-shell">
@@ -106,6 +106,47 @@
           </table>
         </div>
         <div class="mobile-card-list event-card-list" id="eventsCards"></div>
+      </section>
+
+      <section class="panel setup-panel" id="eventEditPanel">
+        <div class="panel-heading">
+          <div>
+            <h2>Edit event details</h2>
+            <p class="muted">Update host contact details, event date, and Time Capsule access after setup.</p>
+          </div>
+          <span class="status-pill">Admin edit</span>
+        </div>
+        <form id="eventEditForm">
+          <div class="field">
+            <label for="editEventSelect">Event</label>
+            <select id="editEventSelect" name="eventId"></select>
+          </div>
+          <div class="field">
+            <label for="editEventName">Event name</label>
+            <input id="editEventName" name="name" required />
+          </div>
+          <div class="form-grid">
+            <div class="field">
+              <label for="editEventDate">Event date</label>
+              <input id="editEventDate" name="eventDate" type="date" />
+            </div>
+            <div class="field">
+              <label for="editHostName">Host name</label>
+              <input id="editHostName" name="hostName" placeholder="Host name" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="editHostEmail">Host email</label>
+            <input id="editHostEmail" name="hostEmail" type="email" placeholder="host@example.com" />
+          </div>
+          <label class="checkbox-row">
+            <input id="editTimeCapsuleEnabled" name="timeCapsuleEnabled" type="checkbox" value="true" />
+            <span>Wallflower Time Capsule is included for this host.</span>
+          </label>
+          <div class="button-row">
+            <button class="button button-primary" type="submit">Save event details</button>
+          </div>
+        </form>
       </section>
 
       <section class="setup-workflow" id="setupPanel" aria-label="Setup workflow">
@@ -318,6 +359,6 @@
     </section>
   </main>
 
-  <script type="module" src="admin.js?v=20260603-unsaved-2"></script>
+  <script type="module" src="admin.js?v=20260605-admin-event-edit-1"></script>
 </body>
 </html>

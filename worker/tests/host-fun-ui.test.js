@@ -22,6 +22,10 @@ test('host page has the fun pass dashboard, cleaner actions, and share card', as
   assert.match(hostJs, /const workspaceCounts/);
   assert.match(hostJs, /guestUploadsBeforeCountdownEnabled: qs\("#guestUploadsBeforeCountdownEnabled"\)\.checked/);
   assert.match(hostJs, /qs\("#guestUploadsBeforeCountdownEnabled"\)\.checked = !!eventRecord\.guestUploadsBeforeCountdownEnabled/);
+  assert.match(hostJs, /qs\("#countdownEnabled"\)\.addEventListener\("change", applyCountdownStartDefault\)/);
+  assert.match(hostJs, /function getEventDateMidnightLocalValue/);
+  assert.match(hostJs, /\$\{eventDate\}T00:00/);
+  assert.match(hostJs, /applyCountdownStartDefault\(\);[\s\S]*?dataset\.hasUnsavedChanges/);
   assert.match(hostJs, /function showHostCelebration/);
   assert.match(hostJs, /function renderCardMoreActions/);
   assert.match(hostJs, /function copyCapsuleLink/);

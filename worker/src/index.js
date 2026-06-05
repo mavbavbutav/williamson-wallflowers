@@ -1908,6 +1908,10 @@ async function updateAdminEvent(request, env, corsHeaders, eventId) {
     return json({ ok: false, message: 'Event name is required.' }, 400, corsHeaders);
   }
 
+  next.timeCapsuleTitle = next.timeCapsuleEnabled
+    ? (next.timeCapsuleTitle || `${next.name} Time Capsule`)
+    : null;
+
   await env.MOMENTS_DB.prepare(`
     UPDATE events
     SET name = ?, event_date = ?, host_name = ?, host_email = ?, status = ?, host_token = ?,
@@ -1924,7 +1928,7 @@ async function updateAdminEvent(request, env, corsHeaders, eventId) {
     next.retentionExpiresAt,
     next.timeCapsuleEnabled ? 1 : 0,
     next.timeCapsuleStatus,
-    next.timeCapsuleTitle || (next.timeCapsuleEnabled ? `${next.name} Time Capsule` : null),
+    next.timeCapsuleTitle,
     next.timeCapsuleShareToken,
     next.timeCapsulePublishedAt,
     new Date().toISOString(),
