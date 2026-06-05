@@ -646,6 +646,46 @@ test('group hero tries to normalize an OpenAI-rejected photo before excluding it
   }
 });
 
+test('group hero includes legacy photo MIME variants when an AI reference is available', async () => {
+  const heic = guestSubmission({
+    id: 'guest-heic',
+    object_key: 'moments/event-hero/guest-heic.heic',
+    objectKey: 'moments/event-hero/guest-heic.heic',
+    original_filename: 'guest-heic.heic',
+    originalFilename: 'guest-heic.heic',
+    mime_type: 'image/heic',
+    mimeType: 'image/heic',
+    guest_name: 'Legacy Heic Source',
+    guestName: 'Legacy Heic Source',
+    status: 'pending',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:04:00.000Z',
+    createdAt: '2026-09-19T20:04:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({ submissions: [heic] });
+  const normalizedBytes = 'normalized-heic-reference';
+  const bucket = new FakeBucket([
+    [heic.object_key, 'original-heic-bytes'],
+    ['moments/event-hero/ai-references/guest-heic.jpg', normalizedBytes]
+  ]);
+  const calls = mockOpenAi();
+
+  try {
+    const response = await approveSubmission(envWithDb(db, bucket), heic.id);
+
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].imageCount, 1);
+    assert.match(calls[0].imageNames[0], /guest-heic-ai-reference\.jpg$/);
+    assert.equal(calls[0].imageSizes[0], new TextEncoder().encode(normalizedBytes).byteLength);
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-heic']);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('host can backfill a normalized AI reference for an approved legacy photo and refresh the group hero', async () => {
   const legacy = guestSubmission({
     id: 'guest-legacy-invalid',
@@ -865,6 +905,8 @@ test('Worker source query supports video thumbnail inputs for group heroes', asy
   assert.match(source, /thumbnail_object_key AS objectKey/);
   assert.match(source, /thumbnail_mime_type AS mimeType/);
   assert.match(source, /media_type = 'video'/);
+  assert.doesNotMatch(source, /media_type = 'photo' AND mime_type IN \('image\/jpeg', 'image\/png', 'image\/webp'\)/);
+  assert.doesNotMatch(source, /thumbnail_mime_type IN \('image\/jpeg', 'image\/png', 'image\/webp'\)/);
 });
 
 async function readText(path) {
@@ -1156,6 +1198,36 @@ function toBytes(value) {
   return new TextEncoder().encode(String(value || ''));
 }
 
+function isFakeGroupHeroPhotoCandidate(mimeType, filename = '') {
+  const baseMimeType = String(mimeType || '').split(';')[0].trim().toLowerCase();
+  if (['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'].includes(baseMimeType)) return true;
+  if (baseMimeType.startsWith('image/')) return true;
+  if (!baseMimeType || ['application/octet-stream', 'binary/octet-stream'].includes(baseMimeType)) {
+    return Boolean(fakeImageMimeTypeForExtension(filename));
+  }
+  return false;
+}
+
+function isFakeGroupHeroThumbnailCandidate(mimeType, filename = '') {
+  const baseMimeType = String(mimeType || '').split(';')[0].trim().toLowerCase();
+  if (['image/jpeg', 'image/png', 'image/webp'].includes(baseMimeType)) return true;
+  if (baseMimeType.startsWith('image/')) return true;
+  if (!baseMimeType || ['application/octet-stream', 'binary/octet-stream'].includes(baseMimeType)) {
+    return ['image/jpeg', 'image/png', 'image/webp'].includes(fakeImageMimeTypeForExtension(filename));
+  }
+  return false;
+}
+
+function fakeImageMimeTypeForExtension(filename = '') {
+  const extension = String(filename || '').split('?')[0].split('#')[0].split('.').pop().toLowerCase();
+  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
+  if (extension === 'png') return 'image/png';
+  if (extension === 'webp') return 'image/webp';
+  if (extension === 'heic') return 'image/heic';
+  if (extension === 'heif') return 'image/heif';
+  return '';
+}
+
 class GroupHeroFakeDb {
   constructor(seed = {}) {
     this.rateLimits = new Map();
@@ -1267,10 +1339,18 @@ class GroupHeroFakeStatement {
           .filter((item) => item.ai_artwork_consent_at || item.aiArtworkConsentAt)
           .filter((item) => {
             const mediaType = item.media_type || item.mediaType;
-            if (mediaType === 'photo') return ['image/jpeg', 'image/png', 'image/webp'].includes(item.mime_type || item.mimeType);
+            if (mediaType === 'photo') {
+              return isFakeGroupHeroPhotoCandidate(
+                item.mime_type || item.mimeType,
+                item.original_filename || item.originalFilename || item.object_key || item.objectKey
+              );
+            }
             if (mediaType === 'video') {
               return Boolean(item.thumbnail_object_key || item.thumbnailObjectKey)
-                && ['image/jpeg', 'image/png', 'image/webp'].includes(item.thumbnail_mime_type || item.thumbnailMimeType);
+                && isFakeGroupHeroThumbnailCandidate(
+                  item.thumbnail_mime_type || item.thumbnailMimeType,
+                  item.thumbnail_object_key || item.thumbnailObjectKey
+                );
             }
             return false;
           })

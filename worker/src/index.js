@@ -61,6 +61,8 @@ const LIKE_INTERACTION_RATE_WINDOW_SECONDS = 60 * 60 * 24 * 365;
 const MAX_COMMENT_LENGTH = 320;
 const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 const GROUP_HERO_INPUT_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const GROUP_HERO_PHOTO_TYPES = new Set([...GROUP_HERO_INPUT_TYPES, 'image/heic', 'image/heif']);
+const GROUP_HERO_GENERIC_IMAGE_TYPES = new Set(['application/octet-stream', 'binary/octet-stream']);
 const THUMBNAIL_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const VIDEO_TYPES = new Set([
   'video/mp4',
@@ -1876,8 +1878,36 @@ async function getGroupHeroSourceSubmissions(env, eventId) {
       AND deleted_at IS NULL
       AND ai_artwork_consent_at IS NOT NULL
       AND (
-        (media_type = 'photo' AND mime_type IN ('image/jpeg', 'image/png', 'image/webp'))
-        OR (media_type = 'video' AND thumbnail_object_key IS NOT NULL AND thumbnail_mime_type IN ('image/jpeg', 'image/png', 'image/webp'))
+        (
+          media_type = 'photo'
+          AND object_key IS NOT NULL
+          AND (
+            mime_type IS NULL
+            OR TRIM(mime_type) = ''
+            OR LOWER(mime_type) LIKE 'image/%'
+            OR LOWER(mime_type) IN ('application/octet-stream', 'binary/octet-stream')
+            OR LOWER(original_filename) LIKE '%.jpg'
+            OR LOWER(original_filename) LIKE '%.jpeg'
+            OR LOWER(original_filename) LIKE '%.png'
+            OR LOWER(original_filename) LIKE '%.webp'
+            OR LOWER(original_filename) LIKE '%.heic'
+            OR LOWER(original_filename) LIKE '%.heif'
+          )
+        )
+        OR (
+          media_type = 'video'
+          AND thumbnail_object_key IS NOT NULL
+          AND (
+            thumbnail_mime_type IS NULL
+            OR TRIM(thumbnail_mime_type) = ''
+            OR LOWER(thumbnail_mime_type) LIKE 'image/%'
+            OR LOWER(thumbnail_mime_type) IN ('application/octet-stream', 'binary/octet-stream')
+            OR LOWER(thumbnail_object_key) LIKE '%.jpg'
+            OR LOWER(thumbnail_object_key) LIKE '%.jpeg'
+            OR LOWER(thumbnail_object_key) LIKE '%.png'
+            OR LOWER(thumbnail_object_key) LIKE '%.webp'
+          )
+        )
       )
     ORDER BY created_at DESC
     LIMIT ?
@@ -1885,7 +1915,7 @@ async function getGroupHeroSourceSubmissions(env, eventId) {
 
   const compatibleSources = (result.results || []).map((row) => {
     if ((row.mediaType || row.media_type) === 'video') {
-      const mimeType = row.mimeType || row.mime_type || 'image/jpeg';
+      const mimeType = getGroupHeroInputMimeType(row.mimeType || row.mime_type, row.objectKey || row.object_key || '');
       return {
         ...row,
         objectKey: row.objectKey || row.object_key,
@@ -1896,7 +1926,10 @@ async function getGroupHeroSourceSubmissions(env, eventId) {
     return {
       ...row,
       objectKey: row.photoObjectKey || row.objectKey || row.object_key,
-      mimeType: row.photoMimeType || row.mimeType || row.mime_type,
+      mimeType: getGroupHeroInputMimeType(
+        row.photoMimeType || row.mimeType || row.mime_type,
+        row.originalFilename || row.original_filename || row.photoObjectKey || row.objectKey || row.object_key || ''
+      ),
       aiReferenceObjectKey: getAiReferenceObjectKey(row.eventId || row.event_id || eventId, row.id),
       aiReferenceMimeType: AI_REFERENCE_MIME_TYPE
     };
@@ -2026,9 +2059,51 @@ function isGroupHeroEligibleSubmission(submission) {
   const thumbnailMimeType = submission.thumbnailMimeType || submission.thumbnail_mime_type || '';
   const consentAt = submission.aiArtworkConsentAt || submission.ai_artwork_consent_at || '';
   if (source !== 'guest' || !consentAt) return false;
-  if (mediaType === 'photo') return GROUP_HERO_INPUT_TYPES.has(getBaseMimeType(mimeType));
-  if (mediaType === 'video') return Boolean(thumbnailObjectKey) && GROUP_HERO_INPUT_TYPES.has(getBaseMimeType(thumbnailMimeType));
+  if (mediaType === 'photo') {
+    return isGroupHeroPhotoCandidate(mimeType, submission.originalFilename || submission.original_filename || submission.objectKey || submission.object_key || '');
+  }
+  if (mediaType === 'video') {
+    return Boolean(thumbnailObjectKey) && isGroupHeroThumbnailCandidate(thumbnailMimeType, thumbnailObjectKey);
+  }
   return false;
+}
+
+function isGroupHeroPhotoCandidate(mimeType, filename = '') {
+  const baseMimeType = getBaseMimeType(mimeType);
+  if (GROUP_HERO_PHOTO_TYPES.has(baseMimeType)) return true;
+  if (baseMimeType?.startsWith('image/')) return true;
+  if (!baseMimeType || GROUP_HERO_GENERIC_IMAGE_TYPES.has(baseMimeType)) {
+    return Boolean(imageMimeTypeForExtension(filename));
+  }
+  return false;
+}
+
+function isGroupHeroThumbnailCandidate(mimeType, filename = '') {
+  const baseMimeType = getBaseMimeType(mimeType);
+  if (GROUP_HERO_INPUT_TYPES.has(baseMimeType)) return true;
+  if (baseMimeType?.startsWith('image/')) return true;
+  if (!baseMimeType || GROUP_HERO_GENERIC_IMAGE_TYPES.has(baseMimeType)) {
+    return GROUP_HERO_INPUT_TYPES.has(imageMimeTypeForExtension(filename));
+  }
+  return false;
+}
+
+function getGroupHeroInputMimeType(mimeType, filename = '', fallback = 'image/jpeg') {
+  const baseMimeType = getBaseMimeType(mimeType);
+  if (baseMimeType?.startsWith('image/') && !GROUP_HERO_GENERIC_IMAGE_TYPES.has(baseMimeType)) {
+    return baseMimeType;
+  }
+  return imageMimeTypeForExtension(filename) || fallback;
+}
+
+function imageMimeTypeForExtension(filename = '') {
+  const extension = getFileExtension(filename);
+  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
+  if (extension === 'png') return 'image/png';
+  if (extension === 'webp') return 'image/webp';
+  if (extension === 'heic') return 'image/heic';
+  if (extension === 'heif') return 'image/heif';
+  return '';
 }
 
 function buildGroupHeroPrompt(eventName) {
