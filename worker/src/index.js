@@ -1285,7 +1285,7 @@ async function regenerateHostGroupHero(request, env, url, corsHeaders, eventId, 
     return json({ ok: false, message: 'Too many AI group artwork refreshes. Please wait before trying again.' }, 429, corsHeaders);
   }
 
-  await queueEventGroupHeroGeneration(env, request, eventId, { force: true }, ctx);
+  await queueEventGroupHeroGeneration(env, request, eventId, { force: true });
 
   return json({
     ok: true,

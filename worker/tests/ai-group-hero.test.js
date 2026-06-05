@@ -174,10 +174,22 @@ test('OpenAI failure stores failed group hero state without breaking approval', 
 });
 
 test('guest and host group hero endpoints enforce access tokens', async () => {
+  const source = guestSubmission({
+    id: 'guest-source',
+    object_key: 'moments/event-hero/guest-source.jpg',
+    objectKey: 'moments/event-hero/guest-source.jpg',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z'
+  });
   const db = new GroupHeroFakeDb({
+    submissions: [source],
     groupHeroes: [readyHero()]
   });
-  const env = envWithDb(db, new FakeBucket([['moments/event-hero/generated/group-hero.png', 'generated']]));
+  const env = envWithDb(db, new FakeBucket([
+    ['moments/event-hero/generated/group-hero.png', 'generated'],
+    [source.object_key, 'source-photo']
+  ]));
   const token = await getUploadToken(env);
 
   const badGuest = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/events/event-hero/group-hero', {
@@ -210,14 +222,22 @@ test('guest and host group hero endpoints enforce access tokens', async () => {
 
   mockOpenAi();
   try {
+    let waitUntilCalled = false;
+    const ctx = {
+      waitUntil() {
+        waitUntilCalled = true;
+      }
+    };
     const goodHost = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
       method: 'POST',
       headers: {
         Origin: 'https://williamsonwallflowers.com',
         Authorization: 'Bearer host-token'
       }
-    }), env);
+    }), env, ctx);
     assert.equal(goodHost.status, 202);
+    assert.equal(waitUntilCalled, false);
+    assert.equal(db.groupHeroes[0].status, 'ready');
   } finally {
     restoreFetch();
   }
