@@ -41,13 +41,7 @@ const GROUP_HERO_TOKEN_TTL_SECONDS = 6 * 60 * 60;
 const GROUP_HERO_FORCE_RATE_LIMIT = 6;
 const GROUP_HERO_FORCE_RATE_WINDOW_SECONDS = 60 * 60;
 const GROUP_HERO_DEFAULT_MODEL = 'gpt-image-1.5';
-const GROUP_HERO_PROMPT = [
-  'Create a warm editorial cartoon group scene for a Williamson Wallflowers event.',
-  'Use the uploaded guest photos as respectful likeness references, with age-appropriate, friendly cartoon styling.',
-  'Place the people together in one cohesive group portrait in front of romantic floral wall decor.',
-  'No names, captions, logos, text overlays, watermarks, or realistic fake photography.',
-  'The final image should feel polished, celebratory, premium, and suitable as a guest-facing event hero.'
-].join(' ');
+const GROUP_HERO_PROMPT = buildGroupHeroPrompt('the event');
 const STANDARD_RETENTION_DAYS = 90;
 const TIME_CAPSULE_RETENTION_DAYS = 365;
 const UPLOAD_NOTIFICATION_RECIPIENT = 'contact@jjentertainmentsolutions.com';
@@ -262,7 +256,7 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
 
     if (parts[0] === 'media' && parts[1] && parts[2] === 'thumbnail') {
       if (request.method === 'POST') {
-        return saveGeneratedThumbnail(request, env, url, corsHeaders, parts[1]);
+        return saveGeneratedThumbnail(request, env, url, corsHeaders, parts[1], ctx);
       }
 
       if (request.method === 'GET' || request.method === 'HEAD') {
@@ -1319,6 +1313,8 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
   if (!eventId) return;
 
   const force = Boolean(options.force);
+  const event = await getEventById(env, eventId);
+  const prompt = buildGroupHeroPrompt(event?.name || event?.eventName || 'the event');
   const sources = await getGroupHeroSourceSubmissions(env, eventId);
   const sourceIds = sources.map((source) => source.id);
   const existing = await getEventGroupHero(env, eventId);
@@ -1334,7 +1330,7 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
       participantCount: 0,
       sourceIds: [],
       model: getOpenAiImageModel(env),
-      prompt: GROUP_HERO_PROMPT,
+      prompt,
       errorMessage: '',
       generatedAt: null
     });
@@ -1361,12 +1357,12 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
     participantCount: sources.length,
     sourceIds,
     model: getOpenAiImageModel(env),
-    prompt: GROUP_HERO_PROMPT,
+    prompt,
     errorMessage: '',
     generatedAt: existing?.generated_at || existing?.generatedAt || null
   });
 
-  const work = generateEventGroupHero(env, request, eventId, sources, sourceIds, existingObjectKey).catch(async (error) => {
+  const work = generateEventGroupHero(env, request, eventId, sources, sourceIds, prompt, existingObjectKey).catch(async (error) => {
     console.error('AI group hero generation failed', eventId, String(error.message || error));
     await storeEventGroupHeroState(env, {
       eventId,
@@ -1377,7 +1373,7 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
       participantCount: sources.length,
       sourceIds,
       model: getOpenAiImageModel(env),
-      prompt: GROUP_HERO_PROMPT,
+      prompt,
       errorMessage: cleanText(error.message || 'AI group hero generation failed.', 500),
       generatedAt: existing?.generated_at || existing?.generatedAt || null
     });
@@ -1391,7 +1387,7 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
   await work;
 }
 
-async function generateEventGroupHero(env, request, eventId, sources, sourceIds, previousObjectKey = '') {
+async function generateEventGroupHero(env, request, eventId, sources, sourceIds, prompt = GROUP_HERO_PROMPT, previousObjectKey = '') {
   const now = new Date().toISOString();
   await storeEventGroupHeroState(env, {
     eventId,
@@ -1402,7 +1398,7 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
     participantCount: sources.length,
     sourceIds,
     model: getOpenAiImageModel(env),
-    prompt: GROUP_HERO_PROMPT,
+    prompt,
     errorMessage: '',
     generatedAt: null
   });
@@ -1414,7 +1410,7 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
 
   const formData = new FormData();
   formData.append('model', getOpenAiImageModel(env));
-  formData.append('prompt', GROUP_HERO_PROMPT);
+  formData.append('prompt', prompt);
   formData.append('size', '1536x1024');
   formData.append('quality', 'medium');
   formData.append('output_format', 'png');
@@ -1471,7 +1467,7 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
     participantCount: sources.length,
     sourceIds,
     model: getOpenAiImageModel(env),
-    prompt: GROUP_HERO_PROMPT,
+    prompt,
     errorMessage: '',
     generatedAt: now
   });
@@ -1533,23 +1529,43 @@ async function getGroupHeroSourceSubmissions(env, eventId) {
     SELECT
       id,
       event_id AS eventId,
-      object_key AS objectKey,
+      media_type AS mediaType,
+      object_key AS photoObjectKey,
+      thumbnail_object_key AS objectKey,
       original_filename AS originalFilename,
-      mime_type AS mimeType,
+      mime_type AS photoMimeType,
+      thumbnail_mime_type AS mimeType,
       created_at AS createdAt
     FROM submissions
     WHERE event_id = ?
       AND source = 'guest'
-      AND media_type = 'photo'
       AND status = 'approved'
       AND deleted_at IS NULL
       AND ai_artwork_consent_at IS NOT NULL
-      AND mime_type IN ('image/jpeg', 'image/png', 'image/webp')
+      AND (
+        (media_type = 'photo' AND mime_type IN ('image/jpeg', 'image/png', 'image/webp'))
+        OR (media_type = 'video' AND thumbnail_object_key IS NOT NULL AND thumbnail_mime_type IN ('image/jpeg', 'image/png', 'image/webp'))
+      )
     ORDER BY created_at DESC
     LIMIT ?
   `).bind(eventId, GROUP_HERO_MAX_INPUTS).all();
 
-  return result.results || [];
+  return (result.results || []).map((row) => {
+    if ((row.mediaType || row.media_type) === 'video') {
+      const mimeType = row.mimeType || row.mime_type || 'image/jpeg';
+      return {
+        ...row,
+        objectKey: row.objectKey || row.object_key,
+        originalFilename: `${row.id}-video-thumbnail.${extensionFor(mimeType, '')}`,
+        mimeType
+      };
+    }
+    return {
+      ...row,
+      objectKey: row.photoObjectKey || row.objectKey || row.object_key,
+      mimeType: row.photoMimeType || row.mimeType || row.mime_type
+    };
+  });
 }
 
 async function storeEventGroupHeroState(env, state) {
@@ -1595,11 +1611,27 @@ function isGroupHeroEligibleSubmission(submission) {
   const mediaType = submission.mediaType || submission.media_type;
   const source = submission.source || 'guest';
   const mimeType = submission.mimeType || submission.mime_type || '';
+  const thumbnailObjectKey = submission.thumbnailObjectKey || submission.thumbnail_object_key || '';
+  const thumbnailMimeType = submission.thumbnailMimeType || submission.thumbnail_mime_type || '';
   const consentAt = submission.aiArtworkConsentAt || submission.ai_artwork_consent_at || '';
-  return mediaType === 'photo'
-    && source === 'guest'
-    && Boolean(consentAt)
-    && GROUP_HERO_INPUT_TYPES.has(getBaseMimeType(mimeType));
+  if (source !== 'guest' || !consentAt) return false;
+  if (mediaType === 'photo') return GROUP_HERO_INPUT_TYPES.has(getBaseMimeType(mimeType));
+  if (mediaType === 'video') return Boolean(thumbnailObjectKey) && GROUP_HERO_INPUT_TYPES.has(getBaseMimeType(thumbnailMimeType));
+  return false;
+}
+
+function buildGroupHeroPrompt(eventName) {
+  const eventLabel = cleanText(eventName, 90).replace(/["<>]/g, '').trim() || 'the event';
+  return [
+    `Create a warm editorial cartoon group portrait for the event "${eventLabel}".`,
+    'Use every uploaded photo or video thumbnail as an approved real-person likeness reference for one participant in the group scene.',
+    'Prioritize recognizable cartoon likeness over generic character design: preserve facial structure, hairstyle, age cues, skin tone, eyewear, expression, posture, and clothing color or style from each source image.',
+    'Use family-friendly, age-appropriate, respectful caricature styling without exaggerating sensitive traits.',
+    'Place the people together in one cohesive celebratory portrait with premium floral wall decor and warm event lighting.',
+    `If any readable sign, backdrop lettering, or wall text appears, it must say "${eventLabel}" exactly; otherwise avoid readable text entirely.`,
+    'Do not include company branding, guest names, captions, logos, watermarks, UI elements, or realistic fake photography.',
+    'The final image should feel polished, celebratory, premium, and suitable as a guest-facing event hero.'
+  ].join(' ');
 }
 
 function getGroupHeroSourceIds(row) {
@@ -1790,7 +1822,7 @@ async function streamThumbnail(request, env, url, corsHeaders, submissionId) {
   return new Response(isHeadRequest ? null : object.body, { status: 200, headers });
 }
 
-async function saveGeneratedThumbnail(request, env, url, corsHeaders, submissionId) {
+async function saveGeneratedThumbnail(request, env, url, corsHeaders, submissionId, ctx) {
   const thumbnailToken = url.searchParams.get('thumbnailToken') || '';
   const submission = await getSubmissionWithEvent(env, submissionId);
 
@@ -1825,6 +1857,15 @@ async function saveGeneratedThumbnail(request, env, url, corsHeaders, submission
     SET thumbnail_object_key = ?, thumbnail_mime_type = ?, thumbnail_size = ?, thumbnail_created_at = ?, updated_at = ?
     WHERE id = ?
   `).bind(record.objectKey, record.mimeType, record.size, record.createdAt, now, submission.id).run();
+
+  await queueEventGroupHeroGenerationForSubmission(env, request, {
+    ...submission,
+    thumbnailObjectKey: record.objectKey,
+    thumbnailMimeType: record.mimeType,
+    thumbnailSize: record.size,
+    thumbnailCreatedAt: record.createdAt,
+    updatedAt: now
+  }, ctx);
 
   return json({
     ok: true,

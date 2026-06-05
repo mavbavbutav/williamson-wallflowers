@@ -77,6 +77,78 @@ test('approving an AI-consented photo generates a ready group hero from the late
   }
 });
 
+test('group hero uses approved video thumbnails and an event-specific likeness prompt', async () => {
+  const photo = guestSubmission({
+    id: 'guest-photo',
+    object_key: 'moments/event-hero/guest-photo.jpg',
+    objectKey: 'moments/event-hero/guest-photo.jpg',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:01:00.000Z',
+    createdAt: '2026-09-19T20:01:00.000Z'
+  });
+  const video = guestSubmission({
+    id: 'guest-video',
+    media_type: 'video',
+    mediaType: 'video',
+    object_key: 'moments/event-hero/guest-video.mp4',
+    objectKey: 'moments/event-hero/guest-video.mp4',
+    original_filename: 'guest-video.mp4',
+    originalFilename: 'guest-video.mp4',
+    mime_type: 'video/mp4',
+    mimeType: 'video/mp4',
+    thumbnail_object_key: 'moments/event-hero/thumbnails/guest-video.jpg',
+    thumbnailObjectKey: 'moments/event-hero/thumbnails/guest-video.jpg',
+    thumbnail_mime_type: 'image/jpeg',
+    thumbnailMimeType: 'image/jpeg',
+    thumbnail_size: 640,
+    thumbnailSize: 640,
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:02:00.000Z',
+    createdAt: '2026-09-19T20:02:00.000Z'
+  });
+  const videoWithoutThumbnail = guestSubmission({
+    id: 'guest-video-no-thumbnail',
+    media_type: 'video',
+    mediaType: 'video',
+    mime_type: 'video/mp4',
+    mimeType: 'video/mp4',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:03:00.000Z',
+    createdAt: '2026-09-19T20:03:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({ submissions: [photo, video, videoWithoutThumbnail] });
+  const bucket = new FakeBucket([
+    [photo.object_key, 'source-photo'],
+    [video.thumbnail_object_key, 'source-video-thumbnail']
+  ]);
+  const calls = mockOpenAi();
+
+  try {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://williamsonwallflowers.com',
+        Authorization: 'Bearer host-token'
+      }
+    }), envWithDb(db, bucket));
+
+    assert.equal(response.status, 202);
+    assert.equal(calls[0].imageCount, 2);
+    assert.match(calls[0].prompt, /AI Hero Test/);
+    assert.match(calls[0].prompt, /recognizable/i);
+    assert.doesNotMatch(calls[0].prompt, /Williamson Wallflowers/);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-video', 'guest-photo']);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('OpenAI failure stores failed group hero state without breaking approval', async () => {
   const submission = guestSubmission({
     id: 'guest-fail',
@@ -240,6 +312,13 @@ test('frontends expose AI group hero UI and cache-busted assets', async () => {
   assert.match(migration, /CREATE TABLE IF NOT EXISTS event_group_heroes/);
 });
 
+test('Worker source query supports video thumbnail inputs for group heroes', async () => {
+  const source = await readText('../src/index.js');
+  assert.match(source, /thumbnail_object_key AS objectKey/);
+  assert.match(source, /thumbnail_mime_type AS mimeType/);
+  assert.match(source, /media_type = 'video'/);
+});
+
 async function readText(path) {
   return readFile(new URL(path, import.meta.url), 'utf8');
 }
@@ -302,6 +381,7 @@ function mockOpenAi({ status = 200, body = { data: [{ b64_json: btoa('generated-
       calls.push({
         url,
         model: entries.find(([key]) => key === 'model')?.[1],
+        prompt: entries.find(([key]) => key === 'prompt')?.[1],
         imageCount: entries.filter(([key]) => key === 'image[]').length
       });
       return new Response(JSON.stringify(body), {
@@ -540,19 +620,30 @@ class GroupHeroFakeStatement {
         results: this.db.submissions
           .filter((item) => (item.event_id || item.eventId) === eventId)
           .filter((item) => item.source === 'guest')
-          .filter((item) => (item.media_type || item.mediaType) === 'photo')
           .filter((item) => item.status === 'approved')
           .filter((item) => !(item.deleted_at || item.deletedAt))
           .filter((item) => item.ai_artwork_consent_at || item.aiArtworkConsentAt)
-          .filter((item) => ['image/jpeg', 'image/png', 'image/webp'].includes(item.mime_type || item.mimeType))
+          .filter((item) => {
+            const mediaType = item.media_type || item.mediaType;
+            if (mediaType === 'photo') return ['image/jpeg', 'image/png', 'image/webp'].includes(item.mime_type || item.mimeType);
+            if (mediaType === 'video') {
+              return Boolean(item.thumbnail_object_key || item.thumbnailObjectKey)
+                && ['image/jpeg', 'image/png', 'image/webp'].includes(item.thumbnail_mime_type || item.thumbnailMimeType);
+            }
+            return false;
+          })
           .sort((a, b) => new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0))
           .slice(0, Number(limit || 16))
           .map((item) => ({
             id: item.id,
             eventId: item.event_id || item.eventId,
-            objectKey: item.object_key || item.objectKey,
+            objectKey: (item.media_type || item.mediaType) === 'video'
+              ? item.thumbnail_object_key || item.thumbnailObjectKey
+              : item.object_key || item.objectKey,
             originalFilename: item.original_filename || item.originalFilename,
-            mimeType: item.mime_type || item.mimeType,
+            mimeType: (item.media_type || item.mediaType) === 'video'
+              ? item.thumbnail_mime_type || item.thumbnailMimeType
+              : item.mime_type || item.mimeType,
             createdAt: item.created_at || item.createdAt
           }))
       };
