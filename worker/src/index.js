@@ -1412,7 +1412,7 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
     console.warn('Retrying stale AI group hero generation', eventId, existing?.status || 'unknown');
   }
 
-  await storeEventGroupHeroState(env, {
+  const queuedUpdatedAt = await storeEventGroupHeroState(env, {
     eventId,
     status: 'queued',
     objectKey: existingObjectKey || null,
@@ -1426,21 +1426,29 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
     generatedAt: existing?.generated_at || existing?.generatedAt || null
   });
 
-  const work = generateEventGroupHero(env, request, eventId, sources, sourceIds, prompt, existingObjectKey, existing).catch(async (error) => {
+  const generationContext = {
+    updatedAt: queuedUpdatedAt,
+    sourceIds
+  };
+  const work = generateEventGroupHero(env, request, eventId, sources, sourceIds, prompt, existingObjectKey, existing, generationContext).catch(async (error) => {
     console.error('AI group hero generation failed', eventId, String(error.message || error));
-    await storeEventGroupHeroState(env, {
+    const failureSourceIds = generationContext.sourceIds || sourceIds;
+    const failedUpdatedAt = await updateEventGroupHeroStateIfCurrent(env, {
       eventId,
       status: 'failed',
       objectKey: existingObjectKey || null,
       mimeType: existing?.mime_type || existing?.mimeType || null,
       size: existing?.size || 0,
-      participantCount: sources.length,
-      sourceIds,
+      participantCount: failureSourceIds.length,
+      sourceIds: failureSourceIds,
       model: getOpenAiImageModel(env),
       prompt,
       errorMessage: cleanText(error.message || 'AI group hero generation failed.', 500),
       generatedAt: existing?.generated_at || existing?.generatedAt || null
-    });
+    }, generationContext.updatedAt, failureSourceIds);
+    if (!failedUpdatedAt) {
+      console.warn('Skipped failed state for superseded AI group hero generation', eventId);
+    }
   });
 
   if (ctx && typeof ctx.waitUntil === 'function') {
@@ -1451,13 +1459,15 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
   await work;
 }
 
-async function generateEventGroupHero(env, request, eventId, sources, sourceIds, prompt = GROUP_HERO_PROMPT, previousObjectKey = '', previousHero = {}) {
+async function generateEventGroupHero(env, request, eventId, sources, sourceIds, prompt = GROUP_HERO_PROMPT, previousObjectKey = '', previousHero = {}, generationContext = {}) {
   const now = new Date().toISOString();
   const previousMimeType = previousHero?.mime_type || previousHero?.mimeType || (previousObjectKey ? 'image/png' : null);
   const previousSize = Number(previousHero?.size || 0);
   const previousGeneratedAt = previousHero?.generated_at || previousHero?.generatedAt || null;
 
-  await storeEventGroupHeroState(env, {
+  let currentSourceIds = sourceIds;
+  let generationUpdatedAt = generationContext.updatedAt || '';
+  generationUpdatedAt = await updateEventGroupHeroStateIfCurrent(env, {
     eventId,
     status: 'generating',
     objectKey: previousObjectKey || null,
@@ -1469,7 +1479,13 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
     prompt,
     errorMessage: '',
     generatedAt: previousGeneratedAt
-  });
+  }, generationUpdatedAt, currentSourceIds);
+  if (!generationUpdatedAt) {
+    console.warn('Skipped superseded AI group hero generation before OpenAI request', eventId);
+    return;
+  }
+  generationContext.updatedAt = generationUpdatedAt;
+  generationContext.sourceIds = currentSourceIds;
 
   const apiKey = getOpenAiApiKey(env);
   if (!apiKey) {
@@ -1510,7 +1526,7 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
         ));
         activeSourceIds = activeSources.map((source) => source.id);
 
-        await storeEventGroupHeroState(env, {
+        const nextUpdatedAt = await updateEventGroupHeroStateIfCurrent(env, {
           eventId,
           status: 'generating',
           objectKey: previousObjectKey || null,
@@ -1522,7 +1538,15 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
           prompt,
           errorMessage: '',
           generatedAt: previousGeneratedAt
-        });
+        }, generationUpdatedAt, currentSourceIds);
+        if (!nextUpdatedAt) {
+          console.warn('Skipped superseded AI group hero generation after source normalization', eventId);
+          return;
+        }
+        currentSourceIds = activeSourceIds;
+        generationUpdatedAt = nextUpdatedAt;
+        generationContext.updatedAt = generationUpdatedAt;
+        generationContext.sourceIds = currentSourceIds;
         continue;
       }
 
@@ -1534,7 +1558,7 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
       activeSources = activeSources.filter((_, index) => index !== invalidImageIndex);
       activeSourceIds = activeSources.map((source) => source.id);
 
-      await storeEventGroupHeroState(env, {
+      const nextUpdatedAt = await updateEventGroupHeroStateIfCurrent(env, {
         eventId,
         status: 'generating',
         objectKey: previousObjectKey || null,
@@ -1546,7 +1570,15 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
         prompt,
         errorMessage: '',
         generatedAt: previousGeneratedAt
-      });
+      }, generationUpdatedAt, currentSourceIds);
+      if (!nextUpdatedAt) {
+        console.warn('Skipped superseded AI group hero generation after source rejection', eventId);
+        return;
+      }
+      currentSourceIds = activeSourceIds;
+      generationUpdatedAt = nextUpdatedAt;
+      generationContext.updatedAt = generationUpdatedAt;
+      generationContext.sourceIds = currentSourceIds;
     }
   }
 
@@ -1567,7 +1599,7 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
     }
   });
 
-  await storeEventGroupHeroState(env, {
+  const readyUpdatedAt = await updateEventGroupHeroStateIfCurrent(env, {
     eventId,
     status: 'ready',
     objectKey,
@@ -1579,7 +1611,18 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
     prompt,
     errorMessage: '',
     generatedAt: now
-  });
+  }, generationUpdatedAt, currentSourceIds);
+  if (!readyUpdatedAt) {
+    console.warn('Discarding superseded AI group hero image', eventId, objectKey);
+    try {
+      await env.MOMENTS_BUCKET.delete(objectKey);
+    } catch (error) {
+      console.error('R2 delete failed for superseded group hero', eventId, error);
+    }
+    return;
+  }
+  generationContext.updatedAt = readyUpdatedAt;
+  generationContext.sourceIds = activeSourceIds;
 
   if (previousObjectKey && previousObjectKey !== objectKey) {
     try {
@@ -1869,6 +1912,51 @@ async function storeEventGroupHeroState(env, state) {
     now,
     now
   ).run();
+  return now;
+}
+
+async function updateEventGroupHeroStateIfCurrent(env, state, expectedUpdatedAt, expectedSourceIds = state.sourceIds || []) {
+  if (!expectedUpdatedAt) return '';
+  const now = new Date().toISOString();
+  const result = await env.MOMENTS_DB.prepare(`
+    UPDATE event_group_heroes
+    SET
+      status = ?,
+      object_key = ?,
+      mime_type = ?,
+      size = ?,
+      participant_count = ?,
+      source_submission_ids = ?,
+      model = ?,
+      prompt = ?,
+      error_message = ?,
+      generated_at = ?,
+      updated_at = ?
+    WHERE event_id = ?
+      AND updated_at = ?
+      AND source_submission_ids = ?
+  `).bind(
+    state.status,
+    state.objectKey || null,
+    state.mimeType || null,
+    Number(state.size || 0),
+    Number(state.participantCount || 0),
+    JSON.stringify(state.sourceIds || []),
+    state.model || getOpenAiImageModel(env),
+    state.prompt || GROUP_HERO_PROMPT,
+    state.errorMessage || '',
+    state.generatedAt || null,
+    now,
+    state.eventId,
+    expectedUpdatedAt,
+    JSON.stringify(expectedSourceIds || [])
+  ).run();
+
+  return getD1ChangedRows(result) > 0 ? now : '';
+}
+
+function getD1ChangedRows(result) {
+  return Number(result?.meta?.changes ?? result?.changes ?? 0);
 }
 
 function isGroupHeroEligibleSubmission(submission) {

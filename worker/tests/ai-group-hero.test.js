@@ -345,6 +345,77 @@ test('stale generating group hero state can be retried with the same source set'
   }
 });
 
+test('older overlapping group hero generation cannot overwrite a newer result', async () => {
+  const first = guestSubmission({
+    id: 'guest-first',
+    object_key: 'moments/event-hero/guest-first.jpg',
+    objectKey: 'moments/event-hero/guest-first.jpg',
+    guest_name: 'First Guest',
+    guestName: 'First Guest',
+    status: 'pending',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:01:00.000Z',
+    createdAt: '2026-09-19T20:01:00.000Z'
+  });
+  const second = guestSubmission({
+    id: 'guest-second',
+    object_key: 'moments/event-hero/guest-second.jpg',
+    objectKey: 'moments/event-hero/guest-second.jpg',
+    guest_name: 'Second Guest',
+    guestName: 'Second Guest',
+    status: 'pending',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:02:00.000Z',
+    createdAt: '2026-09-19T20:02:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({ submissions: [first, second] });
+  const bucket = new FakeBucket([
+    [first.object_key, 'source-first'],
+    [second.object_key, 'source-second']
+  ]);
+  const env = envWithDb(db, bucket);
+  const calls = mockOpenAiDeferred();
+  const waitUntil = [];
+  const ctx = { waitUntil: (work) => waitUntil.push(work) };
+
+  try {
+    const firstResponse = await approveSubmission(env, first.id, ctx);
+    await waitForOpenAiCalls(calls, 1);
+    const firstHeroWork = waitUntil.at(-1);
+
+    const secondResponse = await approveSubmission(env, second.id, ctx);
+
+    assert.equal(firstResponse.status, 200);
+    assert.equal(secondResponse.status, 200);
+    await waitForOpenAiCalls(calls, 2);
+    const secondHeroWork = waitUntil.at(-1);
+    assert.equal(calls.length, 2);
+    assert.ok(firstHeroWork);
+    assert.ok(secondHeroWork);
+    assert.notEqual(firstHeroWork, secondHeroWork);
+    assert.match(calls[0].imageNames[0], /guest-first/);
+    assert.equal(calls[1].imageCount, 2);
+
+    calls[1].resolveSuccess('newer-generated-png');
+    await secondHeroWork;
+
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-second', 'guest-first']);
+
+    calls[0].resolveSuccess('older-generated-png');
+    await firstHeroWork;
+
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-second', 'guest-first']);
+    assert.equal(bucket.puts.at(-1).body.byteLength, new TextEncoder().encode('newer-generated-png').byteLength);
+  } finally {
+    resolvePendingOpenAiCalls(calls);
+    restoreFetch();
+  }
+});
+
 test('group hero retries without an OpenAI-rejected input image', async () => {
   const invalid = guestSubmission({
     id: 'guest-invalid',
@@ -727,7 +798,7 @@ async function submitGuestPhoto(env, uploadToken, options = {}) {
   }), env);
 }
 
-function approveSubmission(env, submissionId) {
+function approveSubmission(env, submissionId, ctx) {
   return worker.fetch(new Request(`https://williamsonwallflowers.com/moments-api/host/submissions/${submissionId}`, {
     method: 'PATCH',
     headers: {
@@ -736,7 +807,7 @@ function approveSubmission(env, submissionId) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({ status: 'approved' })
-  }), env);
+  }), env, ctx);
 }
 
 let originalFetch = null;
@@ -802,6 +873,56 @@ function mockOpenAi({
     return originalFetch(url, init);
   };
   return calls;
+}
+
+function mockOpenAiDeferred() {
+  originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.includes('/v1/images/edits')) {
+      const entries = Array.from(init.body.entries());
+      const images = entries.filter(([key]) => key === 'image[]');
+      let resolveResponse;
+      const responsePromise = new Promise((resolve) => {
+        resolveResponse = resolve;
+      });
+      calls.push({
+        url,
+        model: entries.find(([key]) => key === 'model')?.[1],
+        prompt: entries.find(([key]) => key === 'prompt')?.[1],
+        imageCount: images.length,
+        imageNames: images.map(([, image]) => image?.name || ''),
+        imageSizes: images.map(([, image]) => image?.size || 0),
+        resolved: false,
+        resolveSuccess(value = 'generated-png') {
+          this.resolved = true;
+          resolveResponse(new Response(JSON.stringify({ data: [{ b64_json: btoa(value) }] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          }));
+        }
+      });
+      return responsePromise;
+    }
+    return originalFetch(url, init);
+  };
+  return calls;
+}
+
+async function waitForOpenAiCalls(calls, expectedCount) {
+  const startedAt = Date.now();
+  while (calls.length < expectedCount && Date.now() - startedAt < 1000) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+function resolvePendingOpenAiCalls(calls) {
+  for (const call of calls) {
+    if (!call.resolved && typeof call.resolveSuccess === 'function') {
+      call.resolveSuccess('cleanup-generated-png');
+    }
+  }
 }
 
 function restoreFetch() {
@@ -1184,6 +1305,54 @@ class GroupHeroFakeStatement {
 
     if (this.sql.includes('DELETE FROM time_capsule_items')) {
       return { success: true };
+    }
+
+    if (this.sql.includes('UPDATE event_group_heroes')) {
+      const [
+        status,
+        objectKey,
+        mimeType,
+        size,
+        participantCount,
+        sourceSubmissionIds,
+        model,
+        prompt,
+        errorMessage,
+        generatedAt,
+        updatedAt,
+        eventId,
+        expectedUpdatedAt,
+        expectedSourceSubmissionIds
+      ] = this.params;
+      const existing = this.db.groupHeroes.find((hero) => (hero.event_id || hero.eventId) === eventId);
+      if (
+        existing &&
+        (existing.updated_at || existing.updatedAt) === expectedUpdatedAt &&
+        (existing.source_submission_ids || existing.sourceSubmissionIds) === expectedSourceSubmissionIds
+      ) {
+        Object.assign(existing, {
+          status,
+          object_key: objectKey,
+          objectKey,
+          mime_type: mimeType,
+          mimeType,
+          size,
+          participant_count: participantCount,
+          participantCount,
+          source_submission_ids: sourceSubmissionIds,
+          sourceSubmissionIds,
+          model,
+          prompt,
+          error_message: errorMessage,
+          errorMessage,
+          generated_at: generatedAt,
+          generatedAt,
+          updated_at: updatedAt,
+          updatedAt
+        });
+        return { success: true, meta: { changes: 1 } };
+      }
+      return { success: true, meta: { changes: 0 } };
     }
 
     if (this.sql.includes('INSERT INTO event_group_heroes')) {
