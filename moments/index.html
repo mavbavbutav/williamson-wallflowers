@@ -31,7 +31,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20260604-countdown-fit-1" />
+  <link rel="stylesheet" href="styles.css?v=20260605-guest-mode-invite-1" />
 </head>
 <body class="guest-page">
   <main class="app-shell">
@@ -73,19 +73,25 @@
           <p class="countdown-unlock-hint" id="countdownUnlockHint" hidden>Photo, video, and voice uploads unlock when the party starts.</p>
         </div>
         <div class="memory-mode-grid" aria-label="Choose what to send">
-          <button class="memory-mode-card is-photo" type="button" data-mode="photo">
+          <button class="memory-mode-card is-photo" type="button" data-mode="photo" aria-label="Send a photo">
+            <span class="mode-glyph" aria-hidden="true"></span>
             <strong class="mode-title">Photo</strong>
-            <span class="mode-detail">Take or upload</span>
+            <span class="mode-detail">Capture the moment</span>
+            <span class="mode-nudge">Tap to add</span>
             <span class="mode-lock">Unlocks when the party starts</span>
           </button>
-          <button class="memory-mode-card is-video" type="button" data-mode="video">
+          <button class="memory-mode-card is-video" type="button" data-mode="video" aria-label="Send a 30 second video">
+            <span class="mode-glyph" aria-hidden="true"></span>
             <strong class="mode-title">Video</strong>
-            <span class="mode-detail">30 sec max</span>
+            <span class="mode-detail">30 sec of fun</span>
+            <span class="mode-nudge">Tap to film</span>
             <span class="mode-lock">Unlocks when the party starts</span>
           </button>
-          <button class="memory-mode-card is-audio" type="button" data-mode="audio">
+          <button class="memory-mode-card is-audio" type="button" data-mode="audio" aria-label="Send a 60 second voice memo">
+            <span class="mode-glyph" aria-hidden="true"></span>
             <strong class="mode-title">Voice Memo</strong>
-            <span class="mode-detail">60 sec max</span>
+            <span class="mode-detail">60 sec toast</span>
+            <span class="mode-nudge">Tap to record</span>
             <span class="mode-lock">Unlocks when the party starts</span>
           </button>
         </div>

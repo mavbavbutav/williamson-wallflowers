@@ -16,9 +16,14 @@ test('guest link keeps the memory booth flow minimal', async () => {
   assert.match(guestHtml, />Photo</);
   assert.match(guestHtml, />Video</);
   assert.match(guestHtml, />Voice Memo</);
-  assert.match(guestHtml, /Take or upload/);
-  assert.match(guestHtml, /30 sec max/);
-  assert.match(guestHtml, /60 sec max/);
+  assert.match(guestHtml, /class="mode-glyph"/);
+  assert.match(guestHtml, /class="mode-nudge"/);
+  assert.match(guestHtml, /Capture the moment/);
+  assert.match(guestHtml, /30 sec of fun/);
+  assert.match(guestHtml, /60 sec toast/);
+  assert.match(guestHtml, /Tap to add/);
+  assert.match(guestHtml, /Tap to film/);
+  assert.match(guestHtml, /Tap to record/);
   assert.match(guestHtml, /<h1 class="section-title" tabindex="-1">Send it\?<\/h1>/);
   assert.doesNotMatch(guestHtml, /class="mode-badge"/);
   assert.doesNotMatch(guestHtml, /class="mode-action"/);
@@ -44,6 +49,9 @@ test('guest link keeps the memory booth flow minimal', async () => {
   assert.match(styles, /\.memory-mode-card/);
   assert.match(styles, /\.send-summary/);
   assert.match(styles, /\.guest-page \.memory-mode-card/);
+  assert.match(styles, /\.mode-glyph/);
+  assert.match(styles, /\.mode-nudge/);
+  assert.match(styles, /\.guest-page:not\(\.is-countdown-locked\) \.memory-mode-card:hover/);
   assert.match(styles, /\.mode-detail/);
   assert.match(styles, /\.guest-celebration/);
   assert.match(styles, /\.countdown-unit\s*\{[\s\S]*?grid-template-rows: minmax\(3\.8rem, auto\) auto/);
