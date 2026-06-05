@@ -2012,11 +2012,6 @@ textarea:focus-visible {
   margin-top: 1rem;
 }
 
-.guest-party-view-tabs {
-  justify-content: flex-end;
-  margin: 0.75rem 0;
-}
-
 .guest-page .guest-party-swipe-feed {
   min-height: min(680px, calc(100dvh - 180px));
   max-height: min(680px, calc(100dvh - 180px));

@@ -8,6 +8,8 @@ const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "webm", "3gp", "3gpp", "3g2"];
 const AUDIO_EXTENSIONS = ["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav", "weba", "webm"];
+const GUEST_PARTY_SWIPE_QUERY = "(max-width: 767px)";
+const guestPartySwipeMedia = window.matchMedia(GUEST_PARTY_SWIPE_QUERY);
 
 const state = {
   tagCode: getParam("t"),
@@ -30,9 +32,7 @@ const state = {
   isLocalDemo: false,
   hostPostsTimerId: 0,
   countdownTimerId: 0,
-  isCountdownLocked: false,
-  guestPartyViewMode: "grid",
-  guestPartyViewModeSelected: false
+  isCountdownLocked: false
 };
 
 const views = {
@@ -107,9 +107,11 @@ function bindEvents() {
   qs("#addAnotherButton").addEventListener("click", resetFlow);
   qs("#submissionForm").addEventListener("submit", submitMoment);
   qs("#refreshHostPostsButton").addEventListener("click", () => loadHostPosts());
-  qsa("[data-guest-party-view]").forEach((button) => {
-    button.addEventListener("click", () => setGuestPartyViewMode(button.dataset.guestPartyView, { userInitiated: true }));
-  });
+  if (guestPartySwipeMedia.addEventListener) {
+    guestPartySwipeMedia.addEventListener("change", renderHostPosts);
+  } else {
+    guestPartySwipeMedia.addListener(renderHostPosts);
+  }
 
   fileInput.addEventListener("change", async () => {
     const file = fileInput.files && fileInput.files[0];
@@ -169,26 +171,17 @@ function startHostPostsPolling() {
 function renderHostPosts() {
   const view = qs("#hostPostsView");
   const grid = qs("#guestHostPostsGrid");
-  const tabs = qs("#guestPartyViewTabs");
   const swipeFeed = qs("#guestPartySwipeFeed");
   updateGuestPartyViewLanguage();
   const posts = state.hostPosts
     .slice()
     .sort((a, b) => new Date(b.capturedAt || b.createdAt || 0) - new Date(a.capturedAt || a.createdAt || 0));
   const swipeEnabled = isGuestPartySwipeEnabled() && posts.length > 0;
+  const showSwipe = swipeEnabled && isGuestPartySwipeViewport();
 
   view.hidden = posts.length === 0;
   grid.innerHTML = "";
   swipeFeed.innerHTML = "";
-  tabs.hidden = !swipeEnabled;
-
-  syncGuestPartyViewMode(swipeEnabled);
-
-  qsa("[data-guest-party-view]").forEach((button) => {
-    const isActive = button.dataset.guestPartyView === state.guestPartyViewMode;
-    button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-pressed", String(isActive));
-  });
 
   if (posts.length === 0) {
     grid.hidden = false;
@@ -196,7 +189,6 @@ function renderHostPosts() {
     return;
   }
 
-  const showSwipe = swipeEnabled && state.guestPartyViewMode === "swipe";
   grid.hidden = showSwipe;
   swipeFeed.hidden = !showSwipe;
 
@@ -209,26 +201,12 @@ function renderHostPosts() {
   }
 }
 
-function setGuestPartyViewMode(mode, options = {}) {
-  if (!["grid", "swipe"].includes(mode)) return;
-  state.guestPartyViewMode = mode;
-  state.guestPartyViewModeSelected = Boolean(options.userInitiated);
-  renderHostPosts();
-}
-
-function syncGuestPartyViewMode(swipeEnabled) {
-  if (!swipeEnabled) {
-    state.guestPartyViewMode = "grid";
-    return;
-  }
-
-  if (!state.guestPartyViewModeSelected) {
-    state.guestPartyViewMode = "swipe";
-  }
-}
-
 function isGuestPartySwipeEnabled() {
   return Boolean(state.event?.partyViewSwipeEnabled);
+}
+
+function isGuestPartySwipeViewport() {
+  return guestPartySwipeMedia.matches;
 }
 
 function renderGuestPartySwipeFeed(posts) {

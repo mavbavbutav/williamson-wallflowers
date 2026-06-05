@@ -263,14 +263,16 @@ test('host and guest frontends expose Host Posts controls and party view', async
   assert.match(hostJs, /\/host\/submissions\/\$\{encodeURIComponent\(submission\.id\)\}\/party-view/);
   assert.match(hostJs, /capturedAt: submission\.createdAt/);
   assert.match(guestHtml, /id="hostPostsView"/);
-  assert.match(guestHtml, /id="guestPartyViewTabs"/);
   assert.match(guestHtml, /id="guestPartySwipeFeed"/);
+  assert.doesNotMatch(guestHtml, /data-guest-party-view/);
   assert.match(guestHtml, /Party View/);
   assert.match(guestHtml, /Unlocks when the party starts/);
   assert.match(guestJs, /loadHostPosts/);
   assert.match(guestJs, /renderGuestPartySwipeFeed/);
   assert.match(guestJs, /isGuestPartySwipeEnabled/);
-  assert.match(guestJs, /data-guest-party-view/);
+  assert.match(guestJs, /GUEST_PARTY_SWIPE_QUERY = "\(max-width: 767px\)"/);
+  assert.match(guestJs, /window\.matchMedia\(GUEST_PARTY_SWIPE_QUERY\)/);
+  assert.match(guestJs, /isGuestPartySwipeViewport/);
   assert.match(guestJs, /applyGuestUploadLock/);
   assert.match(guestJs, /Pre-Party View/);
   assert.match(guestJs, /getLocalDemoGuestPayload/);

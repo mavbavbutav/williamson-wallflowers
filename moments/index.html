@@ -31,7 +31,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20260604-party-swipe-1" />
+  <link rel="stylesheet" href="styles.css?v=20260604-party-responsive-1" />
 </head>
 <body class="guest-page">
   <main class="app-shell">
@@ -191,15 +191,11 @@
         <button class="small-button" type="button" id="refreshHostPostsButton">Refresh</button>
       </div>
       <div id="hostPostsNotice" class="notice" role="status" aria-live="polite" hidden></div>
-      <div class="tabs guest-party-view-tabs" id="guestPartyViewTabs" aria-label="Choose Party View layout" hidden>
-        <button class="tab-button" type="button" data-guest-party-view="grid">Grid</button>
-        <button class="tab-button" type="button" data-guest-party-view="swipe">Swipe Feed</button>
-      </div>
       <div class="party-feed" id="guestHostPostsGrid"></div>
       <div class="capsule-swipe-feed guest-party-swipe-feed" id="guestPartySwipeFeed" aria-label="Swipe through Party View moments" hidden></div>
     </section>
   </main>
 
-  <script type="module" src="app.js?v=20260604-party-swipe-1"></script>
+  <script type="module" src="app.js?v=20260604-party-responsive-1"></script>
 </body>
 </html>
