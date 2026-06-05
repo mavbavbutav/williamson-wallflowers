@@ -11,6 +11,14 @@ const AUDIO_EXTENSIONS = ["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wa
 const GUEST_PARTY_SWIPE_QUERY = "(max-width: 767px)";
 const guestPartySwipeMedia = window.matchMedia(GUEST_PARTY_SWIPE_QUERY);
 const HOST_POSTS_POLL_INTERVAL_MS = 10000;
+const MOMENT_COMMENT_MAX_LENGTH = 320;
+const MOMENT_REACTIONS = [
+  { id: "like", emoji: "&#x1F44D;", label: "Like" },
+  { id: "dislike", emoji: "&#x1F44E;", label: "Dislike" },
+  { id: "laugh", emoji: "&#x1F602;", label: "Laugh" },
+  { id: "cry", emoji: "&#x1F622;", label: "Aww" },
+  { id: "surprised", emoji: "&#x1F62E;", label: "Surprised" }
+];
 
 const state = {
   tagCode: getParam("t"),
@@ -125,6 +133,9 @@ function bindEvents() {
     await acceptFile(file);
     fileInput.value = "";
   });
+
+  document.addEventListener("click", handleMomentInteractionAction);
+  document.addEventListener("submit", handleMomentCommentSubmit);
 }
 
 async function loadHostPosts({ silent = false } = {}) {
@@ -157,6 +168,9 @@ async function loadHostPosts({ silent = false } = {}) {
 
     if (!hasHostPostsChanged) {
       syncGuestPartyPostVisibility(nextHostPosts);
+      if (!isPartyViewMediaPlaying()) {
+        applyHostPostsDiff(nextHostPosts);
+      }
     } else if (isPartyViewMediaPlaying()) {
       applyHostPostsDiff(nextHostPosts);
     } else {
@@ -252,7 +266,11 @@ function patchHostPostsInContainer(container, posts, renderCard) {
 
   for (const item of posts) {
     if (!item?.id) continue;
-    if (existing.has(item.id)) continue;
+    const child = existing.get(item.id);
+    if (child) {
+      applyMomentInteractionsToCard(child, item);
+      continue;
+    }
 
     const card = renderCard(item);
     card.dataset.hostPostId = item.id;
@@ -268,6 +286,8 @@ function patchHostPostsInContainer(container, posts, renderCard) {
     }
     if (insertBefore) container.insertBefore(card, insertBefore);
     else container.append(card);
+
+    applyMomentInteractionsToCard(card, item);
   }
 }
 
@@ -327,6 +347,7 @@ function renderGuestPartySwipeCard(item) {
   const card = document.createElement("article");
   card.className = `capsule-feed-card guest-party-swipe-card is-${item.mediaType}`;
   if (item?.id) card.dataset.hostPostId = item.id;
+  if (item?.submissionId) card.dataset.submissionId = item.submissionId;
   const partyViewName = getGuestPartyViewName();
   const mediaUrl = inlineMediaUrl(item.mediaUrl);
 
@@ -382,6 +403,7 @@ function renderGuestPartySwipeCard(item) {
     <strong>${escapeHtml(item.title || (item.source === "host" ? "Host Post" : "Guest moment"))}</strong>
     <p>${escapeHtml(item.caption || item.guestNote || "")}</p>
     <span>${escapeHtml(formatDateTime(item.capturedAt || item.createdAt))}</span>
+    ${buildMomentInteractionsMarkup(item)}
   `;
 
   card.append(media, copy);
@@ -392,6 +414,7 @@ function renderHostPostCard(item) {
   const card = document.createElement("article");
   card.className = `party-card is-${item.mediaType}`;
   if (item?.id) card.dataset.hostPostId = item.id;
+  if (item?.submissionId) card.dataset.submissionId = item.submissionId;
   const partyViewName = getGuestPartyViewName();
 
   const mediaUrl = inlineMediaUrl(item.mediaUrl);
@@ -447,10 +470,233 @@ function renderHostPostCard(item) {
     <strong>${escapeHtml(item.title || (item.source === "host" ? "Host Post" : "Guest moment"))}</strong>
     <p>${escapeHtml(item.caption || item.guestNote || "")}</p>
     <span class="muted">${escapeHtml(formatDateTime(item.capturedAt || item.createdAt))}</span>
+    ${buildMomentInteractionsMarkup(item)}
   `;
 
   card.append(media, body);
   return card;
+}
+
+function buildMomentInteractionsMarkup(item) {
+  const interactions = normalizeMomentInteractions(item.interactions);
+  const reactionButtons = MOMENT_REACTIONS.map((reaction) => `
+    <button
+      class="moment-action-button"
+      type="button"
+      data-moment-action="reaction"
+      data-reaction="${reaction.id}"
+      aria-label="${reaction.label}"
+    >
+      <span class="moment-reaction-emoji" aria-hidden="true">${reaction.emoji}</span>
+      <span class="moment-reaction-count" data-moment-reaction-count="${reaction.id}">
+        ${interactions.counts[reaction.id]}
+      </span>
+    </button>
+  `).join("");
+
+  const commentButtonCount = interactions.commentCount;
+  const commentRows = interactions.comments
+    .map((comment) => `<li><span>${escapeHtml(comment.text)}</span></li>`)
+    .join("");
+
+  return `
+    <div class="moment-interactions">
+      <div class="moment-reaction-row" role="group" aria-label="Add reactions">
+        ${reactionButtons}
+        <button
+          class="moment-action-button"
+          type="button"
+          data-moment-action="toggle-comment-form"
+          aria-label="Write a comment"
+        >
+          <span class="moment-reaction-emoji" aria-hidden="true">&#x1F4AC;</span>
+          <span data-moment-comment-count>${commentButtonCount}</span>
+        </button>
+      </div>
+      <div class="moment-comment-wrap" data-moment-comment-wrap hidden>
+        <ul class="moment-comment-list" data-moment-comment-list>${commentRows}</ul>
+        <form class="moment-comment-form" data-moment-action="post-comment" aria-label="Add a comment">
+          <input
+            class="moment-comment-input"
+            type="text"
+            maxlength="${MOMENT_COMMENT_MAX_LENGTH}"
+            placeholder="Share a quick comment"
+            aria-label="Comment on this moment"
+          />
+          <button class="moment-comment-submit" type="submit">Post</button>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function normalizeMomentInteractions(interactions = {}) {
+  const counts = {};
+  MOMENT_REACTIONS.forEach((reaction) => {
+    counts[reaction.id] = Number(interactions?.counts?.[reaction.id] || 0);
+  });
+
+  const comments = Array.isArray(interactions.comments)
+    ? interactions.comments.filter((item) => item && typeof item.text === "string")
+    : [];
+
+  return {
+    counts,
+    comments,
+    commentCount: comments.length
+  };
+}
+
+function handleMomentInteractionAction(event) {
+  const target = event.target instanceof Element ? event.target.closest("[data-moment-action]") : null;
+  if (!target) return;
+
+  const card = target.closest("[data-submission-id]");
+  if (!card) return;
+
+  const submissionId = card.dataset.submissionId || "";
+  if (!submissionId || !state.event?.id || !state.uploadToken) {
+    return;
+  }
+
+  const action = target.dataset.momentAction;
+
+  if (action === "reaction") {
+    const reaction = target.dataset.reaction;
+    if (!reaction) return;
+    submitMomentReaction(card, submissionId, reaction, target);
+    return;
+  }
+
+  if (action === "toggle-comment-form") {
+    const wrap = card.querySelector('[data-moment-comment-wrap]');
+    if (!wrap) return;
+
+    const commentInput = wrap.querySelector(".moment-comment-input");
+    const isHidden = wrap.hidden;
+    wrap.hidden = !isHidden;
+    if (!isHidden) return;
+    if (commentInput) {
+      requestAnimationFrame(() => commentInput.focus());
+    }
+  }
+}
+
+async function submitMomentReaction(card, submissionId, reaction, button) {
+  if (!button) return;
+
+  const originalText = button.innerHTML;
+  button.disabled = true;
+
+  try {
+    const payload = await requestJson(`/events/${encodeURIComponent(state.event.id)}/submissions/${encodeURIComponent(submissionId)}/reactions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${state.uploadToken}`
+      },
+      body: JSON.stringify({ reaction })
+    });
+    if (payload?.interactions && payload.submissionId) {
+      syncHostPostInteractions(payload.submissionId, payload.interactions);
+    } else {
+      setNotice(qs("#hostPostsNotice"), payload?.message || "That reaction could not be sent.", "error");
+    }
+  } catch (error) {
+    setNotice(qs("#hostPostsNotice"), error.message || "That reaction could not be sent.", "error");
+  } finally {
+    button.disabled = false;
+    button.innerHTML = originalText;
+  }
+}
+
+async function handleMomentCommentSubmit(event) {
+  const form = event.target instanceof Element ? event.target.closest("[data-moment-action='post-comment']") : null;
+  if (!form) return;
+
+  event.preventDefault();
+
+  const card = form.closest("[data-submission-id]");
+  if (!card || !state.event?.id || !state.uploadToken) return;
+
+  const submissionId = card.dataset.submissionId;
+  if (!submissionId) return;
+
+  const input = form.querySelector(".moment-comment-input");
+  const raw = input ? input.value.trim() : "";
+  if (!raw) {
+    setNotice(qs("#hostPostsNotice"), "Add a comment before posting.", "error");
+    return;
+  }
+
+  const submitButton = form.querySelector(".moment-comment-submit");
+  const previousLabel = submitButton ? submitButton.textContent : "";
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "Posting";
+  }
+
+  try {
+    const payload = await requestJson(`/events/${encodeURIComponent(state.event.id)}/submissions/${encodeURIComponent(submissionId)}/comments`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${state.uploadToken}`
+      },
+      body: JSON.stringify({ comment: raw })
+    });
+
+    if (payload?.interactions && payload.submissionId) {
+      syncHostPostInteractions(payload.submissionId, payload.interactions);
+      if (input) input.value = "";
+    } else {
+      setNotice(qs("#hostPostsNotice"), payload?.message || "That comment could not be posted.", "error");
+    }
+  } catch (error) {
+    setNotice(qs("#hostPostsNotice"), error.message || "That comment could not be posted.", "error");
+  } finally {
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = previousLabel || "Post";
+    }
+  }
+}
+
+function syncHostPostInteractions(submissionId, interactions) {
+  const target = state.hostPosts.find((item) => item.submissionId === submissionId);
+  if (!target) return;
+
+  target.interactions = interactions;
+
+  qsa("[data-submission-id]").forEach((card) => {
+    if (card.dataset.submissionId !== submissionId) return;
+    applyMomentInteractionsToCard(card, target);
+  });
+}
+
+function applyMomentInteractionsToCard(card, item) {
+  const interactions = normalizeMomentInteractions(item.interactions);
+  const row = card.querySelector(".moment-reaction-row");
+  if (row) {
+    row.querySelectorAll(".moment-action-button[data-reaction]").forEach((button) => {
+      const type = button.dataset.reaction;
+      const countNode = button.querySelector(`[data-moment-reaction-count="${type}"]`);
+      if (countNode) countNode.textContent = `${Number(interactions.counts[type] || 0)}`;
+    });
+
+    const commentCountNode = row.querySelector("[data-moment-comment-count]");
+    if (commentCountNode) {
+      commentCountNode.textContent = `${interactions.commentCount}`;
+    }
+  }
+
+  const commentWrap = card.querySelector("[data-moment-comment-wrap]");
+  if (commentWrap) {
+    const list = commentWrap.querySelector("[data-moment-comment-list]");
+    if (list) {
+      list.innerHTML = interactions.comments
+        .map((comment) => `<li><span>${escapeHtml(comment.text)}</span></li>`)
+        .join("");
+    }
+  }
 }
 
 function bindPartyVideoOverlay(card, video) {

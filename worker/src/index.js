@@ -39,6 +39,10 @@ const STREAM_BACKFILL_MAX_LIMIT = 25;
 const STANDARD_RETENTION_DAYS = 90;
 const TIME_CAPSULE_RETENTION_DAYS = 365;
 const UPLOAD_NOTIFICATION_RECIPIENT = 'contact@jjentertainmentsolutions.com';
+const INTERACTION_REACTIONS = ['like', 'dislike', 'laugh', 'cry', 'surprised'];
+const INTERACTION_RATE_LIMIT = 12;
+const INTERACTION_RATE_WINDOW_SECONDS = 60;
+const MAX_COMMENT_LENGTH = 320;
 const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 const THUMBNAIL_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const VIDEO_TYPES = new Set([
@@ -151,7 +155,7 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
       return getTagEvent(request, parts[1], env, corsHeaders);
     }
 
-    if (request.method === 'POST' && parts[0] === 'events' && parts[1] && parts[2] === 'submissions') {
+    if (request.method === 'POST' && parts[0] === 'events' && parts[1] && parts[2] === 'submissions' && parts.length === 3) {
       return createSubmission(request, env, corsHeaders, parts[1], ctx);
     }
 
@@ -161,6 +165,14 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
 
     if (request.method === 'GET' && parts[0] === 'events' && parts[1] && parts[2] === 'host-posts') {
       return listGuestHostPosts(request, env, url, corsHeaders, parts[1]);
+    }
+
+    if (request.method === 'POST' && parts[0] === 'events' && parts[1] && parts[2] === 'submissions' && parts[4] === 'reactions' && parts.length === 5) {
+      return addSubmissionReaction(request, env, url, corsHeaders, parts[1], parts[3]);
+    }
+
+    if (request.method === 'POST' && parts[0] === 'events' && parts[1] && parts[2] === 'submissions' && parts[4] === 'comments' && parts.length === 5) {
+      return addSubmissionComment(request, env, url, corsHeaders, parts[1], parts[3]);
     }
 
     if (request.method === 'GET' && parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'submissions') {
@@ -503,6 +515,106 @@ async function listGuestHostPosts(request, env, url, corsHeaders, eventId) {
     },
     items
   }, 200, corsHeaders);
+}
+
+async function addSubmissionReaction(request, env, url, corsHeaders, eventId, submissionId) {
+  const token = getAccessToken(request, url);
+  const event = await getEventById(env, eventId);
+  if (!event || !isActiveEvent(event)) {
+    return json({ ok: false, message: 'This event is no longer accepting moments.' }, 410, corsHeaders);
+  }
+
+  if (!await verifySignedToken(env, token, 'upload', eventId)) {
+    return json({ ok: false, message: 'This guest link is not valid.' }, 403, corsHeaders);
+  }
+
+  const scope = await getClientRateLimitKey(request, `interaction:${event.id}:${submissionId}`);
+  const rateResult = await consumeRateLimit(env, scope, INTERACTION_RATE_LIMIT, INTERACTION_RATE_WINDOW_SECONDS);
+  if (!rateResult.ok) {
+    return json({ ok: false, message: 'You are reacting too quickly. Please wait a moment.' }, 429, corsHeaders);
+  }
+
+  const payload = await request.json().catch(() => null);
+  const reaction = String(payload?.reaction || '').trim().toLowerCase();
+  if (!INTERACTION_REACTIONS.includes(reaction)) {
+    return json({ ok: false, message: `Unsupported reaction: ${reaction || 'empty'}` }, 400, corsHeaders);
+  }
+
+  const submission = await getGuestPartyVisibleSubmission(env, event.id, submissionId);
+  if (!submission) {
+    return json({ ok: false, message: 'Could not find that moment to react to.' }, 404, corsHeaders);
+  }
+
+  const now = new Date().toISOString();
+  await env.MOMENTS_DB.prepare(`
+    INSERT INTO submission_reactions (
+      id, event_id, submission_id, reaction, created_at
+    )
+    VALUES (?, ?, ?, ?, ?)
+  `).bind(
+    crypto.randomUUID(),
+    event.id,
+    submission.id,
+    reaction,
+    now
+  ).run();
+
+  const interactions = await getSubmissionInteractions(env, submission.id);
+  return json({
+    ok: true,
+    submissionId: submission.id,
+    interactions
+  }, 201, corsHeaders);
+}
+
+async function addSubmissionComment(request, env, url, corsHeaders, eventId, submissionId) {
+  const token = getAccessToken(request, url);
+  const event = await getEventById(env, eventId);
+  if (!event || !isActiveEvent(event)) {
+    return json({ ok: false, message: 'This event is no longer accepting moments.' }, 410, corsHeaders);
+  }
+
+  if (!await verifySignedToken(env, token, 'upload', eventId)) {
+    return json({ ok: false, message: 'This guest link is not valid.' }, 403, corsHeaders);
+  }
+
+  const scope = await getClientRateLimitKey(request, `interaction:${event.id}:${submissionId}:comment`);
+  const rateResult = await consumeRateLimit(env, scope, INTERACTION_RATE_LIMIT, INTERACTION_RATE_WINDOW_SECONDS);
+  if (!rateResult.ok) {
+    return json({ ok: false, message: 'You are commenting too quickly. Please wait a moment.' }, 429, corsHeaders);
+  }
+
+  const payload = await request.json().catch(() => null);
+  const comment = cleanText(payload?.comment || '', MAX_COMMENT_LENGTH);
+  if (!comment) {
+    return json({ ok: false, message: 'Please enter a comment.' }, 400, corsHeaders);
+  }
+
+  const submission = await getGuestPartyVisibleSubmission(env, event.id, submissionId);
+  if (!submission) {
+    return json({ ok: false, message: 'Could not find that moment to comment on.' }, 404, corsHeaders);
+  }
+
+  const now = new Date().toISOString();
+  await env.MOMENTS_DB.prepare(`
+    INSERT INTO submission_comments (
+      id, event_id, submission_id, comment, created_at
+    )
+    VALUES (?, ?, ?, ?, ?)
+  `).bind(
+    crypto.randomUUID(),
+    event.id,
+    submission.id,
+    comment,
+    now
+  ).run();
+
+  const interactions = await getSubmissionInteractions(env, submission.id);
+  return json({
+    ok: true,
+    submissionId: submission.id,
+    interactions
+  }, 201, corsHeaders);
 }
 
 async function createHostPost(request, env, url, corsHeaders, eventId, ctx) {
@@ -3283,6 +3395,54 @@ async function getGuestVisibleSubmissions(env, eventId, request) {
   return Promise.all((result.results || []).map((row) => toPartyViewSubmissionClient(row, request, env)));
 }
 
+async function getGuestPartyVisibleSubmission(env, eventId, submissionId) {
+  return env.MOMENTS_DB.prepare(`
+    SELECT
+      s.id,
+      s.event_id AS eventId
+    FROM submissions s
+    WHERE s.id = ? AND s.event_id = ? AND s.status = 'approved' AND s.deleted_at IS NULL AND s.guest_visible_at IS NOT NULL
+  `).bind(submissionId, eventId).first();
+}
+
+async function getSubmissionInteractions(env, submissionId) {
+  const reactionResult = await env.MOMENTS_DB.prepare(`
+    SELECT reaction, COUNT(*) AS count
+    FROM submission_reactions
+    WHERE submission_id = ?
+    GROUP BY reaction
+  `).bind(submissionId).all();
+
+  const commentsResult = await env.MOMENTS_DB.prepare(`
+    SELECT id, comment, created_at AS createdAt
+    FROM submission_comments
+    WHERE submission_id = ?
+    ORDER BY created_at DESC
+    LIMIT 3
+  `).bind(submissionId).all();
+
+  const counts = Object.fromEntries(INTERACTION_REACTIONS.map((type) => [type, 0]));
+  (reactionResult.results || []).forEach((row) => {
+    const reaction = String(row.reaction || '').toLowerCase();
+    if (INTERACTION_REACTIONS.includes(reaction)) {
+      counts[reaction] = Number(row.count || 0);
+    }
+  });
+
+  const comments = (commentsResult.results || [])
+    .map((comment) => ({
+      id: comment.id,
+      text: String(comment.comment || '').trim(),
+      createdAt: comment.createdAt
+    }))
+    .reverse();
+
+  return {
+    counts,
+    comments
+  };
+}
+
 async function getTimeCapsuleItemBySubmission(env, eventId, submissionId) {
   return env.MOMENTS_DB.prepare(`
     SELECT id
@@ -3826,6 +3986,7 @@ async function toTimeCapsuleItemClient(row, request, env) {
   const mediaUrl = `${getApiOrigin(request, env)}/moments-api/media/${encodeURIComponent(row.submissionId)}?mediaToken=${encodeURIComponent(mediaToken)}`;
   const thumbnail = await buildThumbnailClient(row, request, env, row.submissionId, row.mediaType, row.thumbnailObjectKey);
   const stream = await buildStreamPlaybackClient(row, request, env, row.submissionId, row.mediaType);
+  const interactions = await getSubmissionInteractions(env, row.submissionId);
 
   return {
     id: row.id,
@@ -3839,6 +4000,7 @@ async function toTimeCapsuleItemClient(row, request, env) {
     sortOrder: Number(row.sortOrder || 0),
     isVisible: row.isVisible !== 0,
     mediaType: row.mediaType,
+    interactions,
     source: row.source || 'guest',
     mimeType: row.mimeType,
     size: row.size,
@@ -3924,6 +4086,7 @@ async function toSubmissionClient(row, request, env) {
 
 async function toPartyViewSubmissionClient(row, request, env) {
   const submission = await toSubmissionClient(row, request, env);
+  const interactions = await getSubmissionInteractions(env, submission.id);
   return {
     id: `party-${submission.id}`,
     eventId: submission.eventId,
@@ -3940,6 +4103,7 @@ async function toPartyViewSubmissionClient(row, request, env) {
     mimeType: submission.mimeType,
     size: submission.size,
     durationSeconds: submission.durationSeconds,
+    interactions,
     guestName: submission.guestName,
     guestNote: submission.guestNote,
     mediaUrl: submission.mediaUrl,

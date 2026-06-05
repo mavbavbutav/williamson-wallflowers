@@ -153,6 +153,79 @@ test('host event payload includes a copyable guest link from the assigned tag', 
   assert.equal(payload.event.guestLink.url.includes('host-token'), false);
 });
 
+test('guest can react to a visible moment from the Party View', async () => {
+  const db = new HostPostsFakeDb({
+    submissions: [guestSubmission({
+      id: 'guest-visible',
+      status: 'approved',
+      guest_visible_at: '2026-09-20T20:20:00.000Z',
+      guestVisibleAt: '2026-09-20T20:20:00.000Z'
+    })]
+  });
+  const env = envWithDb(db, new FakeBucket());
+
+  const tokenResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/tags/host-tag', {
+    headers: { Origin: 'https://williamsonwallflowers.com' }
+  }), env);
+  const { uploadToken } = await tokenResponse.json();
+
+  const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/events/event-host/submissions/guest-visible/reactions', {
+    method: 'POST',
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      Authorization: `Bearer ${uploadToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ reaction: 'laugh' })
+  }), env);
+  const payload = await response.json();
+
+  assert.equal(response.status, 201);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.submissionId, 'guest-visible');
+  assert.equal(payload.interactions.counts.laugh, 1);
+  assert.equal(payload.interactions.counts.like, 0);
+  assert.equal(db.reactions.length, 1);
+  assert.equal(db.reactions[0].submissionId, 'guest-visible');
+  assert.equal(db.reactions[0].reaction, 'laugh');
+});
+
+test('guest can post a comment to a visible moment', async () => {
+  const db = new HostPostsFakeDb({
+    submissions: [guestSubmission({
+      id: 'guest-visible-comment',
+      status: 'approved',
+      guest_visible_at: '2026-09-20T20:20:00.000Z',
+      guestVisibleAt: '2026-09-20T20:20:00.000Z'
+    })]
+  });
+  const env = envWithDb(db, new FakeBucket());
+
+  const tokenResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/tags/host-tag', {
+    headers: { Origin: 'https://williamsonwallflowers.com' }
+  }), env);
+  const { uploadToken } = await tokenResponse.json();
+
+  const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/events/event-host/submissions/guest-visible-comment/comments', {
+    method: 'POST',
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      Authorization: `Bearer ${uploadToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ comment: 'Great memory!' })
+  }), env);
+  const payload = await response.json();
+
+  assert.equal(response.status, 201);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.submissionId, 'guest-visible-comment');
+  assert.equal(payload.interactions.comments.length, 1);
+  assert.equal(payload.interactions.comments[0].text, 'Great memory!');
+  assert.equal(db.comments.length, 1);
+  assert.equal(db.comments[0].comment, 'Great memory!');
+});
+
 test('host can enable the guest Party View swipe feed', async () => {
   const db = new HostPostsFakeDb();
   const env = envWithDb(db, new FakeBucket());
@@ -351,6 +424,17 @@ test('party view swipe migration adds a host-controlled event flag', async () =>
   assert.match(migration, /party_view_swipe_enabled INTEGER NOT NULL DEFAULT 0/);
 });
 
+test('interaction migration creates reaction and comment tables', async () => {
+  const migration = await readText('../../worker/migrations/0013_wallflower_submission_interactions.sql');
+
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS submission_reactions/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS submission_comments/);
+  assert.match(migration, /reaction TEXT NOT NULL CHECK \(reaction IN/);
+  assert.match(migration, /comment TEXT NOT NULL/);
+  assert.match(migration, /idx_submission_reactions_submission/);
+  assert.match(migration, /idx_submission_comments_submission/);
+});
+
 async function readText(path) {
   return readFile(new URL(path, import.meta.url), 'utf8');
 }
@@ -484,6 +568,8 @@ class FakeBucket {
 class HostPostsFakeDb {
   constructor(seed = {}) {
     this.rateLimits = new Map();
+    this.reactions = seed.reactions ? seed.reactions.map((reaction) => ({ ...reaction })) : [];
+    this.comments = seed.comments ? seed.comments.map((comment) => ({ ...comment })) : [];
     this.events = seed.events ? seed.events.map((event) => ({ ...event })) : [{
       id: 'event-host',
       name: 'Host Post Test',
@@ -559,6 +645,17 @@ class HostPostsFakeStatement {
           eventAdminToken: event.adminToken
         }
         : null;
+    }
+
+    if (this.sql.includes('FROM submissions s') && this.sql.includes('WHERE s.id = ? AND s.event_id = ?') && this.sql.includes('s.status = \'approved\'')) {
+      const [submissionId, eventId] = this.params;
+      return this.db.submissions.find((item) => (
+        item.id === submissionId &&
+        (item.event_id || item.eventId) === eventId &&
+        item.status === 'approved' &&
+        !(item.deleted_at || item.deletedAt) &&
+        (item.guest_visible_at || item.guestVisibleAt)
+      )) || null;
     }
 
     if (this.sql.includes('FROM tags')) {
@@ -640,6 +737,41 @@ class HostPostsFakeStatement {
         .filter((item) => item.guest_visible_at || item.guestVisibleAt)
         .sort((a, b) => new Date(b.guest_visible_at || b.guestVisibleAt || b.created_at || b.createdAt || 0) - new Date(a.guest_visible_at || a.guestVisibleAt || a.created_at || a.createdAt || 0));
       return { results: rows };
+    }
+
+    if (this.sql.includes('FROM submission_reactions')) {
+      const [submissionId] = this.params;
+      const rows = this.db.reactions
+        .filter((reaction) => reaction.submissionId === submissionId)
+        .reduce((acc, reaction) => {
+          const existing = acc.find((entry) => entry.reaction === reaction.reaction);
+          if (existing) {
+            existing.count = Number(existing.count || 0) + 1;
+          } else {
+            acc.push({
+              reaction: reaction.reaction,
+              count: 1
+            });
+          }
+          return acc;
+        }, []);
+
+      return { results: rows };
+    }
+
+    if (this.sql.includes('FROM submission_comments')) {
+      const [submissionId] = this.params;
+      const comments = this.db.comments
+        .filter((comment) => comment.submissionId === submissionId)
+        .map((comment) => ({
+          id: comment.id,
+          comment: comment.comment,
+          createdAt: comment.createdAt
+        }))
+        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+        .slice(0, 3);
+
+      return { results: comments };
     }
 
     if (this.sql.includes('FROM time_capsule_items')) {
@@ -793,6 +925,40 @@ class HostPostsFakeStatement {
         submission.updated_at = updatedAt;
         submission.updatedAt = updatedAt;
       }
+    }
+
+    if (this.sql.includes('INSERT INTO submission_reactions')) {
+      const [
+        id,
+        eventId,
+        submissionId,
+        reaction,
+        createdAt
+      ] = this.params;
+      this.db.reactions.push({
+        id,
+        eventId,
+        submissionId,
+        reaction,
+        createdAt
+      });
+    }
+
+    if (this.sql.includes('INSERT INTO submission_comments')) {
+      const [
+        id,
+        eventId,
+        submissionId,
+        comment,
+        createdAt
+      ] = this.params;
+      this.db.comments.push({
+        id,
+        eventId,
+        submissionId,
+        comment,
+        createdAt
+      });
     }
 
     if (this.sql.includes('UPDATE events') && this.sql.includes('party_view_swipe_enabled = ?')) {
