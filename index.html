@@ -1446,7 +1446,7 @@
             </div>
 
             <div class="quick-book">
-              <a class="inline-link" href="mailto:jamicarswell@gmail.com?subject=Williamson%20Wallflowers%20Inquiry">Contact Jami directly</a>
+              <a class="inline-link" id="directContactLink" href="mailto:jamicarswell@gmail.com?subject=Williamson%20Wallflowers%20Inquiry" data-email-link="mailto:jamicarswell@gmail.com?subject=Williamson%20Wallflowers%20Inquiry" data-sms-link="sms:+16155164341?&amp;body=Hi%20Jami%2C%20I%27d%20like%20to%20ask%20about%20renting%20a%20Williamson%20Wallflowers%20flower%20wall%20for%20my%20event.">Contact Jami directly</a>
             </div>
           </div>
 
@@ -1568,6 +1568,7 @@
     const nextMonth = document.getElementById("nextMonth");
     const bookingContinue = document.getElementById("bookingContinue");
     const availabilityNote = document.getElementById("availabilityNote");
+    const directContactLink = document.getElementById("directContactLink");
     const formDate = document.getElementById("date");
     const formWall = document.getElementById("wall");
     const inquiryStatus = document.getElementById("inquiryStatus");
@@ -1719,6 +1720,25 @@
     navLinks.querySelectorAll("a").forEach((link) => {
       link.addEventListener("click", closeMenu);
     });
+
+    function isMobileTextDevice() {
+      const userAgent = navigator.userAgent || "";
+      const isTouchMac = userAgent.includes("Macintosh") && navigator.maxTouchPoints > 1;
+      const isReportedMobile = navigator.userAgentData && navigator.userAgentData.mobile;
+      return Boolean(isReportedMobile || isTouchMac || /Android|iPhone|iPad|iPod/i.test(userAgent));
+    }
+
+    function configureDirectContactLink() {
+      if (!directContactLink) {
+        return;
+      }
+
+      const emailLink = directContactLink.dataset.emailLink || directContactLink.href;
+      const smsLink = directContactLink.dataset.smsLink;
+      directContactLink.href = smsLink && isMobileTextDevice() ? smsLink : emailLink;
+    }
+
+    configureDirectContactLink();
 
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeMenu();
