@@ -320,14 +320,18 @@ test('frontends expose AI group hero UI and cache-busted assets', async () => {
 
   assert.match(guestHtml, /AI event artwork use/);
   assert.match(guestHtml, /data-group-hero-panel/);
+  assert.match(guestHtml, /styles\.css\?v=20260605-ai-hero-contain-1/);
   assert.match(guestHtml, /app\.js\?v=20260605-ai-group-hero-1/);
   assert.match(guestJs, /function renderGroupHero/);
   assert.match(guestJs, /formData\.append\("aiArtworkConsent", "true"\)/);
   assert.match(hostHtml, /id="groupHeroHostCard"/);
+  assert.match(hostHtml, /styles\.css\?v=20260605-ai-hero-contain-1/);
   assert.match(hostHtml, /host\.js\?v=20260605-ai-group-hero-1/);
   assert.match(hostJs, /function regenerateGroupHero/);
   assert.match(hostJs, /group-hero\/regenerate/);
   assert.match(styles, /\.group-hero-panel/);
+  assert.match(styles, /\.group-hero-frame,[\s\S]*?aspect-ratio: 3 \/ 2;/);
+  assert.match(styles, /\.group-hero-frame img,[\s\S]*?object-fit: contain;/);
   assert.match(migration, /ai_artwork_consent_at TEXT/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS event_group_heroes/);
 });
