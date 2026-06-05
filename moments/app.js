@@ -11,28 +11,11 @@ const AUDIO_EXTENSIONS = ["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wa
 const GUEST_PARTY_SWIPE_QUERY = "(max-width: 767px)";
 const guestPartySwipeMedia = window.matchMedia(GUEST_PARTY_SWIPE_QUERY);
 const HOST_POSTS_POLL_INTERVAL_MS = 10000;
-const MOMENT_COMMENT_MAX_LENGTH = 320;
-const MOMENT_PRIMARY_REACTION_ID = "like";
-const MOMENT_REACTION_LONG_PRESS_MS = 420;
-const MOMENT_REACTION_SESSION_KEY = "wallflowerMomentSessionId";
-const MOMENT_REACTION_LIKES_KEY = "wallflowerMomentLikedSubmissions";
-const MOMENT_REACTIONS = [
-  { id: "like", emoji: "&#x1F44D;", label: "Like" },
-  { id: "dislike", emoji: "&#x1F44E;", label: "Dislike" },
-  { id: "laugh", emoji: "&#x1F602;", label: "Laugh" },
-  { id: "cry", emoji: "&#x1F622;", label: "Aww" },
-  { id: "surprised", emoji: "&#x1F62E;", label: "Surprised" }
-];
-const MOMENT_REACTION_PIVOT_OPTIONS = MOMENT_REACTIONS.filter((reaction) => reaction.id !== MOMENT_PRIMARY_REACTION_ID);
-
-const momentReactionPressStates = new WeakMap();
-let activeMomentLongPressButton = null;
 
 const state = {
   tagCode: getParam("t"),
   event: null,
   uploadToken: "",
-  guestSessionId: "",
   mode: "",
   stream: null,
   recorder: null,
@@ -52,7 +35,6 @@ const state = {
   hostPostsTimerId: 0,
   countdownTimerId: 0,
   isCountdownLocked: false,
-  pendingLikeSubmissionKeys: new Map()
 };
 
 const views = {
@@ -86,7 +68,6 @@ init();
 
 async function init() {
   bindEvents();
-  state.guestSessionId = getOrCreateGuestSessionId();
 
   if (!state.tagCode) {
     showError("This link is missing its tag code. Please scan the Wallflower Moments tag again.");
@@ -145,11 +126,6 @@ function bindEvents() {
     fileInput.value = "";
   });
 
-  document.addEventListener("pointerdown", handleMomentReactionPointerDown);
-  document.addEventListener("pointerup", handleMomentReactionPointerUp);
-  document.addEventListener("pointercancel", handleMomentReactionPointerCancel);
-  document.addEventListener("click", handleMomentInteractionAction);
-  document.addEventListener("submit", handleMomentCommentSubmit);
 }
 
 async function loadHostPosts({ silent = false } = {}) {
@@ -235,7 +211,6 @@ function renderHostPosts() {
     grid.innerHTML = "";
     posts.forEach((item) => {
       const card = renderHostPostCard(item);
-      applyMomentInteractionsToCard(card, item);
       grid.append(card);
     });
   }
@@ -284,7 +259,6 @@ function patchHostPostsInContainer(container, posts, renderCard) {
     if (!item?.id) continue;
     const child = existing.get(item.id);
     if (child) {
-      applyMomentInteractionsToCard(child, item);
       continue;
     }
 
@@ -303,7 +277,6 @@ function patchHostPostsInContainer(container, posts, renderCard) {
     if (insertBefore) container.insertBefore(card, insertBefore);
     else container.append(card);
 
-    applyMomentInteractionsToCard(card, item);
   }
 }
 
@@ -355,7 +328,6 @@ function renderGuestPartySwipeFeed(posts) {
   posts.forEach((item) => {
     const card = renderGuestPartySwipeCard(item);
     if (item?.id) card.dataset.hostPostId = item.id;
-    applyMomentInteractionsToCard(card, item);
     feed.append(card);
   });
 }
@@ -364,7 +336,6 @@ function renderGuestPartySwipeCard(item) {
   const card = document.createElement("article");
   card.className = `capsule-feed-card guest-party-swipe-card is-${item.mediaType}`;
   if (item?.id) card.dataset.hostPostId = item.id;
-  if (item?.submissionId) card.dataset.submissionId = item.submissionId;
   const partyViewName = getGuestPartyViewName();
   const mediaUrl = inlineMediaUrl(item.mediaUrl);
 
@@ -420,7 +391,6 @@ function renderGuestPartySwipeCard(item) {
     <strong>${escapeHtml(item.title || (item.source === "host" ? "Host Post" : "Guest moment"))}</strong>
     <p>${escapeHtml(item.caption || item.guestNote || "")}</p>
     <span>${escapeHtml(formatDateTime(item.capturedAt || item.createdAt))}</span>
-    ${buildMomentInteractionsMarkup(item)}
   `;
 
   card.append(media, copy);
@@ -431,7 +401,6 @@ function renderHostPostCard(item) {
   const card = document.createElement("article");
   card.className = `party-card is-${item.mediaType}`;
   if (item?.id) card.dataset.hostPostId = item.id;
-  if (item?.submissionId) card.dataset.submissionId = item.submissionId;
   const partyViewName = getGuestPartyViewName();
 
   const mediaUrl = inlineMediaUrl(item.mediaUrl);
@@ -487,575 +456,12 @@ function renderHostPostCard(item) {
     <strong>${escapeHtml(item.title || (item.source === "host" ? "Host Post" : "Guest moment"))}</strong>
     <p>${escapeHtml(item.caption || item.guestNote || "")}</p>
     <span class="muted">${escapeHtml(formatDateTime(item.capturedAt || item.createdAt))}</span>
-    ${buildMomentInteractionsMarkup(item)}
   `;
 
   card.append(media, body);
   return card;
 }
 
-function buildMomentInteractionsMarkup(item) {
-  const interactions = normalizeMomentInteractions(item.interactions);
-  const submissionId = item?.submissionId || "";
-  const hasUsedLike = isMomentLikeLocked(submissionId);
-  const displayedLikeCount = getDisplayedReactionCount(interactions, submissionId, MOMENT_PRIMARY_REACTION_ID);
-  const reactionPickerButtons = MOMENT_REACTION_PIVOT_OPTIONS.map((reaction) => `
-    <button
-      class="moment-action-button moment-reaction-option"
-      type="button"
-      data-moment-action="reaction"
-      data-reaction="${reaction.id}"
-      aria-label="${reaction.label}"
-    >
-      <span class="moment-reaction-emoji" aria-hidden="true">${reaction.emoji}</span>
-      <span class="moment-reaction-count" data-moment-reaction-count="${reaction.id}">
-        ${interactions.counts[reaction.id]}
-      </span>
-    </button>
-  `).join("");
-
-  const commentButtonCount = interactions.commentCount;
-  const commentRows = interactions.comments
-    .map((comment) => `<li><span>${escapeHtml(comment.text)}</span></li>`)
-    .join("");
-
-  return `
-    <div class="moment-interactions">
-      <div class="moment-reaction-row" role="group" aria-label="Add reactions">
-        <div class="moment-reaction-pivot">
-          <button
-            class="moment-action-button moment-reaction-primary"
-            type="button"
-            data-moment-action="reaction"
-            data-reaction="${MOMENT_PRIMARY_REACTION_ID}"
-            data-moment-primary-reaction="1"
-            ${hasUsedLike ? "data-moment-liked=\"1\"" : ""}
-            ${hasUsedLike ? "disabled" : ""}
-            aria-label="Like"
-            aria-expanded="false"
-            aria-controls="moment-reaction-picker-${item.submissionId}"
-          >
-            <span class="moment-reaction-emoji" aria-hidden="true">&#x1F44D;</span>
-            <span class="moment-reaction-count" data-moment-reaction-count="${MOMENT_PRIMARY_REACTION_ID}">
-              ${displayedLikeCount}
-            </span>
-          </button>
-          <div
-            class="moment-reaction-picker"
-            id="moment-reaction-picker-${item.submissionId}"
-            data-moment-reaction-picker
-            hidden
-          >
-            ${reactionPickerButtons}
-          </div>
-        </div>
-        <button
-          class="moment-action-button moment-comment-action"
-          type="button"
-          data-moment-action="toggle-comment-form"
-          aria-label="Write a comment"
-        >
-          <span class="moment-reaction-emoji" aria-hidden="true">&#x1F4AC;</span>
-          <span data-moment-comment-count>${commentButtonCount}</span>
-        </button>
-      </div>
-      <div class="moment-comment-wrap" data-moment-comment-wrap hidden>
-        <ul class="moment-comment-list" data-moment-comment-list>${commentRows}</ul>
-        <form class="moment-comment-form" data-moment-action="post-comment" aria-label="Add a comment">
-          <input
-            class="moment-comment-input"
-            type="text"
-            maxlength="${MOMENT_COMMENT_MAX_LENGTH}"
-            placeholder="Share a quick comment"
-            aria-label="Comment on this moment"
-          />
-          <button class="moment-comment-submit" type="submit">Post</button>
-        </form>
-      </div>
-    </div>
-  `;
-}
-
-function normalizeMomentInteractions(interactions = {}) {
-  const counts = {};
-  MOMENT_REACTIONS.forEach((reaction) => {
-    counts[reaction.id] = Number(interactions?.counts?.[reaction.id] || 0);
-  });
-
-  const comments = Array.isArray(interactions.comments)
-    ? interactions.comments.filter((item) => item && typeof item.text === "string")
-    : [];
-
-  return {
-    counts,
-    comments,
-    commentCount: comments.length
-  };
-}
-
-function handleMomentInteractionAction(event) {
-  const target = event.target instanceof Element ? event.target.closest("[data-moment-action]") : null;
-  if (!target) {
-    closeAllMomentReactionPickers();
-    return;
-  }
-
-  const card = target.closest("[data-submission-id]");
-  if (!card) return;
-
-  const submissionId = card.dataset.submissionId || "";
-  if (!submissionId || !state.event?.id || !state.uploadToken) {
-    return;
-  }
-
-  const action = target.dataset.momentAction;
-
-  if (action === "reaction") {
-    const reaction = target.dataset.reaction;
-    if (!reaction) return;
-    const isPrimaryReaction = target.matches("[data-moment-primary-reaction='1']");
-    if (isPrimaryReaction) {
-      const pressState = momentReactionPressStates.get(target);
-      if (pressState?.suppressLikeClick) {
-        pressState.suppressLikeClick = false;
-        pressState.timerId = 0;
-        return;
-      }
-    }
-    submitMomentReaction(card, submissionId, reaction, target);
-    closeMomentReactionPicker(card);
-    return;
-  }
-
-  if (action === "toggle-comment-form") {
-    closeMomentReactionPicker(card);
-    const wrap = card.querySelector('[data-moment-comment-wrap]');
-    if (!wrap) return;
-
-    const commentInput = wrap.querySelector(".moment-comment-input");
-    const isHidden = wrap.hidden;
-    wrap.hidden = !isHidden;
-    if (!isHidden) return;
-    if (commentInput) {
-      requestAnimationFrame(() => commentInput.focus());
-    }
-  }
-}
-
-function handleMomentReactionPointerDown(event) {
-  const target = getMomentPrimaryReactionButton(event.target);
-  if (!target) return;
-  if (!state.event?.id || !state.uploadToken) return;
-  if (event.button !== undefined && event.button !== 0) return;
-
-  const existing = momentReactionPressStates.get(target);
-  if (existing?.timerId) {
-    window.clearTimeout(existing.timerId);
-  }
-
-  const pressState = {
-    timerId: 0,
-    pickerOpen: false,
-    suppressLikeClick: false
-  };
-  activeMomentLongPressButton = target;
-
-  pressState.timerId = window.setTimeout(() => {
-    const current = momentReactionPressStates.get(target);
-    if (!current) return;
-    current.pickerOpen = true;
-    current.suppressLikeClick = true;
-    openMomentReactionPicker(target.closest("[data-submission-id]"), target);
-  }, MOMENT_REACTION_LONG_PRESS_MS);
-
-  momentReactionPressStates.set(target, pressState);
-}
-
-function handleMomentReactionPointerUp(event) {
-  const target = getMomentPrimaryReactionButton(event.target);
-  if (target) {
-    completeMomentReactionPress(target);
-    return;
-  }
-
-  if (activeMomentLongPressButton) {
-    completeMomentReactionPress(activeMomentLongPressButton);
-  }
-}
-
-function handleMomentReactionPointerCancel(event) {
-  const target = getMomentPrimaryReactionButton(event.target);
-  if (target) {
-    cancelMomentReactionPress(target);
-    return;
-  }
-
-  if (activeMomentLongPressButton) {
-    cancelMomentReactionPress(activeMomentLongPressButton);
-  }
-}
-
-function getMomentPrimaryReactionButton(target) {
-  return target instanceof Element
-    ? target.closest('[data-moment-action="reaction"][data-reaction="like"][data-moment-primary-reaction="1"]')
-    : null;
-}
-
-function completeMomentReactionPress(button) {
-  const pressState = momentReactionPressStates.get(button);
-  if (!pressState) return;
-
-  window.clearTimeout(pressState.timerId);
-  pressState.timerId = 0;
-  if (!pressState.pickerOpen) {
-    momentReactionPressStates.delete(button);
-  } else {
-    pressState.suppressLikeClick = true;
-  }
-
-  activeMomentLongPressButton = null;
-}
-
-function cancelMomentReactionPress(button) {
-  const pressState = momentReactionPressStates.get(button);
-  if (!pressState) return;
-
-  window.clearTimeout(pressState.timerId);
-  pressState.pickerOpen = false;
-  pressState.suppressLikeClick = false;
-  momentReactionPressStates.delete(button);
-  activeMomentLongPressButton = null;
-}
-
-function openMomentReactionPicker(card, primaryButton) {
-  if (!card || !primaryButton) return;
-  const picker = card.querySelector("[data-moment-reaction-picker]");
-  if (!picker) return;
-
-  closeAllMomentReactionPickers(card);
-  picker.hidden = false;
-  requestAnimationFrame(() => picker.classList.add("is-open"));
-  primaryButton.setAttribute("aria-expanded", "true");
-}
-
-function closeMomentReactionPicker(card) {
-  if (!card) return;
-  const picker = card.querySelector("[data-moment-reaction-picker]");
-  const primary = card.querySelector('[data-moment-primary-reaction="1"]');
-
-  if (picker) {
-    picker.hidden = true;
-    picker.classList.remove("is-open");
-  }
-
-  if (primary) {
-    primary.setAttribute("aria-expanded", "false");
-    const pressState = momentReactionPressStates.get(primary);
-    if (pressState) {
-      pressState.pickerOpen = false;
-      pressState.suppressLikeClick = false;
-    }
-    momentReactionPressStates.delete(primary);
-  }
-}
-
-function closeAllMomentReactionPickers(excludeCard = null) {
-  qsa("[data-moment-reaction-picker]").forEach((picker) => {
-    const card = picker.closest("[data-submission-id]");
-    if (excludeCard && card === excludeCard) return;
-    picker.hidden = true;
-    picker.classList.remove("is-open");
-    const primary = card ? card.querySelector('[data-moment-primary-reaction="1"]') : null;
-    if (primary) {
-      primary.setAttribute("aria-expanded", "false");
-      const pressState = momentReactionPressStates.get(primary);
-      if (pressState) {
-        pressState.pickerOpen = false;
-        pressState.suppressLikeClick = false;
-      }
-      momentReactionPressStates.delete(primary);
-    }
-  });
-}
-
-async function submitMomentReaction(card, submissionId, reaction, button) {
-  if (!button) return;
-  const isLikeReaction = reaction === MOMENT_PRIMARY_REACTION_ID;
-  if (isLikeReaction && isMomentLikeLocked(submissionId)) {
-    setNotice(qs("#hostPostsNotice"), "You already liked this moment.", "error");
-    return;
-  }
-
-  const countNode = button.querySelector(`[data-moment-reaction-count="${reaction}"]`);
-  const previousCount = Number(countNode?.textContent) || 0;
-  if (countNode) countNode.textContent = `${Math.max(0, previousCount) + 1}`;
-
-  const originalText = button.innerHTML;
-  button.disabled = true;
-
-  if (isLikeReaction) {
-    markMomentLikePending(submissionId, previousCount);
-    syncMomentLikeState(card, submissionId);
-  }
-
-  try {
-    const payload = await requestJson(`/events/${encodeURIComponent(state.event.id)}/submissions/${encodeURIComponent(submissionId)}/reactions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${state.uploadToken}`
-      },
-      body: JSON.stringify({ reaction, sessionId: state.guestSessionId })
-    });
-    if (payload?.interactions && payload.submissionId) {
-      if (isLikeReaction) {
-        const serverLikeCount = Number(payload.interactions?.counts?.[MOMENT_PRIMARY_REACTION_ID] || 0);
-        if (serverLikeCount >= previousCount + 1) {
-          clearMomentLikePending(submissionId);
-        }
-        markLikedSubmission(submissionId);
-      }
-      syncHostPostInteractions(payload.submissionId, payload.interactions);
-    } else {
-      setNotice(qs("#hostPostsNotice"), payload?.message || "That reaction could not be sent.", "error");
-      if (isLikeReaction) {
-        clearMomentLikePending(submissionId);
-      }
-    }
-  } catch (error) {
-    if (countNode) countNode.textContent = `${Math.max(0, previousCount)}`;
-    setNotice(qs("#hostPostsNotice"), error.message || "That reaction could not be sent.", "error");
-    if (isLikeReaction) {
-      clearMomentLikePending(submissionId);
-    }
-  } finally {
-    button.disabled = false;
-    button.innerHTML = originalText;
-    if (button.dataset && button.dataset.momentPrimaryReaction === "1" && card) {
-      syncMomentLikeState(card, submissionId);
-    }
-  }
-}
-
-function getSubmissionReactionKey(submissionId) {
-  if (!submissionId) return "";
-  return getGuestReactionKey(submissionId);
-}
-
-function isMomentLikeLocked(submissionId) {
-  const key = getSubmissionReactionKey(submissionId);
-  return !!(key && (state.pendingLikeSubmissionKeys.has(key) || hasLikedSubmission(submissionId)));
-}
-
-function getMomentLikePendingBase(submissionId) {
-  const key = getSubmissionReactionKey(submissionId);
-  if (!key) return 0;
-  return state.pendingLikeSubmissionKeys.has(key) ? Number(state.pendingLikeSubmissionKeys.get(key) || 0) : 0;
-}
-
-function markMomentLikePending(submissionId, baselineCount) {
-  const key = getSubmissionReactionKey(submissionId);
-  if (!key) return;
-  state.pendingLikeSubmissionKeys.set(key, Number(baselineCount || 0));
-}
-
-function clearMomentLikePending(submissionId) {
-  const key = getSubmissionReactionKey(submissionId);
-  if (!key) return;
-  state.pendingLikeSubmissionKeys.delete(key);
-}
-
-function getDisplayedReactionCount(interactions, submissionId, reactionId) {
-  const baseCount = Number(interactions?.counts?.[reactionId] || 0);
-  if (reactionId !== MOMENT_PRIMARY_REACTION_ID) {
-    return baseCount;
-  }
-
-  if (isMomentLikePending(submissionId)) {
-    return baseCount + 1;
-  }
-
-  return baseCount;
-}
-
-function isMomentLikePending(submissionId) {
-  const key = getSubmissionReactionKey(submissionId);
-  return !!(key && state.pendingLikeSubmissionKeys.has(key));
-}
-
-function syncPendingLikeIfNeeded(interactions, submissionId) {
-  const key = getSubmissionReactionKey(submissionId);
-  if (!key || !state.pendingLikeSubmissionKeys.has(key)) return;
-
-  const baseline = getMomentLikePendingBase(submissionId);
-  const serverCount = Number(interactions?.counts?.[MOMENT_PRIMARY_REACTION_ID] || 0);
-  if (serverCount >= baseline + 1) {
-    clearMomentLikePending(submissionId);
-  }
-}
-
-function syncMomentLikeState(card, submissionId) {
-  if (!card) return;
-
-  const likeButton = card.querySelector('[data-moment-action="reaction"][data-moment-primary-reaction="1"]');
-  if (!likeButton) return;
-
-  const isLocked = isMomentLikeLocked(submissionId);
-  likeButton.classList.toggle("moment-reaction-liked", isLocked);
-  if (isLocked) {
-    likeButton.dataset.momentLiked = "1";
-  } else {
-    likeButton.removeAttribute("data-moment-liked");
-  }
-  likeButton.disabled = isLocked;
-  likeButton.setAttribute("aria-pressed", isLocked ? "true" : "false");
-}
-
-function applyMomentInteractionsToCard(card, item) {
-  const interactions = normalizeMomentInteractions(item.interactions);
-  syncPendingLikeIfNeeded(interactions, item.submissionId);
-  const row = card.querySelector(".moment-reaction-row");
-  if (row) {
-    row.querySelectorAll(".moment-action-button[data-reaction]").forEach((button) => {
-      const type = button.dataset.reaction;
-      const countNode = button.querySelector(`[data-moment-reaction-count="${type}"]`);
-      const displayCount = getDisplayedReactionCount(interactions, item.submissionId, type);
-      if (countNode) countNode.textContent = `${Number(displayCount)}`;
-    });
-
-    const commentCountNode = row.querySelector("[data-moment-comment-count]");
-    if (commentCountNode) {
-      commentCountNode.textContent = `${interactions.commentCount}`;
-    }
-  }
-
-  const commentWrap = card.querySelector("[data-moment-comment-wrap]");
-  if (commentWrap) {
-    const list = commentWrap.querySelector("[data-moment-comment-list]");
-    if (list) {
-      list.innerHTML = interactions.comments
-        .map((comment) => `<li><span>${escapeHtml(comment.text)}</span></li>`)
-        .join("");
-    }
-  }
-
-  syncMomentLikeState(card, item.submissionId);
-}
-
-function syncHostPostInteractions(submissionId, interactions) {
-  const target = state.hostPosts.find((item) => item.submissionId === submissionId);
-  if (!target) return;
-
-  target.interactions = interactions;
-
-  qsa("[data-submission-id]").forEach((card) => {
-    if (card.dataset.submissionId !== submissionId) return;
-    applyMomentInteractionsToCard(card, target);
-  });
-}
-
-async function handleMomentCommentSubmit(event) {
-  const form = event.target instanceof Element ? event.target.closest("[data-moment-action='post-comment']") : null;
-  if (!form) return;
-
-  event.preventDefault();
-
-  const card = form.closest("[data-submission-id]");
-  if (!card || !state.event?.id || !state.uploadToken) return;
-
-  const submissionId = card.dataset.submissionId;
-  if (!submissionId) return;
-
-  const input = form.querySelector(".moment-comment-input");
-  const raw = input ? input.value.trim() : "";
-  if (!raw) {
-    setNotice(qs("#hostPostsNotice"), "Add a comment before posting.", "error");
-    return;
-  }
-
-  const submitButton = form.querySelector(".moment-comment-submit");
-  const previousLabel = submitButton ? submitButton.textContent : "";
-  if (submitButton) {
-    submitButton.disabled = true;
-    submitButton.textContent = "Posting";
-  }
-
-  try {
-    const payload = await requestJson(`/events/${encodeURIComponent(state.event.id)}/submissions/${encodeURIComponent(submissionId)}/comments`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${state.uploadToken}`
-      },
-      body: JSON.stringify({ comment: raw })
-    });
-
-    if (payload?.interactions && payload.submissionId) {
-      syncHostPostInteractions(payload.submissionId, payload.interactions);
-      if (input) input.value = "";
-    } else {
-      setNotice(qs("#hostPostsNotice"), payload?.message || "That comment could not be posted.", "error");
-    }
-  } catch (error) {
-    setNotice(qs("#hostPostsNotice"), error.message || "That comment could not be posted.", "error");
-  } finally {
-    if (submitButton) {
-      submitButton.disabled = false;
-      submitButton.textContent = previousLabel || "Post";
-    }
-  }
-}
-
-function getOrCreateGuestSessionId() {
-  try {
-    const existing = window.localStorage.getItem(MOMENT_REACTION_SESSION_KEY);
-    if (existing) return existing;
-
-    const fallback = `guest-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const next = window.crypto?.randomUUID ? window.crypto.randomUUID() : fallback;
-    window.localStorage.setItem(MOMENT_REACTION_SESSION_KEY, next);
-    return next;
-  } catch {
-    return `guest-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  }
-}
-
-function getGuestReactionLikesMap() {
-  try {
-    const raw = window.localStorage.getItem(MOMENT_REACTION_LIKES_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function setGuestReactionLikesMap(next) {
-  try {
-    window.localStorage.setItem(MOMENT_REACTION_LIKES_KEY, JSON.stringify(next || {}));
-  } catch {
-    // localStorage can be unavailable in some privacy/privacy modes.
-  }
-}
-
-function getGuestReactionKey(submissionId) {
-  const eventId = state.event?.id || "unknown-event";
-  return `${eventId}:${submissionId}`;
-}
-
-function hasLikedSubmission(submissionId) {
-  if (!submissionId) return false;
-  const key = getGuestReactionKey(submissionId);
-  const reactionMap = getGuestReactionLikesMap();
-  return reactionMap[key] === true;
-}
-
-function markLikedSubmission(submissionId) {
-  if (!submissionId) return;
-  const key = getGuestReactionKey(submissionId);
-  const reactionMap = getGuestReactionLikesMap();
-  if (reactionMap[key]) return;
-  reactionMap[key] = true;
-  setGuestReactionLikesMap(reactionMap);
-}
 
 function bindPartyVideoOverlay(card, video) {
   let hideTimer = 0;
