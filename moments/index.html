@@ -31,7 +31,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20260607-no-likes-comments-1" />
+  <link rel="stylesheet" href="styles.css?v=20260605-ai-group-hero-1" />
 </head>
 <body class="guest-page">
   <main class="app-shell">
@@ -66,6 +66,13 @@
       <div class="hero-main">
         <h1 id="eventTitle" tabindex="-1">Leave a little love.</h1>
         <p id="eventDetails">Choose what to send.</p>
+        <div class="group-hero-panel" data-group-hero-panel hidden>
+          <div class="group-hero-frame">
+            <img data-group-hero-image alt="Cartoon group artwork made from approved guest photos." hidden />
+            <div class="group-hero-status" data-group-hero-status hidden>Group artwork is refreshing.</div>
+          </div>
+          <p class="group-hero-caption" data-group-hero-caption></p>
+        </div>
         <div class="countdown-banner" id="countdownBanner" aria-label="Event countdown" hidden>
           <p class="countdown-badge" id="countdownBadge">Event countdown</p>
           <strong id="countdownMessage"></strong>
@@ -154,7 +161,7 @@
 
           <label class="checkbox-row">
             <input id="consent" name="consent" type="checkbox" required />
-            <span>I agree to private sharing with the host.</span>
+            <span>I agree to private sharing with the host and AI event artwork use.</span>
           </label>
 
           <div class="progress-track" id="progressTrack" role="progressbar" aria-label="Upload progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
@@ -181,7 +188,14 @@
           <span></span>
         </div>
         <h1 tabindex="-1">Sent.</h1>
-        <p>Thank you.</p>
+        <p>Thank you. Once approved, it can join the group artwork.</p>
+        <div class="group-hero-panel" data-group-hero-panel hidden>
+          <div class="group-hero-frame">
+            <img data-group-hero-image alt="Cartoon group artwork made from approved guest photos." hidden />
+            <div class="group-hero-status" data-group-hero-status hidden>Group artwork is refreshing.</div>
+          </div>
+          <p class="group-hero-caption" data-group-hero-caption></p>
+        </div>
         <div class="button-row">
           <button class="button button-primary" type="button" id="addAnotherButton">Add another</button>
         </div>
@@ -201,6 +215,6 @@
     </section>
   </main>
 
-  <script type="module" src="app.js?v=20260607-no-likes-comments-1"></script>
+  <script type="module" src="app.js?v=20260605-ai-group-hero-1"></script>
 </body>
 </html>

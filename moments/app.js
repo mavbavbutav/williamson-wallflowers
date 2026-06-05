@@ -82,6 +82,7 @@ async function init() {
     state.hostPosts = payload.hostPosts || [];
     qs("#eventTitle").textContent = `${state.event.name}`;
     qs("#eventDetails").textContent = formatDate(state.event.eventDate);
+    renderGroupHero();
     renderCountdown();
     showView("welcome");
     await loadHostPosts({ silent: true });
@@ -147,6 +148,7 @@ async function loadHostPosts({ silent = false } = {}) {
         ...state.event,
         ...payload.event
       };
+      renderGroupHero();
     }
     const nextHostPosts = (payload.items || [])
       .slice()
@@ -214,6 +216,42 @@ function renderHostPosts() {
       grid.append(card);
     });
   }
+}
+
+function renderGroupHero() {
+  const hero = state.event?.groupHero || { status: "empty" };
+  const status = hero.status || "empty";
+  const panels = qsa("[data-group-hero-panel]");
+
+  panels.forEach((panel) => {
+    const image = panel.querySelector("[data-group-hero-image]");
+    const statusElement = panel.querySelector("[data-group-hero-status]");
+    const caption = panel.querySelector("[data-group-hero-caption]");
+    const isReady = status === "ready" && hero.imageUrl;
+    const isRefreshing = status === "queued" || status === "generating";
+
+    panel.hidden = !isReady && !isRefreshing;
+    if (image) {
+      image.hidden = !isReady;
+      if (isReady && image.src !== hero.imageUrl) image.src = hero.imageUrl;
+    }
+    if (statusElement) {
+      statusElement.hidden = !isRefreshing;
+      statusElement.textContent = "Group artwork is refreshing.";
+    }
+    if (caption) {
+      caption.textContent = isReady
+        ? getGroupHeroCaption(hero.participantCount)
+        : "Approved guest photos can join the event artwork.";
+    }
+  });
+}
+
+function getGroupHeroCaption(count) {
+  const value = Number(count || 0);
+  if (value <= 0) return "Approved guest photos can join the event artwork.";
+  if (value === 1) return "1 approved guest photo is in the group artwork.";
+  return `${value} approved guest photos are in the group artwork.`;
 }
 
 function isGuestPartySwipeEnabled() {
@@ -1026,6 +1064,7 @@ async function submitMoment(event) {
   formData.append("guestName", qs("#guestName").value.trim());
   formData.append("guestNote", qs("#guestNote").value.trim());
   formData.append("consent", "true");
+  formData.append("aiArtworkConsent", "true");
   formData.append("durationSeconds", String(state.durationSeconds || 0));
   formData.append("uploadToken", state.uploadToken);
   if (state.mediaType === "video" && state.thumbnailFile) {
@@ -1354,7 +1393,13 @@ function getLocalDemoParty(id) {
       countdownEnabled: !empty,
       countdownMessage: "Party starts in",
       guestUploadsBeforeCountdownEnabled: false,
-      partyViewSwipeEnabled: !empty
+      partyViewSwipeEnabled: !empty,
+      groupHero: {
+        status: started ? "generating" : "empty",
+        imageUrl: "",
+        participantCount: 0,
+        updatedAt: ""
+      }
     },
     hostPosts: empty ? [] : [
       localDemoHostPost({

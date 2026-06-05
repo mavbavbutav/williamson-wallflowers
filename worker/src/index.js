@@ -36,6 +36,18 @@ const DEFAULT_EVENT_MAX_BYTES = 10 * 1024 * 1024 * 1024;
 const RETENTION_CLEANUP_LIMIT = 100;
 const STREAM_BACKFILL_DEFAULT_LIMIT = 10;
 const STREAM_BACKFILL_MAX_LIMIT = 25;
+const GROUP_HERO_MAX_INPUTS = 16;
+const GROUP_HERO_TOKEN_TTL_SECONDS = 6 * 60 * 60;
+const GROUP_HERO_FORCE_RATE_LIMIT = 6;
+const GROUP_HERO_FORCE_RATE_WINDOW_SECONDS = 60 * 60;
+const GROUP_HERO_DEFAULT_MODEL = 'gpt-image-1.5';
+const GROUP_HERO_PROMPT = [
+  'Create a warm editorial cartoon group scene for a Williamson Wallflowers event.',
+  'Use the uploaded guest photos as respectful likeness references, with age-appropriate, friendly cartoon styling.',
+  'Place the people together in one cohesive group portrait in front of romantic floral wall decor.',
+  'No names, captions, logos, text overlays, watermarks, or realistic fake photography.',
+  'The final image should feel polished, celebratory, premium, and suitable as a guest-facing event hero.'
+].join(' ');
 const STANDARD_RETENTION_DAYS = 90;
 const TIME_CAPSULE_RETENTION_DAYS = 365;
 const UPLOAD_NOTIFICATION_RECIPIENT = 'contact@jjentertainmentsolutions.com';
@@ -46,6 +58,7 @@ const LIKE_INTERACTION_RATE_LIMIT = 1;
 const LIKE_INTERACTION_RATE_WINDOW_SECONDS = 60 * 60 * 24 * 365;
 const MAX_COMMENT_LENGTH = 320;
 const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
+const GROUP_HERO_INPUT_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const THUMBNAIL_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const VIDEO_TYPES = new Set([
   'video/mp4',
@@ -161,6 +174,14 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
       return createSubmission(request, env, corsHeaders, parts[1], ctx);
     }
 
+    if ((request.method === 'GET' || request.method === 'HEAD') && parts[0] === 'events' && parts[1] && parts[2] === 'group-hero' && parts[3] === 'image') {
+      return streamGroupHeroImage(request, env, url, corsHeaders, parts[1]);
+    }
+
+    if (request.method === 'GET' && parts[0] === 'events' && parts[1] && parts[2] === 'group-hero' && parts.length === 3) {
+      return getGuestGroupHero(request, env, url, corsHeaders, parts[1]);
+    }
+
     if (parts[0] === 'bridge') {
       return handleBridgeApi(request, env, url, corsHeaders, parts.slice(1));
     }
@@ -191,6 +212,10 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
 
     if (request.method === 'PATCH' && parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'party-view-settings') {
       return updateHostPartyViewSettings(request, env, url, corsHeaders, parts[2]);
+    }
+
+    if (request.method === 'POST' && parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'group-hero' && parts[4] === 'regenerate') {
+      return regenerateHostGroupHero(request, env, url, corsHeaders, parts[2], ctx);
     }
 
     if (parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'time-capsule') {
@@ -231,7 +256,7 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
       }
 
       if (request.method === 'DELETE') {
-        return deleteHostSubmission(request, env, url, corsHeaders, parts[2]);
+        return deleteHostSubmission(request, env, url, corsHeaders, parts[2], ctx);
       }
     }
 
@@ -303,6 +328,7 @@ async function getTagEvent(request, tagCode, env, corsHeaders) {
   }
 
   const uploadToken = await createSignedToken(env, 'upload', row.eventId, UPLOAD_TOKEN_TTL_SECONDS);
+  const groupHero = await getEventGroupHeroClient(env, row.eventId, request);
   await recordScanEvent(env, row.eventId, row.tagId);
   await safeQueueEventLightTrigger(env, row.eventId, 'tag_scan');
 
@@ -322,7 +348,8 @@ async function getTagEvent(request, tagCode, env, corsHeaders) {
       countdownMessage: row.countdownMessage,
       guestUploadsBeforeCountdownEnabled: Number(row.guestUploadsBeforeCountdownEnabled || 0) === 1,
       partyViewSwipeEnabled: Number(row.partyViewSwipeEnabled || 0) === 1,
-      hostName: row.hostName
+      hostName: row.hostName,
+      groupHero
     },
     uploadToken
   }, 200, corsHeaders);
@@ -364,6 +391,7 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
   const media = formData.get('media');
   const consent = String(formData.get('consent') || '').toLowerCase() === 'true';
   const uploadToken = String(formData.get('uploadToken') || '');
+  const aiArtworkConsent = normalizeBoolean(formData.get('aiArtworkConsent'));
 
   if (!consent) {
     return json({ ok: false, message: 'Consent is required before uploading.' }, 400, corsHeaders);
@@ -402,6 +430,7 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
   const objectKey = `moments/${eventId}/${id}.${extensionFor(storedMimeType, originalFilename)}`;
   const guestName = cleanText(formData.get('guestName'), 90);
   const guestNote = cleanText(formData.get('guestNote'), 220);
+  const aiArtworkConsentAt = aiArtworkConsent ? now : null;
 
   await env.MOMENTS_BUCKET.put(objectKey, media.stream(), {
     httpMetadata: {
@@ -446,6 +475,14 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
     now
   ).run();
 
+  if (aiArtworkConsentAt) {
+    await env.MOMENTS_DB.prepare(`
+      UPDATE submissions
+      SET ai_artwork_consent_at = ?, updated_at = ?
+      WHERE id = ?
+    `).bind(aiArtworkConsentAt, now, id).run();
+  }
+
   await queueUploadNotification(env, ctx, {
     event,
     submissionId: id,
@@ -468,7 +505,8 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
     ok: true,
     submission: {
       id,
-      status: 'pending'
+      status: 'pending',
+      aiArtworkConsent: Boolean(aiArtworkConsentAt)
     }
   }, 201, corsHeaders);
 }
@@ -485,6 +523,8 @@ async function listGuestHostPosts(request, env, url, corsHeaders, eventId) {
     return json({ ok: false, message: 'This guest link is not valid.' }, 403, corsHeaders);
   }
 
+  const groupHero = await getEventGroupHeroClient(env, event.id, request);
+
   if (!event.timeCapsuleEnabled) {
     return json({
       ok: true,
@@ -493,7 +533,8 @@ async function listGuestHostPosts(request, env, url, corsHeaders, eventId) {
         name: event.name,
         eventDate: event.eventDate,
         hostName: event.hostName,
-        partyViewSwipeEnabled: Number(event.partyViewSwipeEnabled || 0) === 1
+        partyViewSwipeEnabled: Number(event.partyViewSwipeEnabled || 0) === 1,
+        groupHero
       },
       items: []
     }, 200, corsHeaders);
@@ -513,7 +554,8 @@ async function listGuestHostPosts(request, env, url, corsHeaders, eventId) {
       name: event.name,
       eventDate: event.eventDate,
       hostName: event.hostName,
-      partyViewSwipeEnabled: Number(event.partyViewSwipeEnabled || 0) === 1
+      partyViewSwipeEnabled: Number(event.partyViewSwipeEnabled || 0) === 1,
+      groupHero
     },
     items
   }, 200, corsHeaders);
@@ -806,13 +848,13 @@ async function listHostSubmissions(request, env, url, corsHeaders, eventId) {
     ORDER BY created_at DESC
   `).bind(eventId).all();
   const guestLink = await getHostGuestLink(env, event.id);
+  const eventClient = toEventClient(event, env);
+  eventClient.guestLink = guestLink;
+  eventClient.groupHero = await getEventGroupHeroClient(env, event.id, request);
 
   return json({
     ok: true,
-    event: {
-      ...toEventClient(event, env),
-      guestLink
-    },
+    event: eventClient,
     submissions: await Promise.all((result.results || []).map((row) => toSubmissionClient(row, request, env)))
   }, 200, corsHeaders);
 }
@@ -1036,7 +1078,11 @@ async function updateHostSubmission(request, env, url, corsHeaders, submissionId
   `).bind(status, status, now, submissionId).run();
 
   if (status === 'approved') {
-    await queueStreamOptimization(env, request, { ...submission, status }, ctx);
+    const approvedSubmission = { ...submission, status, updatedAt: now };
+    await queueStreamOptimization(env, request, approvedSubmission, ctx);
+    await queueEventGroupHeroGenerationForSubmission(env, request, approvedSubmission, ctx);
+  } else {
+    await queueEventGroupHeroRefreshIfIncluded(env, request, submission, ctx);
   }
 
   return json({ ok: true, status }, 200, corsHeaders);
@@ -1174,7 +1220,454 @@ async function updateHostPartyViewSettings(request, env, url, corsHeaders, event
   }, 200, corsHeaders);
 }
 
-async function deleteHostSubmission(request, env, url, corsHeaders, submissionId) {
+async function getGuestGroupHero(request, env, url, corsHeaders, eventId) {
+  const event = await getEventById(env, eventId);
+
+  if (!event || !isActiveEvent(event)) {
+    return json({ ok: false, message: 'This event is no longer accepting moments.' }, 410, corsHeaders);
+  }
+
+  const token = getAccessToken(request, url);
+  if (!await verifySignedToken(env, token, 'upload', eventId)) {
+    return json({ ok: false, message: 'This guest link is not valid.' }, 403, corsHeaders);
+  }
+
+  return json({
+    ok: true,
+    groupHero: await getEventGroupHeroClient(env, eventId, request)
+  }, 200, corsHeaders);
+}
+
+async function streamGroupHeroImage(request, env, url, corsHeaders, eventId) {
+  const heroToken = url.searchParams.get('heroToken') || '';
+  if (!await verifySignedToken(env, heroToken, 'group-hero', eventId)) {
+    return json({ ok: false, message: 'This group artwork link is not valid.' }, 403, corsHeaders);
+  }
+
+  const hero = await getEventGroupHero(env, eventId);
+  const objectKey = hero?.object_key || hero?.objectKey || '';
+  if (!hero || hero.status !== 'ready' || !objectKey) {
+    return json({ ok: false, message: 'Group artwork is not ready yet.' }, 404, corsHeaders);
+  }
+
+  const isHeadRequest = request.method === 'HEAD';
+  const object = isHeadRequest
+    ? await env.MOMENTS_BUCKET.head(objectKey)
+    : await env.MOMENTS_BUCKET.get(objectKey);
+
+  if (!object) {
+    return json({ ok: false, message: 'Group artwork is missing from storage.' }, 404, corsHeaders);
+  }
+
+  const headers = new Headers(corsHeaders);
+  if (typeof object.writeHttpMetadata === 'function') {
+    object.writeHttpMetadata(headers);
+  }
+  headers.set('Content-Type', hero.mime_type || hero.mimeType || 'image/png');
+  headers.set('Cache-Control', 'private, max-age=300');
+  headers.set('ETag', object.httpEtag || object.etag || `${eventId}-group-hero`);
+  headers.set('Content-Disposition', `inline; filename="${eventId}-wallflower-group-hero.png"`);
+  headers.set('Content-Length', String(hero.size || object.size || 0));
+
+  return new Response(isHeadRequest ? null : object.body, { status: 200, headers });
+}
+
+async function regenerateHostGroupHero(request, env, url, corsHeaders, eventId, ctx) {
+  const token = getAccessToken(request, url);
+  const event = await getHostEvent(env, eventId, token);
+
+  if (!event) {
+    return json({ ok: false, message: 'This host gallery link is not valid.' }, 403, corsHeaders);
+  }
+
+  const rate = await consumeRateLimit(
+    env,
+    `group-hero:force:${eventId}`,
+    GROUP_HERO_FORCE_RATE_LIMIT,
+    GROUP_HERO_FORCE_RATE_WINDOW_SECONDS
+  );
+
+  if (!rate.ok) {
+    return json({ ok: false, message: 'Too many AI group artwork refreshes. Please wait before trying again.' }, 429, corsHeaders);
+  }
+
+  await queueEventGroupHeroGeneration(env, request, eventId, { force: true }, ctx);
+
+  return json({
+    ok: true,
+    groupHero: await getEventGroupHeroClient(env, eventId, request)
+  }, 202, corsHeaders);
+}
+
+async function queueEventGroupHeroGenerationForSubmission(env, request, submission, ctx) {
+  if (!isGroupHeroEligibleSubmission(submission)) return;
+  await queueEventGroupHeroGeneration(env, request, submission.eventId || submission.event_id, { force: false }, ctx);
+}
+
+async function queueEventGroupHeroRefreshIfIncluded(env, request, submission, ctx) {
+  const eventId = submission?.eventId || submission?.event_id;
+  const submissionId = submission?.id;
+  if (!eventId || !submissionId) return;
+
+  const hero = await getEventGroupHero(env, eventId);
+  if (!getGroupHeroSourceIds(hero).includes(submissionId)) return;
+
+  await queueEventGroupHeroGeneration(env, request, eventId, { force: true }, ctx);
+}
+
+async function queueEventGroupHeroGeneration(env, request, eventId, options = {}, ctx) {
+  if (!eventId) return;
+
+  const force = Boolean(options.force);
+  const sources = await getGroupHeroSourceSubmissions(env, eventId);
+  const sourceIds = sources.map((source) => source.id);
+  const existing = await getEventGroupHero(env, eventId);
+  const existingObjectKey = existing?.object_key || existing?.objectKey || '';
+
+  if (sources.length === 0) {
+    await storeEventGroupHeroState(env, {
+      eventId,
+      status: 'empty',
+      objectKey: null,
+      mimeType: null,
+      size: 0,
+      participantCount: 0,
+      sourceIds: [],
+      model: getOpenAiImageModel(env),
+      prompt: GROUP_HERO_PROMPT,
+      errorMessage: '',
+      generatedAt: null
+    });
+    if (existingObjectKey) {
+      try {
+        await env.MOMENTS_BUCKET.delete(existingObjectKey);
+      } catch (error) {
+        console.error('R2 delete failed for cleared group hero', eventId, error);
+      }
+    }
+    return;
+  }
+
+  if (!force && sourceIdsMatch(getGroupHeroSourceIds(existing), sourceIds)) {
+    return;
+  }
+
+  await storeEventGroupHeroState(env, {
+    eventId,
+    status: 'queued',
+    objectKey: existingObjectKey || null,
+    mimeType: existing?.mime_type || existing?.mimeType || null,
+    size: existing?.size || 0,
+    participantCount: sources.length,
+    sourceIds,
+    model: getOpenAiImageModel(env),
+    prompt: GROUP_HERO_PROMPT,
+    errorMessage: '',
+    generatedAt: existing?.generated_at || existing?.generatedAt || null
+  });
+
+  const work = generateEventGroupHero(env, request, eventId, sources, sourceIds, existingObjectKey).catch(async (error) => {
+    console.error('AI group hero generation failed', eventId, String(error.message || error));
+    await storeEventGroupHeroState(env, {
+      eventId,
+      status: 'failed',
+      objectKey: existingObjectKey || null,
+      mimeType: existing?.mime_type || existing?.mimeType || null,
+      size: existing?.size || 0,
+      participantCount: sources.length,
+      sourceIds,
+      model: getOpenAiImageModel(env),
+      prompt: GROUP_HERO_PROMPT,
+      errorMessage: cleanText(error.message || 'AI group hero generation failed.', 500),
+      generatedAt: existing?.generated_at || existing?.generatedAt || null
+    });
+  });
+
+  if (ctx && typeof ctx.waitUntil === 'function') {
+    ctx.waitUntil(work);
+    return;
+  }
+
+  await work;
+}
+
+async function generateEventGroupHero(env, request, eventId, sources, sourceIds, previousObjectKey = '') {
+  const now = new Date().toISOString();
+  await storeEventGroupHeroState(env, {
+    eventId,
+    status: 'generating',
+    objectKey: previousObjectKey || null,
+    mimeType: 'image/png',
+    size: 0,
+    participantCount: sources.length,
+    sourceIds,
+    model: getOpenAiImageModel(env),
+    prompt: GROUP_HERO_PROMPT,
+    errorMessage: '',
+    generatedAt: null
+  });
+
+  const apiKey = getOpenAiApiKey(env);
+  if (!apiKey) {
+    throw new Error('OpenAI API key is not configured.');
+  }
+
+  const formData = new FormData();
+  formData.append('model', getOpenAiImageModel(env));
+  formData.append('prompt', GROUP_HERO_PROMPT);
+  formData.append('size', '1536x1024');
+  formData.append('quality', 'medium');
+  formData.append('output_format', 'png');
+  formData.append('n', '1');
+
+  for (const source of sources) {
+    const object = await env.MOMENTS_BUCKET.get(source.objectKey || source.object_key);
+    if (!object) {
+      throw new Error(`Source image is missing from storage: ${source.id}`);
+    }
+    const bytes = await r2ObjectToArrayBuffer(object);
+    const mimeType = source.mimeType || source.mime_type || 'image/jpeg';
+    const filename = `${source.id}.${extensionFor(mimeType, source.originalFilename || source.original_filename || '')}`;
+    formData.append('image', new Blob([bytes], { type: mimeType }), filename);
+  }
+
+  const response = await fetch('https://api.openai.com/v1/images/edits', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: formData
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(getOpenAiErrorMessage(payload, response.status));
+  }
+
+  const imageBytes = await getOpenAiImageBytes(payload);
+  if (!imageBytes?.byteLength) {
+    throw new Error('OpenAI did not return generated image data.');
+  }
+
+  const objectKey = `moments/${eventId}/generated/group-hero-${Date.now()}.png`;
+  await env.MOMENTS_BUCKET.put(objectKey, imageBytes, {
+    httpMetadata: {
+      contentType: 'image/png',
+      contentDisposition: `inline; filename="${eventId}-wallflower-group-hero.png"`
+    },
+    customMetadata: {
+      eventId,
+      mediaType: 'group-hero',
+      sourceSubmissionIds: JSON.stringify(sourceIds)
+    }
+  });
+
+  await storeEventGroupHeroState(env, {
+    eventId,
+    status: 'ready',
+    objectKey,
+    mimeType: 'image/png',
+    size: imageBytes.byteLength,
+    participantCount: sources.length,
+    sourceIds,
+    model: getOpenAiImageModel(env),
+    prompt: GROUP_HERO_PROMPT,
+    errorMessage: '',
+    generatedAt: now
+  });
+
+  if (previousObjectKey && previousObjectKey !== objectKey) {
+    try {
+      await env.MOMENTS_BUCKET.delete(previousObjectKey);
+    } catch (error) {
+      console.error('R2 delete failed for replaced group hero', eventId, error);
+    }
+  }
+}
+
+async function getEventGroupHeroClient(env, eventId, request) {
+  return toEventGroupHeroClient(await getEventGroupHero(env, eventId), request, env, eventId);
+}
+
+async function toEventGroupHeroClient(row, request, env, eventId) {
+  const normalized = row || {};
+  const status = normalized.status || 'empty';
+  const objectKey = normalized.object_key || normalized.objectKey || '';
+
+  return {
+    status,
+    imageUrl: status === 'ready' && objectKey ? await buildGroupHeroAccessUrl(request, env, eventId) : '',
+    participantCount: Number(normalized.participant_count || normalized.participantCount || 0),
+    updatedAt: normalized.updated_at || normalized.updatedAt || ''
+  };
+}
+
+async function buildGroupHeroAccessUrl(request, env, eventId) {
+  const heroToken = await createSignedToken(env, 'group-hero', eventId, GROUP_HERO_TOKEN_TTL_SECONDS);
+  return `${getApiOrigin(request, env)}/moments-api/events/${encodeURIComponent(eventId)}/group-hero/image?heroToken=${encodeURIComponent(heroToken)}`;
+}
+
+async function getEventGroupHero(env, eventId) {
+  return env.MOMENTS_DB.prepare(`
+    SELECT
+      event_id AS eventId,
+      status,
+      object_key AS objectKey,
+      mime_type AS mimeType,
+      size,
+      participant_count AS participantCount,
+      source_submission_ids AS sourceSubmissionIds,
+      model,
+      prompt,
+      error_message AS errorMessage,
+      generated_at AS generatedAt,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM event_group_heroes
+    WHERE event_id = ?
+  `).bind(eventId).first();
+}
+
+async function getGroupHeroSourceSubmissions(env, eventId) {
+  const result = await env.MOMENTS_DB.prepare(`
+    SELECT
+      id,
+      event_id AS eventId,
+      object_key AS objectKey,
+      original_filename AS originalFilename,
+      mime_type AS mimeType,
+      created_at AS createdAt
+    FROM submissions
+    WHERE event_id = ?
+      AND source = 'guest'
+      AND media_type = 'photo'
+      AND status = 'approved'
+      AND deleted_at IS NULL
+      AND ai_artwork_consent_at IS NOT NULL
+      AND mime_type IN ('image/jpeg', 'image/png', 'image/webp')
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).bind(eventId, GROUP_HERO_MAX_INPUTS).all();
+
+  return result.results || [];
+}
+
+async function storeEventGroupHeroState(env, state) {
+  const now = new Date().toISOString();
+  await env.MOMENTS_DB.prepare(`
+    INSERT INTO event_group_heroes (
+      event_id, status, object_key, mime_type, size, participant_count,
+      source_submission_ids, model, prompt, error_message, generated_at,
+      created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(event_id) DO UPDATE SET
+      status = excluded.status,
+      object_key = excluded.object_key,
+      mime_type = excluded.mime_type,
+      size = excluded.size,
+      participant_count = excluded.participant_count,
+      source_submission_ids = excluded.source_submission_ids,
+      model = excluded.model,
+      prompt = excluded.prompt,
+      error_message = excluded.error_message,
+      generated_at = excluded.generated_at,
+      updated_at = excluded.updated_at
+  `).bind(
+    state.eventId,
+    state.status,
+    state.objectKey || null,
+    state.mimeType || null,
+    Number(state.size || 0),
+    Number(state.participantCount || 0),
+    JSON.stringify(state.sourceIds || []),
+    state.model || getOpenAiImageModel(env),
+    state.prompt || GROUP_HERO_PROMPT,
+    state.errorMessage || '',
+    state.generatedAt || null,
+    now,
+    now
+  ).run();
+}
+
+function isGroupHeroEligibleSubmission(submission) {
+  if (!submission) return false;
+  const mediaType = submission.mediaType || submission.media_type;
+  const source = submission.source || 'guest';
+  const mimeType = submission.mimeType || submission.mime_type || '';
+  const consentAt = submission.aiArtworkConsentAt || submission.ai_artwork_consent_at || '';
+  return mediaType === 'photo'
+    && source === 'guest'
+    && Boolean(consentAt)
+    && GROUP_HERO_INPUT_TYPES.has(getBaseMimeType(mimeType));
+}
+
+function getGroupHeroSourceIds(row) {
+  const value = row?.source_submission_ids || row?.sourceSubmissionIds || '[]';
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map((item) => String(item)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function sourceIdsMatch(previous, next) {
+  if (!Array.isArray(previous) || !Array.isArray(next)) return false;
+  if (previous.length !== next.length) return false;
+  return previous.every((id, index) => id === next[index]);
+}
+
+async function r2ObjectToArrayBuffer(object) {
+  if (typeof object.arrayBuffer === 'function') {
+    return object.arrayBuffer();
+  }
+
+  if (object.body) {
+    return new Response(object.body).arrayBuffer();
+  }
+
+  throw new Error('Stored source image is not readable.');
+}
+
+async function getOpenAiImageBytes(payload) {
+  const first = payload?.data?.[0] || {};
+  if (first.b64_json) {
+    return base64ToUint8Array(first.b64_json);
+  }
+
+  if (first.url) {
+    const response = await fetch(first.url);
+    if (!response.ok) throw new Error('Could not download generated image.');
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  return null;
+}
+
+function base64ToUint8Array(value) {
+  const binary = atob(String(value || ''));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function getOpenAiApiKey(env) {
+  return env.OPENAI_API_KEY || env.openai || env.OPENAI || '';
+}
+
+function getOpenAiImageModel(env) {
+  return env.OPENAI_IMAGE_MODEL || GROUP_HERO_DEFAULT_MODEL;
+}
+
+function getOpenAiErrorMessage(payload, status) {
+  const message = payload?.error?.message || payload?.message || `OpenAI image generation failed with status ${status}.`;
+  return cleanText(message, 500);
+}
+
+async function deleteHostSubmission(request, env, url, corsHeaders, submissionId, ctx) {
   const token = getAccessToken(request, url);
   const submission = await getSubmissionWithEvent(env, submissionId);
 
@@ -1198,6 +1691,8 @@ async function deleteHostSubmission(request, env, url, corsHeaders, submissionId
   } catch (error) {
     console.error('R2 delete failed for host-deleted submission', submissionId, error);
   }
+
+  await queueEventGroupHeroRefreshIfIncluded(env, request, submission, ctx);
 
   return json({ ok: true, status: 'deleted' }, 200, corsHeaders);
 }
@@ -3572,6 +4067,7 @@ async function getSubmissionWithEvent(env, submissionId) {
       s.guest_name AS guestName,
       s.guest_note AS guestNote,
       s.consent_at AS consentAt,
+      s.ai_artwork_consent_at AS aiArtworkConsentAt,
       s.status,
       s.guest_visible_at AS guestVisibleAt,
       s.deleted_at AS deletedAt,
@@ -4093,6 +4589,7 @@ async function toSubmissionClient(row, request, env) {
     durationSeconds: row.duration_seconds || row.durationSeconds || 0,
     guestName: row.guest_name || row.guestName || '',
     guestNote: row.guest_note || row.guestNote || '',
+    aiArtworkConsent: Boolean(row.ai_artwork_consent_at || row.aiArtworkConsentAt),
     status: row.status,
     guestVisibleAt,
     guestVisible: Boolean(guestVisibleAt),

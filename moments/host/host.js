@@ -77,6 +77,7 @@ function init() {
   });
   qs("#hostPostForm").addEventListener("submit", createHostPost);
   qs("#clearHostPostButton").addEventListener("click", clearHostPostComposer);
+  qs("#regenerateGroupHeroButton").addEventListener("click", regenerateGroupHero);
   qs("#modalClose").addEventListener("click", closeMediaModal);
   qs("#mediaModal").addEventListener("click", (event) => {
     if (event.target === event.currentTarget) closeMediaModal();
@@ -140,6 +141,7 @@ function render() {
   renderGuestLink();
   renderWorkspaceTabs();
   renderSubmissions();
+  renderGroupHeroHostPanel();
   renderHostPosts();
   renderCapsule();
   renderShare();
@@ -647,6 +649,52 @@ function renderShare() {
   qs("#openCapsuleLinkButton").disabled = !isPublished || !shareUrl;
 }
 
+function renderGroupHeroHostPanel() {
+  const card = qs("#groupHeroHostCard");
+  if (!card || !eventRecord) return;
+
+  const hero = eventRecord.groupHero || { status: "empty", participantCount: 0 };
+  const status = hero.status || "empty";
+  const isWorking = status === "queued" || status === "generating";
+  const isReady = status === "ready" && hero.imageUrl;
+  const pill = qs("#groupHeroStatusPill");
+  const preview = qs("#groupHeroHostPreview");
+  const meta = qs("#groupHeroHostMeta");
+  const button = qs("#regenerateGroupHeroButton");
+
+  pill.textContent = getGroupHeroStatusLabel(status);
+  pill.className = `status-pill${status === "ready" ? " is-approved" : ""}${status === "failed" ? " is-rejected" : ""}`;
+  button.disabled = isWorking;
+
+  if (isReady) {
+    preview.innerHTML = `<img src="${escapeHtml(hero.imageUrl)}" alt="AI cartoon group hero preview" />`;
+  } else if (isWorking) {
+    preview.innerHTML = `<span class="muted">Group artwork is refreshing.</span>`;
+  } else if (status === "failed") {
+    preview.innerHTML = `<span class="muted">Group artwork could not be generated. Try regenerating after reviewing the approved photos.</span>`;
+  } else {
+    preview.innerHTML = `<span class="muted">Approve AI-consented guest photos to start the group artwork.</span>`;
+  }
+
+  meta.textContent = getGroupHeroHostMeta(hero);
+}
+
+function getGroupHeroStatusLabel(status) {
+  if (status === "ready") return "Ready";
+  if (status === "queued") return "Queued";
+  if (status === "generating") return "Generating";
+  if (status === "failed") return "Needs retry";
+  return "Not started";
+}
+
+function getGroupHeroHostMeta(hero) {
+  const count = Number(hero?.participantCount || 0);
+  const updatedAt = hero?.updatedAt ? ` Updated ${formatDateTime(hero.updatedAt)}.` : "";
+  if (count === 1) return `1 approved photo is included.${updatedAt}`;
+  if (count > 1) return `${count} approved photos are included.${updatedAt}`;
+  return `No approved photos in the artwork yet.${updatedAt}`;
+}
+
 function renderHostPosts() {
   if (!eventRecord?.timeCapsule?.enabled) return;
 
@@ -1082,6 +1130,28 @@ async function setSubmissionPartyView(submission, visible, { reload = true, cele
   } catch (error) {
     if (notify) setNotice(qs("#hostNotice"), error.message || "Could not update the guest Party View.", "error");
     if (throwOnError) throw error;
+  }
+}
+
+async function regenerateGroupHero() {
+  const button = qs("#regenerateGroupHeroButton");
+  button.disabled = true;
+  setNotice(qs("#groupHeroNotice"), "Refreshing group artwork.", "");
+
+  try {
+    const result = await hostRequest(`/host/events/${encodeURIComponent(eventId)}/group-hero/regenerate`, {
+      method: "POST"
+    });
+    eventRecord = {
+      ...eventRecord,
+      groupHero: result.groupHero || eventRecord.groupHero
+    };
+    setNotice(qs("#groupHeroNotice"), "Group artwork refresh started.", "success");
+    render();
+  } catch (error) {
+    setNotice(qs("#groupHeroNotice"), error.message || "Could not refresh group artwork.", "error");
+  } finally {
+    renderGroupHeroHostPanel();
   }
 }
 
@@ -1613,6 +1683,19 @@ function getLocalDemoHostPayload(path, options = {}) {
     return { event: localDemoHostState.event };
   }
 
+  if (path.endsWith("/group-hero/regenerate") && options.method === "POST") {
+    localDemoHostState.event = {
+      ...localDemoHostState.event,
+      groupHero: {
+        status: "queued",
+        imageUrl: "",
+        participantCount: 1,
+        updatedAt: new Date().toISOString()
+      }
+    };
+    return { groupHero: localDemoHostState.event.groupHero };
+  }
+
   if (path.endsWith("/posts") && options.method === "POST") {
     const item = createLocalDemoHostItem({
       id: `demo-host-${Date.now()}`,
@@ -1649,6 +1732,12 @@ function createLocalDemoHostState(id) {
     timeCapsule: {
       enabled: true,
       status: "draft"
+    },
+    groupHero: {
+      status: started ? "generating" : "empty",
+      imageUrl: "",
+      participantCount: started ? 1 : 0,
+      updatedAt: started ? new Date(Date.now() - 3 * 60 * 1000).toISOString() : ""
     }
   };
   const submissions = empty ? [] : [

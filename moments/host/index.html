@@ -31,7 +31,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260605-upload-review-email-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260605-ai-group-hero-1" />
 </head>
 <body class="host-page">
   <main class="app-shell">
@@ -167,6 +167,24 @@
       </section>
 
       <section class="dashboard" id="hostPostsPanel" hidden>
+        <section class="share-card group-hero-host-card" id="groupHeroHostCard">
+          <div class="panel-heading">
+            <div>
+              <span class="status-pill" id="groupHeroStatusPill">Not started</span>
+              <h2>AI group hero</h2>
+              <p class="muted">Preview the cartoon group artwork guests see from the upload link.</p>
+            </div>
+          </div>
+          <div class="group-hero-host-preview" id="groupHeroHostPreview">
+            <span class="muted">Approve AI-consented guest photos to start the group artwork.</span>
+          </div>
+          <p class="muted group-hero-host-meta" id="groupHeroHostMeta">No approved photos in the artwork yet.</p>
+          <div id="groupHeroNotice" class="notice" role="status" aria-live="polite" hidden></div>
+          <div class="row-actions share-actions">
+            <button class="small-button is-primary" type="button" id="regenerateGroupHeroButton">Regenerate</button>
+          </div>
+        </section>
+
         <div class="host-posts-panel">
           <div class="panel-heading">
             <div>
@@ -313,6 +331,6 @@
     <div class="media-modal-stage" id="modalStage"></div>
   </div>
 
-  <script type="module" src="host.js?v=20260605-host-token-local-1"></script>
+  <script type="module" src="host.js?v=20260605-ai-group-hero-1"></script>
 </body>
 </html>
