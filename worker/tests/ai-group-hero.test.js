@@ -399,6 +399,55 @@ test('group hero tries to normalize an OpenAI-rejected photo before excluding it
   }
 });
 
+test('host can backfill a normalized AI reference for an approved legacy photo and refresh the group hero', async () => {
+  const legacy = guestSubmission({
+    id: 'guest-legacy-invalid',
+    object_key: 'moments/event-hero/guest-legacy-invalid.jpg',
+    objectKey: 'moments/event-hero/guest-legacy-invalid.jpg',
+    guest_name: 'Legacy Source',
+    guestName: 'Legacy Source',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:04:00.000Z',
+    createdAt: '2026-09-19T20:04:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({ submissions: [legacy] });
+  const normalizedBytes = 'normalized-legacy-image';
+  const bucket = new FakeBucket([[legacy.object_key, 'legacy-original-bytes']]);
+  const env = envWithDb(db, bucket);
+  const calls = mockOpenAi({ normalizationBody: normalizedBytes });
+  const waitUntil = [];
+
+  try {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/submissions/guest-legacy-invalid/ai-reference/backfill', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://williamsonwallflowers.com',
+        Authorization: 'Bearer host-token'
+      }
+    }), env, { waitUntil: (work) => waitUntil.push(work) });
+    const payload = await response.json();
+
+    assert.equal(response.status, 202);
+    assert.equal(payload.aiReferenceReady, true);
+    assert.match(payload.objectKey, /^moments\/event-hero\/ai-references\/guest-legacy-invalid\.jpg$/);
+    assert.ok(bucket.objects.has('moments/event-hero/ai-references/guest-legacy-invalid.jpg'));
+
+    await Promise.all(waitUntil);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].imageCount, 1);
+    assert.match(calls[0].imageNames[0], /guest-legacy-invalid-ai-reference\.jpg$/);
+    assert.equal(calls[0].imageSizes[0], new TextEncoder().encode(normalizedBytes).byteLength);
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.equal(db.groupHeroes[0].participant_count, 1);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-legacy-invalid']);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('guest and host group hero endpoints enforce access tokens', async () => {
   const source = guestSubmission({
     id: 'guest-source',

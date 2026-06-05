@@ -251,6 +251,10 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
         return updateSubmissionPartyView(request, env, url, corsHeaders, parts[2], ctx);
       }
 
+      if (request.method === 'POST' && parts[3] === 'ai-reference' && parts[4] === 'backfill') {
+        return backfillSubmissionAiReference(request, env, url, corsHeaders, parts[2], ctx);
+      }
+
       if (request.method === 'PATCH') {
         return updateHostSubmission(request, env, url, corsHeaders, parts[2], ctx);
       }
@@ -1095,6 +1099,44 @@ async function updateHostSubmission(request, env, url, corsHeaders, submissionId
   }
 
   return json({ ok: true, status }, 200, corsHeaders);
+}
+
+async function backfillSubmissionAiReference(request, env, url, corsHeaders, submissionId, ctx) {
+  const token = getAccessToken(request, url);
+  const submission = await getSubmissionWithEvent(env, submissionId);
+
+  if (!submission || !isAuthorizedForSubmission(submission, token, env)) {
+    return json({ ok: false, message: 'This host gallery link is not valid.' }, 403, corsHeaders);
+  }
+
+  if (submission.deletedAt || submission.status === 'deleted') {
+    return json({ ok: false, message: 'Submission not found.' }, 404, corsHeaders);
+  }
+
+  if ((submission.mediaType || submission.media_type) !== 'photo') {
+    return json({ ok: false, message: 'Only photo submissions can be prepared for AI artwork this way.' }, 400, corsHeaders);
+  }
+
+  if ((submission.status || '').toLowerCase() !== 'approved' || !(submission.aiArtworkConsentAt || submission.ai_artwork_consent_at)) {
+    return json({ ok: false, message: 'Approve an AI-consented guest photo before preparing it for AI artwork.' }, 400, corsHeaders);
+  }
+
+  const normalizedSource = await normalizeGroupHeroSourceImage(env, request, submission.eventId || submission.event_id, submission);
+  if (!normalizedSource) {
+    return json({
+      ok: false,
+      message: 'This photo could not be prepared for AI artwork. Try re-uploading it as a JPEG if it keeps failing.'
+    }, 502, corsHeaders);
+  }
+
+  await queueEventGroupHeroGeneration(env, request, submission.eventId || submission.event_id, { force: true }, ctx);
+
+  return json({
+    ok: true,
+    aiReferenceReady: true,
+    objectKey: normalizedSource.aiReferenceObjectKey,
+    groupHeroStatus: 'queued'
+  }, 202, corsHeaders);
 }
 
 async function updateSubmissionPartyView(request, env, url, corsHeaders, submissionId, ctx) {
