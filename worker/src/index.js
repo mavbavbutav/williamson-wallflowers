@@ -19,6 +19,7 @@ const AUDIO_MAX_SECONDS = 60;
 const UPLOAD_TOKEN_TTL_SECONDS = 12 * 60 * 60;
 const MEDIA_TOKEN_TTL_SECONDS = 6 * 60 * 60;
 const THUMBNAIL_TOKEN_TTL_SECONDS = 6 * 60 * 60;
+const EMAIL_PREVIEW_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
 const STREAM_TOKEN_TTL_SECONDS = 6 * 60 * 60;
 const UPLOAD_RATE_LIMIT = 12;
 const UPLOAD_RATE_WINDOW_SECONDS = 60 * 60;
@@ -436,6 +437,7 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
     submissionId: id,
     sourceLabel: 'Guest upload',
     mediaType,
+    previewUrl: await buildUploadNotificationPreviewUrl(request, env, id, mediaType, thumbnailRecord.objectKey),
     originalFilename,
     size: media.size,
     title: '',
@@ -1407,8 +1409,8 @@ function normalizeStreamStatus(video, fallbackStatus = 'queued') {
   return fallbackStatus;
 }
 
-async function buildMediaAccessUrl(request, env, submissionId) {
-  const mediaToken = await createSignedToken(env, 'media', submissionId, MEDIA_TOKEN_TTL_SECONDS);
+async function buildMediaAccessUrl(request, env, submissionId, ttlSeconds = MEDIA_TOKEN_TTL_SECONDS) {
+  const mediaToken = await createSignedToken(env, 'media', submissionId, ttlSeconds);
   return `${getApiOrigin(request, env)}/moments-api/media/${encodeURIComponent(submissionId)}?mediaToken=${encodeURIComponent(mediaToken)}&disposition=inline`;
 }
 
@@ -2851,6 +2853,7 @@ function buildUploadNotificationEmail(details) {
   if (details.guestName) lines.push(`Guest name: ${details.guestName}`);
   if (details.guestNote) lines.push(`Note: ${details.guestNote}`);
   if (details.event?.hostName) lines.push(`Event host: ${details.event.hostName}`);
+  if (details.previewUrl) lines.push(`Preview: ${details.previewUrl}`);
   if (details.reviewUrl) {
     lines.push(
       '',
@@ -2903,6 +2906,7 @@ function buildUploadNotificationHtml(details) {
     ? `<a href="${escapeEmailAttribute(details.reviewUrl)}" style="display:inline-block;margin-top:20px;border-radius:8px;background:#2f6f5f;color:#fffaf5;font-size:16px;font-weight:800;line-height:1;text-decoration:none;padding:15px 20px;">Review submission</a>
       <p style="margin:14px 0 0;color:#7a6d66;font-size:13px;line-height:1.5;">This opens the private host dashboard for approval, Party View, Time Capsule, or rejection.</p>`
     : '';
+  const previewBlock = buildUploadNotificationPreviewHtml(details, mediaLabel, eventName);
 
   return `<!doctype html>
 <html>
@@ -2921,6 +2925,7 @@ function buildUploadNotificationHtml(details) {
             <tr>
               <td style="padding:24px 26px;">
                 <p style="margin:0 0 18px;color:#4f4742;font-size:16px;line-height:1.6;">${escapeEmailHtml(intro)}</p>
+                ${previewBlock}
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-top:1px solid #eadfd6;border-bottom:1px solid #eadfd6;padding:8px 0;">
                   ${rows}
                 </table>
@@ -2933,6 +2938,27 @@ function buildUploadNotificationHtml(details) {
     </table>
   </body>
 </html>`;
+}
+
+function buildUploadNotificationPreviewHtml(details, mediaLabel, eventName) {
+  if (details.sourceLabel !== 'Guest upload' || !details.previewUrl) return '';
+
+  return `<div style="margin:0 0 20px;">
+                  <div style="margin:0 0 8px;color:#7a6d66;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0;">Media preview</div>
+                  <img src="${escapeEmailAttribute(details.previewUrl)}" width="588" alt="${escapeEmailAttribute(`${mediaLabel} preview for ${eventName}`)}" style="display:block;width:100%;max-width:588px;max-height:360px;object-fit:contain;border-radius:10px;border:1px solid #eadfd6;background:#1f1d1a;">
+                </div>`;
+}
+
+async function buildUploadNotificationPreviewUrl(request, env, submissionId, mediaType, thumbnailObjectKey = '') {
+  if (mediaType === 'photo') {
+    return buildMediaAccessUrl(request, env, submissionId, EMAIL_PREVIEW_TOKEN_TTL_SECONDS);
+  }
+
+  if (mediaType === 'video' && thumbnailObjectKey) {
+    return buildThumbnailAccessUrl(request, env, submissionId, EMAIL_PREVIEW_TOKEN_TTL_SECONDS);
+  }
+
+  return '';
 }
 
 function buildUploadReviewUrl(env, details) {
@@ -3829,8 +3855,8 @@ async function buildThumbnailClient(row, request, env, submissionId, mediaType, 
   };
 }
 
-async function buildThumbnailAccessUrl(request, env, submissionId) {
-  const thumbnailToken = await createSignedToken(env, 'thumbnail', submissionId, THUMBNAIL_TOKEN_TTL_SECONDS);
+async function buildThumbnailAccessUrl(request, env, submissionId, ttlSeconds = THUMBNAIL_TOKEN_TTL_SECONDS) {
+  const thumbnailToken = await createSignedToken(env, 'thumbnail', submissionId, ttlSeconds);
   return `${getApiOrigin(request, env)}/moments-api/media/${encodeURIComponent(submissionId)}/thumbnail?thumbnailToken=${encodeURIComponent(thumbnailToken)}`;
 }
 

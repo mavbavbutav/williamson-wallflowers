@@ -83,9 +83,56 @@ test('guest media upload sends an internal Resend notification email', async () 
     assert.match(sentEmails[0].body.text, new RegExp(`submission=${submissionId}`));
     assert.match(sentEmails[0].body.text, /#token=host-token/);
     assert.match(sentEmails[0].body.html, /A new photo is waiting for review/);
+    assert.match(sentEmails[0].body.html, /Media preview/);
+    assert.match(sentEmails[0].body.html, /moments-api\/media\/[^"']+mediaToken=/);
     assert.match(sentEmails[0].body.html, /Review submission/);
     assert.match(sentEmails[0].body.html, new RegExp(`submission=${submissionId}`));
     assert.match(sentEmails[0].body.html, /#token=host-token/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('guest video upload email previews the reusable thumbnail still', async () => {
+  const db = new UploadFakeDb();
+  const bucket = new FakeBucket();
+  const sentEmails = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    sentEmails.push({ url, body: JSON.parse(init.body), headers: init.headers });
+    return new Response('', { status: 202 });
+  };
+
+  try {
+    const env = envWithDb(db, bucket, {
+      resend: 'resend-test-key',
+      FROM_EMAIL: 'Williamson Wallflowers <noreply@example.com>'
+    });
+    const tokenResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/tags/voice-tag', {
+      headers: { Origin: 'https://williamsonwallflowers.com' }
+    }), env);
+    const { uploadToken } = await tokenResponse.json();
+    const formData = new FormData();
+    formData.set('media', new File(['video-bytes'], 'dance.mp4', { type: 'video/mp4' }));
+    formData.set('thumbnail', new File(['jpeg-bytes'], 'dance-thumb.jpg', { type: 'image/jpeg' }));
+    formData.set('mediaType', 'video');
+    formData.set('durationSeconds', '12');
+    formData.set('guestName', 'Jordan');
+    formData.set('guestNote', 'Dance floor');
+    formData.set('consent', 'true');
+    formData.set('uploadToken', uploadToken);
+
+    const uploadResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/events/event-voice/submissions', {
+      method: 'POST',
+      headers: { Origin: 'https://williamsonwallflowers.com' },
+      body: formData
+    }), env);
+
+    assert.equal(uploadResponse.status, 201);
+    assert.equal(sentEmails.length, 1);
+    assert.match(sentEmails[0].body.subject, /Guest video upload/i);
+    assert.match(sentEmails[0].body.html, /Media preview/);
+    assert.match(sentEmails[0].body.html, /moments-api\/media\/[^"']+\/thumbnail\?thumbnailToken=/);
   } finally {
     globalThis.fetch = originalFetch;
   }

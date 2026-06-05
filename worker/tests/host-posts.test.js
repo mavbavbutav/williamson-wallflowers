@@ -91,6 +91,7 @@ test('host media upload sends an internal Resend notification email', async () =
     assert.match(sentEmails[0].body.text, /Caption: First dance is starting\./);
     assert.doesNotMatch(sentEmails[0].body.text, /Review this submission/);
     assert.match(sentEmails[0].body.html, /A new host photo was posted/);
+    assert.doesNotMatch(sentEmails[0].body.html, /Media preview/);
     assert.doesNotMatch(sentEmails[0].body.html, /Review submission/);
   } finally {
     globalThis.fetch = originalFetch;
