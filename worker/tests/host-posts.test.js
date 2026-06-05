@@ -190,6 +190,54 @@ test('guest can react to a visible moment from the Party View', async () => {
   assert.equal(db.reactions[0].reaction, 'laugh');
 });
 
+test('guest can only like a moment once per session', async () => {
+  const db = new HostPostsFakeDb({
+    submissions: [guestSubmission({
+      id: 'guest-visible',
+      status: 'approved',
+      guest_visible_at: '2026-09-20T20:20:00.000Z',
+      guestVisibleAt: '2026-09-20T20:20:00.000Z'
+    })]
+  });
+  const env = envWithDb(db, new FakeBucket());
+
+  const tokenResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/tags/host-tag', {
+    headers: { Origin: 'https://williamsonwallflowers.com' }
+  }), env);
+  const { uploadToken } = await tokenResponse.json();
+
+  const sessionId = 'session-like-test-1';
+  const firstResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/events/event-host/submissions/guest-visible/reactions', {
+    method: 'POST',
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      Authorization: `Bearer ${uploadToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ reaction: 'like', sessionId })
+  }), env);
+  const firstPayload = await firstResponse.json();
+
+  const secondResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/events/event-host/submissions/guest-visible/reactions', {
+    method: 'POST',
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      Authorization: `Bearer ${uploadToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ reaction: 'like', sessionId })
+  }), env);
+  const secondPayload = await secondResponse.json();
+
+  assert.equal(firstResponse.status, 201);
+  assert.equal(firstPayload.ok, true);
+  assert.equal(firstPayload.interactions.counts.like, 1);
+  assert.equal(secondResponse.status, 409);
+  assert.equal(secondPayload.ok, false);
+  assert.equal(secondPayload.message.includes('already liked this moment'), true);
+  assert.equal(db.reactions.length, 1);
+});
+
 test('guest can post a comment to a visible moment', async () => {
   const db = new HostPostsFakeDb({
     submissions: [guestSubmission({

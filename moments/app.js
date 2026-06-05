@@ -14,6 +14,8 @@ const HOST_POSTS_POLL_INTERVAL_MS = 10000;
 const MOMENT_COMMENT_MAX_LENGTH = 320;
 const MOMENT_PRIMARY_REACTION_ID = "like";
 const MOMENT_REACTION_LONG_PRESS_MS = 420;
+const MOMENT_REACTION_SESSION_KEY = "wallflowerMomentSessionId";
+const MOMENT_REACTION_LIKES_KEY = "wallflowerMomentLikedSubmissions";
 const MOMENT_REACTIONS = [
   { id: "like", emoji: "&#x1F44D;", label: "Like" },
   { id: "dislike", emoji: "&#x1F44E;", label: "Dislike" },
@@ -30,6 +32,7 @@ const state = {
   tagCode: getParam("t"),
   event: null,
   uploadToken: "",
+  guestSessionId: "",
   mode: "",
   stream: null,
   recorder: null,
@@ -82,6 +85,7 @@ init();
 
 async function init() {
   bindEvents();
+  state.guestSessionId = getOrCreateGuestSessionId();
 
   if (!state.tagCode) {
     showError("This link is missing its tag code. Please scan the Wallflower Moments tag again.");
@@ -229,7 +233,9 @@ function renderHostPosts() {
   } else {
     grid.innerHTML = "";
     posts.forEach((item) => {
-      grid.append(renderHostPostCard(item));
+      const card = renderHostPostCard(item);
+      applyMomentInteractionsToCard(card, item);
+      grid.append(card);
     });
   }
 }
@@ -348,6 +354,7 @@ function renderGuestPartySwipeFeed(posts) {
   posts.forEach((item) => {
     const card = renderGuestPartySwipeCard(item);
     if (item?.id) card.dataset.hostPostId = item.id;
+    applyMomentInteractionsToCard(card, item);
     feed.append(card);
   });
 }
@@ -488,6 +495,8 @@ function renderHostPostCard(item) {
 
 function buildMomentInteractionsMarkup(item) {
   const interactions = normalizeMomentInteractions(item.interactions);
+  const submissionId = item?.submissionId || "";
+  const hasLiked = hasLikedSubmission(submissionId);
   const reactionPickerButtons = MOMENT_REACTION_PIVOT_OPTIONS.map((reaction) => `
     <button
       class="moment-action-button moment-reaction-option"
@@ -518,6 +527,8 @@ function buildMomentInteractionsMarkup(item) {
             data-moment-action="reaction"
             data-reaction="${MOMENT_PRIMARY_REACTION_ID}"
             data-moment-primary-reaction="1"
+            ${hasLiked ? "data-moment-liked=\"1\"" : ""}
+            ${hasLiked ? "disabled" : ""}
             aria-label="Like"
             aria-expanded="false"
             aria-controls="moment-reaction-picker-${item.submissionId}"
@@ -767,6 +778,14 @@ function closeAllMomentReactionPickers(excludeCard = null) {
 
 async function submitMomentReaction(card, submissionId, reaction, button) {
   if (!button) return;
+  if (reaction === MOMENT_PRIMARY_REACTION_ID && hasLikedSubmission(submissionId)) {
+    setNotice(qs("#hostPostsNotice"), "You already liked this moment.", "error");
+    return;
+  }
+
+  const countNode = button.querySelector(`[data-moment-reaction-count="${reaction}"]`);
+  const previousCount = Number(countNode?.textContent) || 0;
+  if (countNode) countNode.textContent = `${Math.max(0, previousCount) + 1}`;
 
   const originalText = button.innerHTML;
   button.disabled = true;
@@ -777,18 +796,30 @@ async function submitMomentReaction(card, submissionId, reaction, button) {
       headers: {
         Authorization: `Bearer ${state.uploadToken}`
       },
-      body: JSON.stringify({ reaction })
+      body: JSON.stringify({ reaction, sessionId: state.guestSessionId })
     });
     if (payload?.interactions && payload.submissionId) {
       syncHostPostInteractions(payload.submissionId, payload.interactions);
+      if (reaction === MOMENT_PRIMARY_REACTION_ID) {
+        markLikedSubmission(submissionId);
+        if (card) {
+          syncMomentLikeState(card, submissionId);
+        }
+      }
     } else {
       setNotice(qs("#hostPostsNotice"), payload?.message || "That reaction could not be sent.", "error");
     }
   } catch (error) {
+    if (countNode) countNode.textContent = `${Math.max(0, previousCount)}`;
     setNotice(qs("#hostPostsNotice"), error.message || "That reaction could not be sent.", "error");
   } finally {
     button.disabled = false;
     button.innerHTML = originalText;
+    if (button.dataset && button.dataset.momentPrimaryReaction === "1") {
+      if (hasLikedSubmission(submissionId)) {
+        button.disabled = true;
+      }
+    }
   }
 }
 
@@ -880,6 +911,78 @@ function applyMomentInteractionsToCard(card, item) {
         .join("");
     }
   }
+
+  syncMomentLikeState(card, item.submissionId);
+}
+
+function syncMomentLikeState(card, submissionId) {
+  if (!card) return;
+
+  const likeButton = card.querySelector('[data-moment-action="reaction"][data-moment-primary-reaction="1"]');
+  if (!likeButton) return;
+
+  const hasLiked = hasLikedSubmission(submissionId);
+  likeButton.classList.toggle("moment-reaction-liked", hasLiked);
+  if (hasLiked) {
+    likeButton.dataset.momentLiked = "1";
+  } else {
+    likeButton.removeAttribute("data-moment-liked");
+  }
+  likeButton.disabled = hasLiked;
+  likeButton.setAttribute("aria-pressed", hasLiked ? "true" : "false");
+}
+
+function getOrCreateGuestSessionId() {
+  try {
+    const existing = window.localStorage.getItem(MOMENT_REACTION_SESSION_KEY);
+    if (existing) return existing;
+
+    const fallback = `guest-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const next = window.crypto?.randomUUID ? window.crypto.randomUUID() : fallback;
+    window.localStorage.setItem(MOMENT_REACTION_SESSION_KEY, next);
+    return next;
+  } catch {
+    return `guest-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+}
+
+function getGuestReactionLikesMap() {
+  try {
+    const raw = window.localStorage.getItem(MOMENT_REACTION_LIKES_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function setGuestReactionLikesMap(next) {
+  try {
+    window.localStorage.setItem(MOMENT_REACTION_LIKES_KEY, JSON.stringify(next || {}));
+  } catch {
+    // localStorage can be unavailable in some privacy/privacy modes.
+  }
+}
+
+function getGuestReactionKey(submissionId) {
+  const eventId = state.event?.id || "unknown-event";
+  return `${eventId}:${submissionId}`;
+}
+
+function hasLikedSubmission(submissionId) {
+  if (!submissionId) return false;
+  const key = getGuestReactionKey(submissionId);
+  const reactionMap = getGuestReactionLikesMap();
+  return reactionMap[key] === true;
+}
+
+function markLikedSubmission(submissionId) {
+  if (!submissionId) return;
+  const key = getGuestReactionKey(submissionId);
+  const reactionMap = getGuestReactionLikesMap();
+  if (reactionMap[key]) return;
+  reactionMap[key] = true;
+  setGuestReactionLikesMap(reactionMap);
 }
 
 function bindPartyVideoOverlay(card, video) {

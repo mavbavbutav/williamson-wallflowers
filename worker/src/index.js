@@ -42,6 +42,8 @@ const UPLOAD_NOTIFICATION_RECIPIENT = 'contact@jjentertainmentsolutions.com';
 const INTERACTION_REACTIONS = ['like', 'dislike', 'laugh', 'cry', 'surprised'];
 const INTERACTION_RATE_LIMIT = 12;
 const INTERACTION_RATE_WINDOW_SECONDS = 60;
+const LIKE_INTERACTION_RATE_LIMIT = 1;
+const LIKE_INTERACTION_RATE_WINDOW_SECONDS = 60 * 60 * 24 * 365;
 const MAX_COMMENT_LENGTH = 320;
 const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 const THUMBNAIL_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -528,16 +530,24 @@ async function addSubmissionReaction(request, env, url, corsHeaders, eventId, su
     return json({ ok: false, message: 'This guest link is not valid.' }, 403, corsHeaders);
   }
 
-  const scope = await getClientRateLimitKey(request, `interaction:${event.id}:${submissionId}`);
-  const rateResult = await consumeRateLimit(env, scope, INTERACTION_RATE_LIMIT, INTERACTION_RATE_WINDOW_SECONDS);
-  if (!rateResult.ok) {
-    return json({ ok: false, message: 'You are reacting too quickly. Please wait a moment.' }, 429, corsHeaders);
-  }
-
   const payload = await request.json().catch(() => null);
   const reaction = String(payload?.reaction || '').trim().toLowerCase();
   if (!INTERACTION_REACTIONS.includes(reaction)) {
     return json({ ok: false, message: `Unsupported reaction: ${reaction || 'empty'}` }, 400, corsHeaders);
+  }
+
+  if (reaction === 'like') {
+    const likeScope = await getReactionActorLimitScope(request, event.id, submissionId, String(payload?.sessionId || ""));
+    const likeRateResult = await consumeRateLimit(env, likeScope, LIKE_INTERACTION_RATE_LIMIT, LIKE_INTERACTION_RATE_WINDOW_SECONDS);
+    if (!likeRateResult.ok) {
+      return json({ ok: false, message: 'You already liked this moment. Try a different reaction if you want to show something else.' }, 409, corsHeaders);
+    }
+  }
+
+  const scope = await getClientRateLimitKey(request, `interaction:${event.id}:${submissionId}`);
+  const rateResult = await consumeRateLimit(env, scope, INTERACTION_RATE_LIMIT, INTERACTION_RATE_WINDOW_SECONDS);
+  if (!rateResult.ok) {
+    return json({ ok: false, message: 'You are reacting too quickly. Please wait a moment.' }, 429, corsHeaders);
   }
 
   const submission = await getGuestPartyVisibleSubmission(env, event.id, submissionId);
@@ -2495,6 +2505,20 @@ async function getClientRateLimitKey(request, scope) {
   const userAgent = request.headers.get('User-Agent') || 'unknown';
   const digest = await sha256Hex(`${ip}|${userAgent}`);
   return `${scope}:${digest.slice(0, 32)}`;
+}
+
+async function getReactionActorLimitScope(request, eventId, submissionId, sessionId = "") {
+  const normalizedEventId = String(eventId || '').trim();
+  const normalizedSubmissionId = String(submissionId || '').trim();
+  const normalizedSessionId = String(sessionId || '').trim();
+  const baseScope = `interaction:${normalizedEventId}:${normalizedSubmissionId}:like:actor`;
+
+  if (normalizedSessionId) {
+    const sessionDigest = await sha256Hex(`session:${normalizedSessionId}`);
+    return `${baseScope}:session:${sessionDigest.slice(0, 32)}`;
+  }
+
+  return getClientRateLimitKey(request, `interaction:${normalizedEventId}:${normalizedSubmissionId}:like`);
 }
 
 async function validateEventQuota(env, eventId, incomingBytes) {
