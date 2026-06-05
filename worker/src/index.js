@@ -47,6 +47,7 @@ const GROUP_HERO_SOURCE_LOOKBACK_LIMIT = GROUP_HERO_MAX_INPUTS * 4;
 const GROUP_HERO_TOKEN_TTL_SECONDS = 6 * 60 * 60;
 const GROUP_HERO_FORCE_RATE_LIMIT = 6;
 const GROUP_HERO_FORCE_RATE_WINDOW_SECONDS = 60 * 60;
+const GROUP_HERO_GENERATION_STALE_SECONDS = 5 * 60;
 const GROUP_HERO_DEFAULT_MODEL = 'gpt-image-1.5';
 const GROUP_HERO_PROMPT = buildGroupHeroPrompt('the event');
 const STANDARD_RETENTION_DAYS = 90;
@@ -1377,6 +1378,7 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
   const sourceIds = sources.map((source) => source.id);
   const existing = await getEventGroupHero(env, eventId);
   const existingObjectKey = existing?.object_key || existing?.objectKey || '';
+  const staleGeneration = isStaleGroupHeroGeneration(existing);
 
   if (sources.length === 0) {
     await storeEventGroupHeroState(env, {
@@ -1402,8 +1404,12 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
     return;
   }
 
-  if (!force && sourceIdsMatch(getGroupHeroSourceIds(existing), sourceIds)) {
+  if (!force && sourceIdsMatch(getGroupHeroSourceIds(existing), sourceIds) && !staleGeneration) {
     return;
+  }
+
+  if (staleGeneration) {
+    console.warn('Retrying stale AI group hero generation', eventId, existing?.status || 'unknown');
   }
 
   await storeEventGroupHeroState(env, {
@@ -1420,7 +1426,7 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
     generatedAt: existing?.generated_at || existing?.generatedAt || null
   });
 
-  const work = generateEventGroupHero(env, request, eventId, sources, sourceIds, prompt, existingObjectKey).catch(async (error) => {
+  const work = generateEventGroupHero(env, request, eventId, sources, sourceIds, prompt, existingObjectKey, existing).catch(async (error) => {
     console.error('AI group hero generation failed', eventId, String(error.message || error));
     await storeEventGroupHeroState(env, {
       eventId,
@@ -1445,20 +1451,24 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
   await work;
 }
 
-async function generateEventGroupHero(env, request, eventId, sources, sourceIds, prompt = GROUP_HERO_PROMPT, previousObjectKey = '') {
+async function generateEventGroupHero(env, request, eventId, sources, sourceIds, prompt = GROUP_HERO_PROMPT, previousObjectKey = '', previousHero = {}) {
   const now = new Date().toISOString();
+  const previousMimeType = previousHero?.mime_type || previousHero?.mimeType || (previousObjectKey ? 'image/png' : null);
+  const previousSize = Number(previousHero?.size || 0);
+  const previousGeneratedAt = previousHero?.generated_at || previousHero?.generatedAt || null;
+
   await storeEventGroupHeroState(env, {
     eventId,
     status: 'generating',
     objectKey: previousObjectKey || null,
-    mimeType: 'image/png',
-    size: 0,
+    mimeType: previousMimeType || 'image/png',
+    size: previousSize,
     participantCount: sources.length,
     sourceIds,
     model: getOpenAiImageModel(env),
     prompt,
     errorMessage: '',
-    generatedAt: null
+    generatedAt: previousGeneratedAt
   });
 
   const apiKey = getOpenAiApiKey(env);
@@ -1504,14 +1514,14 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
           eventId,
           status: 'generating',
           objectKey: previousObjectKey || null,
-          mimeType: 'image/png',
-          size: 0,
+          mimeType: previousMimeType || 'image/png',
+          size: previousSize,
           participantCount: activeSources.length,
           sourceIds: activeSourceIds,
           model: getOpenAiImageModel(env),
           prompt,
           errorMessage: '',
-          generatedAt: null
+          generatedAt: previousGeneratedAt
         });
         continue;
       }
@@ -1528,14 +1538,14 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
         eventId,
         status: 'generating',
         objectKey: previousObjectKey || null,
-        mimeType: 'image/png',
-        size: 0,
+        mimeType: previousMimeType || 'image/png',
+        size: previousSize,
         participantCount: activeSources.length,
         sourceIds: activeSourceIds,
         model: getOpenAiImageModel(env),
         prompt,
         errorMessage: '',
-        generatedAt: null
+        generatedAt: previousGeneratedAt
       });
     }
   }
@@ -1904,6 +1914,17 @@ function sourceIdsMatch(previous, next) {
   if (!Array.isArray(previous) || !Array.isArray(next)) return false;
   if (previous.length !== next.length) return false;
   return previous.every((id, index) => id === next[index]);
+}
+
+function isStaleGroupHeroGeneration(row) {
+  const status = row?.status || '';
+  if (status !== 'queued' && status !== 'generating') return false;
+
+  const updatedAt = row?.updated_at || row?.updatedAt || '';
+  const updatedTime = new Date(updatedAt).getTime();
+  if (!Number.isFinite(updatedTime)) return false;
+
+  return Date.now() - updatedTime > GROUP_HERO_GENERATION_STALE_SECONDS * 1000;
 }
 
 async function r2ObjectToArrayBuffer(object) {

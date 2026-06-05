@@ -304,6 +304,47 @@ test('OpenAI timeout stores failed group hero state without leaving generation s
   }
 });
 
+test('stale generating group hero state can be retried with the same source set', async () => {
+  const submission = guestSubmission({
+    id: 'guest-stale',
+    object_key: 'moments/event-hero/guest-stale.jpg',
+    objectKey: 'moments/event-hero/guest-stale.jpg',
+    status: 'pending',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [submission],
+    groupHeroes: [readyHero({
+      status: 'generating',
+      object_key: 'moments/event-hero/generated/previous-group-hero.png',
+      objectKey: 'moments/event-hero/generated/previous-group-hero.png',
+      source_submission_ids: JSON.stringify(['guest-stale']),
+      sourceSubmissionIds: JSON.stringify(['guest-stale']),
+      updated_at: '2020-01-01T00:00:00.000Z',
+      updatedAt: '2020-01-01T00:00:00.000Z'
+    })]
+  });
+  const bucket = new FakeBucket([
+    [submission.object_key, 'source-photo'],
+    ['moments/event-hero/generated/previous-group-hero.png', 'previous-generated']
+  ]);
+  const calls = mockOpenAi();
+
+  try {
+    const response = await approveSubmission(envWithDb(db, bucket), submission.id);
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.status, 'approved');
+    assert.equal(calls.length, 1);
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-stale']);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('group hero retries without an OpenAI-rejected input image', async () => {
   const invalid = guestSubmission({
     id: 'guest-invalid',
