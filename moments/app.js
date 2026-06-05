@@ -52,7 +52,7 @@ const state = {
   hostPostsTimerId: 0,
   countdownTimerId: 0,
   isCountdownLocked: false,
-  pendingLikeSubmissionKeys: new Set()
+  pendingLikeSubmissionKeys: new Map()
 };
 
 const views = {
@@ -794,7 +794,7 @@ async function submitMomentReaction(card, submissionId, reaction, button) {
   button.disabled = true;
 
   if (isLikeReaction) {
-    markMomentLikePending(submissionId);
+    markMomentLikePending(submissionId, previousCount);
     syncMomentLikeState(card, submissionId);
   }
 
@@ -808,7 +808,10 @@ async function submitMomentReaction(card, submissionId, reaction, button) {
     });
     if (payload?.interactions && payload.submissionId) {
       if (isLikeReaction) {
-        clearMomentLikePending(submissionId);
+        const serverLikeCount = Number(payload.interactions?.counts?.[MOMENT_PRIMARY_REACTION_ID] || 0);
+        if (serverLikeCount >= previousCount + 1) {
+          clearMomentLikePending(submissionId);
+        }
         markLikedSubmission(submissionId);
       }
       syncHostPostInteractions(payload.submissionId, payload.interactions);
@@ -843,10 +846,16 @@ function isMomentLikeLocked(submissionId) {
   return !!(key && (state.pendingLikeSubmissionKeys.has(key) || hasLikedSubmission(submissionId)));
 }
 
-function markMomentLikePending(submissionId) {
+function getMomentLikePendingBase(submissionId) {
+  const key = getSubmissionReactionKey(submissionId);
+  if (!key) return 0;
+  return state.pendingLikeSubmissionKeys.has(key) ? Number(state.pendingLikeSubmissionKeys.get(key) || 0) : 0;
+}
+
+function markMomentLikePending(submissionId, baselineCount) {
   const key = getSubmissionReactionKey(submissionId);
   if (!key) return;
-  state.pendingLikeSubmissionKeys.add(key);
+  state.pendingLikeSubmissionKeys.set(key, Number(baselineCount || 0));
 }
 
 function clearMomentLikePending(submissionId) {
@@ -873,6 +882,17 @@ function isMomentLikePending(submissionId) {
   return !!(key && state.pendingLikeSubmissionKeys.has(key));
 }
 
+function syncPendingLikeIfNeeded(interactions, submissionId) {
+  const key = getSubmissionReactionKey(submissionId);
+  if (!key || !state.pendingLikeSubmissionKeys.has(key)) return;
+
+  const baseline = getMomentLikePendingBase(submissionId);
+  const serverCount = Number(interactions?.counts?.[MOMENT_PRIMARY_REACTION_ID] || 0);
+  if (serverCount >= baseline + 1) {
+    clearMomentLikePending(submissionId);
+  }
+}
+
 function syncMomentLikeState(card, submissionId) {
   if (!card) return;
 
@@ -892,6 +912,7 @@ function syncMomentLikeState(card, submissionId) {
 
 function applyMomentInteractionsToCard(card, item) {
   const interactions = normalizeMomentInteractions(item.interactions);
+  syncPendingLikeIfNeeded(interactions, item.submissionId);
   const row = card.querySelector(".moment-reaction-row");
   if (row) {
     row.querySelectorAll(".moment-action-button[data-reaction]").forEach((button) => {
