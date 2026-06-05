@@ -49,7 +49,7 @@ test('guest upload accepts an audio-only voice memo', async () => {
   assert.equal(bucket.puts[0].metadata.customMetadata.mediaType, 'audio');
 });
 
-test('guest media upload sends an internal Resend notification email', async () => {
+test('guest media upload sends a host-facing Resend review email', async () => {
   const db = new UploadFakeDb();
   const bucket = new FakeBucket();
   const sentEmails = [];
@@ -73,19 +73,31 @@ test('guest media upload sends an internal Resend notification email', async () 
     assert.equal(sentEmails[0].url, 'https://api.resend.com/emails');
     assert.equal(sentEmails[0].headers.Authorization, 'Bearer resend-test-key');
     assert.deepEqual(sentEmails[0].body.to, ['contact@jjentertainmentsolutions.com', 'taylor@example.com']);
-    assert.match(sentEmails[0].body.subject, /Guest photo upload/i);
+    assert.match(sentEmails[0].body.subject, /Jordan shared a photo/i);
     assert.match(sentEmails[0].body.text, /Event: Voice Memo Test/);
-    assert.match(sentEmails[0].body.text, /Source: Guest upload/);
-    assert.match(sentEmails[0].body.text, /Media type: photo/);
-    assert.match(sentEmails[0].body.text, /Guest name: Jordan/);
-    assert.match(sentEmails[0].body.text, /Note: Loved this wall/);
-    assert.match(sentEmails[0].body.text, /Review this submission:/);
+    assert.match(sentEmails[0].body.text, /Guest: Jordan/);
+    assert.match(sentEmails[0].body.text, /Message from guest: Loved this wall/);
+    assert.match(sentEmails[0].body.text, /Approve or reject/);
+    assert.match(sentEmails[0].body.text, /Review this moment:/);
+    assert.doesNotMatch(sentEmails[0].body.text, /Event ID:/);
+    assert.doesNotMatch(sentEmails[0].body.text, /Source:/);
+    assert.doesNotMatch(sentEmails[0].body.text, /Media type:/);
+    assert.doesNotMatch(sentEmails[0].body.text, /Filename:/);
+    assert.doesNotMatch(sentEmails[0].body.text, /Size:/);
+    assert.doesNotMatch(sentEmails[0].body.text, /Status:/);
+    assert.doesNotMatch(sentEmails[0].body.text, /Uploaded at:/);
     assert.match(sentEmails[0].body.text, new RegExp(`submission=${submissionId}`));
     assert.match(sentEmails[0].body.text, /#token=host-token/);
-    assert.match(sentEmails[0].body.html, /A new photo is waiting for review/);
+    assert.match(sentEmails[0].body.html, /Jordan shared a new photo/);
+    assert.match(sentEmails[0].body.html, /Approve or reject/);
+    assert.match(sentEmails[0].body.html, /Loved this wall/);
+    assert.doesNotMatch(sentEmails[0].body.html, /Event ID/);
+    assert.doesNotMatch(sentEmails[0].body.html, /Source/);
+    assert.doesNotMatch(sentEmails[0].body.html, /Filename/);
+    assert.doesNotMatch(sentEmails[0].body.html, /Uploaded at/);
     assert.match(sentEmails[0].body.html, /Media preview/);
     assert.match(sentEmails[0].body.html, /moments-api\/media\/[^"']+mediaToken=/);
-    assert.match(sentEmails[0].body.html, /Review submission/);
+    assert.match(sentEmails[0].body.html, /Review this moment/);
     assert.match(sentEmails[0].body.html, new RegExp(`submission=${submissionId}`));
     assert.match(sentEmails[0].body.html, /#token=host-token/);
   } finally {
@@ -130,7 +142,7 @@ test('guest video upload email previews the reusable thumbnail still', async () 
 
     assert.equal(uploadResponse.status, 201);
     assert.equal(sentEmails.length, 1);
-    assert.match(sentEmails[0].body.subject, /Guest video upload/i);
+    assert.match(sentEmails[0].body.subject, /Jordan shared a video/i);
     assert.match(sentEmails[0].body.html, /Media preview/);
     assert.match(sentEmails[0].body.html, /moments-api\/media\/[^"']+\/thumbnail\?thumbnailToken=/);
   } finally {

@@ -2719,7 +2719,7 @@ async function sendUploadNotification(env, details) {
   const recipients = getUploadNotificationRecipients(notification);
   if (recipients.length === 0) return;
 
-  const subject = `Wallflower Moments ${getUploadNotificationSubjectSource(details.sourceLabel)} ${details.mediaType} upload`;
+  const subject = buildUploadNotificationSubject(notification);
   const result = await sendEmail({
     env,
     to: recipients,
@@ -2835,6 +2835,10 @@ jamicarswell@gmail.com`;
 }
 
 function buildUploadNotificationEmail(details) {
+  if (details.sourceLabel === 'Guest upload') {
+    return buildGuestUploadNotificationEmail(details);
+  }
+
   const lines = [
     'A new Wallflower Moments media upload was received.',
     '',
@@ -2867,16 +2871,42 @@ function buildUploadNotificationEmail(details) {
   return lines.join('\n');
 }
 
-function buildUploadNotificationHtml(details) {
-  const eventName = details.event?.name || 'Unknown event';
-  const isGuestUpload = details.sourceLabel === 'Guest upload';
+function buildGuestUploadNotificationEmail(details) {
+  const eventName = details.event?.name || 'your event';
   const mediaLabel = getUploadMediaLabel(details.mediaType);
-  const headline = isGuestUpload
-    ? `A new ${mediaLabel} is waiting for review`
-    : `A new host ${mediaLabel} was posted`;
-  const intro = isGuestUpload
-    ? 'A guest just shared a moment. Open the host dashboard to review it and choose where it belongs.'
-    : 'A host post was added to this event.';
+  const guestName = getUploadGuestName(details);
+  const lines = [
+    `${guestName} shared a new ${mediaLabel} for ${eventName}.`,
+    '',
+    `Event: ${eventName}`,
+    `Guest: ${guestName}`,
+    `Moment: ${capitalizeFirst(mediaLabel)}`
+  ];
+
+  if (details.guestNote) lines.push(`Message from guest: ${details.guestNote}`);
+  if (details.previewUrl) lines.push(`Preview image: ${details.previewUrl}`);
+  if (details.reviewUrl) {
+    lines.push(
+      '',
+      'Review this moment:',
+      details.reviewUrl,
+      '',
+      'Approve or reject it in the host dashboard. Approved moments can go to Party View, the Time Capsule, or both.'
+    );
+  }
+
+  return lines.join('\n');
+}
+
+function buildUploadNotificationHtml(details) {
+  if (details.sourceLabel === 'Guest upload') {
+    return buildGuestUploadNotificationHostHtml(details);
+  }
+
+  const eventName = details.event?.name || 'Unknown event';
+  const mediaLabel = getUploadMediaLabel(details.mediaType);
+  const headline = `A new host ${mediaLabel} was posted`;
+  const intro = 'A host post was added to this event.';
   const detailRows = [
     ['Event', eventName],
     ['Event ID', details.event?.id || 'Unknown event ID'],
@@ -2940,6 +2970,66 @@ function buildUploadNotificationHtml(details) {
 </html>`;
 }
 
+function buildGuestUploadNotificationHostHtml(details) {
+  const eventName = details.event?.name || 'your event';
+  const mediaLabel = getUploadMediaLabel(details.mediaType);
+  const guestName = getUploadGuestName(details);
+  const headline = `${guestName} shared a new ${mediaLabel}`;
+  const intro = `Review this moment for ${eventName}. Approve or reject it, then choose whether it belongs in Party View, the Time Capsule, or both.`;
+  const detailRows = [
+    ['Event', eventName],
+    ['Guest', guestName],
+    ['Moment', capitalizeFirst(mediaLabel)]
+  ];
+
+  if (details.guestNote) detailRows.push(['Message', details.guestNote]);
+
+  const rows = detailRows
+    .map(([label, value]) => `
+      <tr>
+        <td style="padding:8px 0;color:#7a6d66;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0;">${escapeEmailHtml(label)}</td>
+        <td style="padding:8px 0;color:#2f2b28;font-size:15px;font-weight:700;text-align:right;">${escapeEmailHtml(value)}</td>
+      </tr>`)
+    .join('');
+
+  const reviewButton = details.reviewUrl
+    ? `<a href="${escapeEmailAttribute(details.reviewUrl)}" style="display:inline-block;margin-top:20px;border-radius:8px;background:#2f6f5f;color:#fffaf5;font-size:16px;font-weight:800;line-height:1;text-decoration:none;padding:15px 20px;">Review this moment</a>
+      <p style="margin:14px 0 0;color:#7a6d66;font-size:13px;line-height:1.5;">This opens the private host dashboard so you can approve, reject, or place the moment where it belongs.</p>`
+    : '';
+  const previewBlock = buildUploadNotificationPreviewHtml(details, mediaLabel, eventName);
+
+  return `<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f7f1eb;font-family:Arial,Helvetica,sans-serif;color:#2f2b28;">
+    <div style="display:none;max-height:0;overflow:hidden;">${escapeEmailHtml(headline)} for ${escapeEmailHtml(eventName)}.</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f7f1eb;padding:28px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#fffaf5;border:1px solid #eadfd6;border-radius:14px;overflow:hidden;">
+            <tr>
+              <td style="padding:24px 26px;background:#2f2b28;color:#fffaf5;">
+                <div style="font-size:12px;font-weight:800;letter-spacing:0;text-transform:uppercase;color:#f7d8c7;">Wallflower Moments</div>
+                <h1 style="margin:10px 0 0;font-size:26px;line-height:1.15;">${escapeEmailHtml(headline)}</h1>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px 26px;">
+                <p style="margin:0 0 18px;color:#4f4742;font-size:16px;line-height:1.6;">${escapeEmailHtml(intro)}</p>
+                ${previewBlock}
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-top:1px solid #eadfd6;border-bottom:1px solid #eadfd6;padding:8px 0;">
+                  ${rows}
+                </table>
+                ${reviewButton}
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
 function buildUploadNotificationPreviewHtml(details, mediaLabel, eventName) {
   if (details.sourceLabel !== 'Guest upload' || !details.previewUrl) return '';
 
@@ -2961,6 +3051,16 @@ async function buildUploadNotificationPreviewUrl(request, env, submissionId, med
   return '';
 }
 
+function buildUploadNotificationSubject(details) {
+  if (details.sourceLabel === 'Guest upload') {
+    const mediaLabel = getUploadMediaLabel(details.mediaType);
+    const eventName = details.event?.name ? ` for ${details.event.name}` : '';
+    return `Wallflower Moments: ${getUploadGuestName(details)} shared a ${mediaLabel}${eventName}`;
+  }
+
+  return `Wallflower Moments ${getUploadNotificationSubjectSource(details.sourceLabel)} ${details.mediaType} upload`;
+}
+
 function buildUploadReviewUrl(env, details) {
   if (details.sourceLabel !== 'Guest upload') return '';
   const eventId = details.event?.id;
@@ -2980,6 +3080,15 @@ function getUploadMediaLabel(mediaType) {
   if (mediaType === 'audio') return 'voice memo';
   if (mediaType === 'video') return 'video';
   return 'photo';
+}
+
+function getUploadGuestName(details) {
+  return String(details.guestName || '').trim() || 'A guest';
+}
+
+function capitalizeFirst(value) {
+  const text = String(value || '');
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
 }
 
 function escapeEmailHtml(value) {
