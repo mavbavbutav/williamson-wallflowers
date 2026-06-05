@@ -284,7 +284,7 @@ a {
 
 .countdown-timer {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(5.25rem, 1fr));
   gap: clamp(0.45rem, 1.6vw, 0.75rem);
 }
 
@@ -294,29 +294,37 @@ a {
 
 .countdown-unit {
   display: grid;
+  grid-template-rows: minmax(3.8rem, auto) auto;
   justify-items: center;
-  gap: 0.18rem;
+  align-items: center;
+  gap: 0.38rem;
   min-width: 0;
   border: 1px solid rgba(222, 211, 200, 0.8);
   border-radius: 18px;
-  padding: clamp(0.65rem, 2.2vw, 1rem) 0.35rem;
+  padding: 0.82rem 0.5rem;
   background: rgba(255, 255, 255, 0.72);
 }
 
 .countdown-value {
+  display: block;
   font-family: "Cormorant Garamond", Georgia, serif;
-  font-size: clamp(2.45rem, 8vw, 4.75rem);
+  font-size: 4.1rem;
   font-weight: 700;
-  line-height: 0.82;
+  line-height: 1;
   color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
 
 .countdown-label {
+  display: block;
   color: var(--muted);
-  font-size: clamp(0.62rem, 1.6vw, 0.76rem);
+  font-size: 0.74rem;
   font-weight: 900;
+  line-height: 1.08;
   letter-spacing: 0.08em;
+  text-align: center;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .countdown-live-message {
@@ -3703,6 +3711,24 @@ tr:last-child td {
 
   .countdown-timer {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .countdown-unit {
+    grid-template-rows: minmax(2.55rem, auto) auto;
+    gap: 0.28rem;
+    min-height: 6.15rem;
+    padding: 0.7rem 0.45rem;
+  }
+
+  .countdown-value {
+    font-size: 2.55rem;
+    line-height: 1;
+  }
+
+  .countdown-label {
+    font-size: 0.66rem;
+    line-height: 1.12;
+    letter-spacing: 0.06em;
   }
 
   .unlock-tease {

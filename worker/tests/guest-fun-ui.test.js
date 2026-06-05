@@ -46,6 +46,11 @@ test('guest link keeps the memory booth flow minimal', async () => {
   assert.match(styles, /\.guest-page \.memory-mode-card/);
   assert.match(styles, /\.mode-detail/);
   assert.match(styles, /\.guest-celebration/);
+  assert.match(styles, /\.countdown-unit\s*\{[\s\S]*?grid-template-rows: minmax\(3\.8rem, auto\) auto/);
+  assert.match(styles, /\.countdown-value\s*\{[\s\S]*?line-height: 1/);
+  assert.match(styles, /\.countdown-label\s*\{[\s\S]*?white-space: nowrap/);
+  assert.match(styles, /@media[\s\S]*?\.countdown-unit\s*\{[\s\S]*?min-height: 6\.15rem/);
+  assert.match(styles, /@media[\s\S]*?\.countdown-value\s*\{[\s\S]*?font-size: 2\.55rem/);
 });
 
 test('guest upload flow stays above Party View media when host posts exist', async () => {
