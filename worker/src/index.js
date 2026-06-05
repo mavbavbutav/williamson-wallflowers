@@ -19,6 +19,7 @@ const AI_REFERENCE_MIME_TYPE = 'image/jpeg';
 const AI_REFERENCE_EXTENSION = 'jpg';
 const AI_REFERENCE_WIDTH = 1536;
 const AI_REFERENCE_QUALITY = 92;
+const OPENAI_IMAGE_DEFAULT_TIMEOUT_MS = 75 * 1000;
 const VIDEO_MAX_SECONDS = 30;
 const AUDIO_MAX_SECONDS = 60;
 const UPLOAD_TOKEN_TTL_SECONDS = 12 * 60 * 60;
@@ -1596,13 +1597,27 @@ async function requestOpenAiGroupHeroImage(env, apiKey, sources, prompt) {
     formData.append('image[]', new Blob([bytes], { type: mimeType }), filename);
   }
 
-  const response = await fetch('https://api.openai.com/v1/images/edits', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: formData
-  });
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), getOpenAiImageTimeoutMs(env));
+  let response;
+
+  try {
+    response = await fetch('https://api.openai.com/v1/images/edits', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: formData,
+      signal: abortController.signal
+    });
+  } catch (error) {
+    if (error && error.name === 'AbortError') {
+      throw new Error('OpenAI image request timed out.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -1933,6 +1948,12 @@ function getOpenAiApiKey(env) {
 
 function getOpenAiImageModel(env) {
   return env.OPENAI_IMAGE_MODEL || GROUP_HERO_DEFAULT_MODEL;
+}
+
+function getOpenAiImageTimeoutMs(env) {
+  const requested = Number(env.OPENAI_IMAGE_TIMEOUT_MS || OPENAI_IMAGE_DEFAULT_TIMEOUT_MS);
+  if (!Number.isFinite(requested) || requested <= 0) return OPENAI_IMAGE_DEFAULT_TIMEOUT_MS;
+  return Math.max(1, Math.min(Math.round(requested), 120000));
 }
 
 function getOpenAiErrorMessage(payload, status) {

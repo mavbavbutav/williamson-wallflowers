@@ -280,6 +280,30 @@ test('OpenAI failure stores failed group hero state without breaking approval', 
   }
 });
 
+test('OpenAI timeout stores failed group hero state without leaving generation stuck', async () => {
+  const submission = guestSubmission({
+    id: 'guest-timeout',
+    status: 'pending',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({ submissions: [submission] });
+  const bucket = new FakeBucket([[submission.object_key, 'source-photo']]);
+  mockOpenAi({ hang: true });
+
+  try {
+    const response = await approveSubmission(envWithDb(db, bucket, { OPENAI_IMAGE_TIMEOUT_MS: '5' }), submission.id);
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.status, 'approved');
+    assert.equal(db.groupHeroes[0].status, 'failed');
+    assert.match(db.groupHeroes[0].error_message, /timed out/i);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('group hero retries without an OpenAI-rejected input image', async () => {
   const invalid = guestSubmission({
     id: 'guest-invalid',
@@ -680,7 +704,8 @@ function mockOpenAi({
   status = 200,
   body = { data: [{ b64_json: btoa('generated-png') }] },
   responses = null,
-  normalizationBody = null
+  normalizationBody = null,
+  hang = false
 } = {}) {
   originalFetch = globalThis.fetch;
   const calls = [];
@@ -697,6 +722,23 @@ function mockOpenAi({
       return new Response('', { status: 502 });
     }
     if (urlText.includes('api.openai.com/v1/images/edits')) {
+      if (hang) {
+        return new Promise((resolve, reject) => {
+          const signal = init.signal;
+          if (!signal) return;
+          if (signal.aborted) {
+            const error = new Error('Aborted');
+            error.name = 'AbortError';
+            reject(error);
+            return;
+          }
+          signal.addEventListener('abort', () => {
+            const error = new Error('Aborted');
+            error.name = 'AbortError';
+            reject(error);
+          }, { once: true });
+        });
+      }
       const entries = Array.from(init.body.entries());
       const images = entries.filter(([key]) => key === 'image[]');
       calls.push({
