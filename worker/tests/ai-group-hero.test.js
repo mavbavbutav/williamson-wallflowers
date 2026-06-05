@@ -302,7 +302,7 @@ function mockOpenAi({ status = 200, body = { data: [{ b64_json: btoa('generated-
       calls.push({
         url,
         model: entries.find(([key]) => key === 'model')?.[1],
-        imageCount: entries.filter(([key]) => key === 'image').length
+        imageCount: entries.filter(([key]) => key === 'image[]').length
       });
       return new Response(JSON.stringify(body), {
         status,

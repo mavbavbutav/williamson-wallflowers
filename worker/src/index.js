@@ -1428,7 +1428,7 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
     const bytes = await r2ObjectToArrayBuffer(object);
     const mimeType = source.mimeType || source.mime_type || 'image/jpeg';
     const filename = `${source.id}.${extensionFor(mimeType, source.originalFilename || source.original_filename || '')}`;
-    formData.append('image', new Blob([bytes], { type: mimeType }), filename);
+    formData.append('image[]', new Blob([bytes], { type: mimeType }), filename);
   }
 
   const response = await fetch('https://api.openai.com/v1/images/edits', {
