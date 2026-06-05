@@ -108,7 +108,6 @@ function bindEvents() {
   qs("#retakeButton").addEventListener("click", () => chooseMode(state.mode));
   qs("#addAnotherButton").addEventListener("click", resetFlow);
   qs("#submissionForm").addEventListener("submit", submitMoment);
-  qs("#refreshHostPostsButton").addEventListener("click", () => loadHostPosts());
   if (guestPartySwipeMedia.addEventListener) {
     guestPartySwipeMedia.addEventListener("change", renderHostPosts);
   } else {
