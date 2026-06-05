@@ -1,4 +1,4 @@
-import { buildGuestUrl, copyText, formatBytes, formatDate, formatDateTime, getHostToken, getParam, isLocalHost, qs, qsa, requestJson, setNotice } from "../shared.js?v=20260604-local-demo-1";
+import { buildGuestUrl, copyText, formatBytes, formatDate, formatDateTime, getHostToken, getParam, isLocalHost, qs, qsa, requestJson, setNotice } from "../shared.js?v=20260605-host-token-local-1";
 import { createVideoThumbnailFile } from "../video-thumbnails.js?v=20260601-video-thumbs-1";
 
 const MAX_VIDEO_SECONDS = 30;

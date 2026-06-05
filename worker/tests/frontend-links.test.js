@@ -17,17 +17,21 @@ function createStorage() {
   };
 }
 
+function installWindow(location, { localStorage = createStorage(), sessionStorage = createStorage(), replaceState = () => {} } = {}) {
+  globalThis.window = {
+    location,
+    localStorage,
+    sessionStorage,
+    setTimeout,
+    clearTimeout,
+    history: { replaceState }
+  };
+}
+
 async function loadSharedModule(location) {
   const previousWindow = globalThis.window;
   const storage = createStorage();
-  globalThis.window = {
-    location,
-    localStorage: storage,
-    sessionStorage: storage,
-    setTimeout,
-    clearTimeout,
-    history: { replaceState() {} }
-  };
+  installWindow(location, { localStorage: storage, sessionStorage: storage });
 
   const moduleUrl = new URL('../../moments/shared.js', import.meta.url);
   moduleUrl.search = `?case=${Date.now()}-${Math.random()}`;
@@ -95,6 +99,42 @@ test('share links generated from local admin still point to the public site', as
       }),
       'https://williamsonwallflowers.com/moments/capsule/?event=event-1#token=share-token'
     );
+  } finally {
+    delete globalThis.window;
+  }
+});
+
+test('host gallery remembers a host token in local storage for return visits', async () => {
+  const shared = await loadSharedModule({
+    hostname: 'williamsonwallflowers.com',
+    search: '?event=event-1',
+    hash: '#token=host-token',
+    origin: 'https://williamsonwallflowers.com',
+    href: 'https://williamsonwallflowers.com/moments/host/?event=event-1#token=host-token'
+  });
+
+  const localStorage = createStorage();
+
+  try {
+    installWindow({
+      hostname: 'williamsonwallflowers.com',
+      search: '?event=event-1',
+      hash: '#token=host-token',
+      origin: 'https://williamsonwallflowers.com',
+      href: 'https://williamsonwallflowers.com/moments/host/?event=event-1#token=host-token'
+    }, { localStorage, sessionStorage: createStorage() });
+
+    assert.equal(shared.getHostToken('event-1'), 'host-token');
+
+    installWindow({
+      hostname: 'williamsonwallflowers.com',
+      search: '?event=event-1',
+      hash: '',
+      origin: 'https://williamsonwallflowers.com',
+      href: 'https://williamsonwallflowers.com/moments/host/?event=event-1'
+    }, { localStorage, sessionStorage: createStorage() });
+
+    assert.equal(shared.getHostToken('event-1'), 'host-token');
   } finally {
     delete globalThis.window;
   }

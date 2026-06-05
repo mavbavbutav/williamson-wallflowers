@@ -68,7 +68,7 @@ export function getParam(name) {
 
 export function getHostToken(eventId) {
   const key = `${HOST_TOKEN_KEY_PREFIX}${eventId || "unknown"}`;
-  return readUrlSecret("token", key);
+  return readUrlSecret("token", key, { persistent: true });
 }
 
 export function formatDate(value) {
@@ -193,15 +193,18 @@ export function getPublishedCapsuleShareUrl(event) {
   return event.capsuleShareUrl || (event.timeCapsuleShareToken ? buildCapsuleUrl(event.id, event.timeCapsuleShareToken) : "");
 }
 
-function readUrlSecret(name, storageKey) {
+function readUrlSecret(name, storageKey, { persistent = false } = {}) {
   const query = new URLSearchParams(window.location.search);
   const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
   const fromHash = hash.get(name) || "";
   const fromQuery = query.get(name) || "";
-  const saved = window.sessionStorage.getItem(storageKey) || "";
+  const saved = window.sessionStorage.getItem(storageKey) || (persistent ? window.localStorage.getItem(storageKey) || "" : "");
   const value = fromHash || fromQuery || saved;
 
-  if (value) window.sessionStorage.setItem(storageKey, value);
+  if (value) {
+    window.sessionStorage.setItem(storageKey, value);
+    if (persistent) window.localStorage.setItem(storageKey, value);
+  }
 
   if (fromHash || fromQuery) {
     query.delete(name);
