@@ -345,6 +345,84 @@ test('stale generating group hero state can be retried with the same source set'
   }
 });
 
+test('stale failed group hero state can be retried with the same source set', async () => {
+  const submission = guestSubmission({
+    id: 'guest-stale-failed',
+    object_key: 'moments/event-hero/guest-stale-failed.jpg',
+    objectKey: 'moments/event-hero/guest-stale-failed.jpg',
+    status: 'pending',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [submission],
+    groupHeroes: [readyHero({
+      status: 'failed',
+      object_key: 'moments/event-hero/generated/previous-group-hero.png',
+      objectKey: 'moments/event-hero/generated/previous-group-hero.png',
+      source_submission_ids: JSON.stringify(['guest-stale-failed']),
+      sourceSubmissionIds: JSON.stringify(['guest-stale-failed']),
+      error_message: 'temporary provider outage',
+      errorMessage: 'temporary provider outage',
+      updated_at: '2020-01-01T00:00:00.000Z',
+      updatedAt: '2020-01-01T00:00:00.000Z'
+    })]
+  });
+  const bucket = new FakeBucket([
+    [submission.object_key, 'source-photo'],
+    ['moments/event-hero/generated/previous-group-hero.png', 'previous-generated']
+  ]);
+  const calls = mockOpenAi();
+
+  try {
+    const response = await approveSubmission(envWithDb(db, bucket), submission.id);
+
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-stale-failed']);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('scheduled task retries stale failed group heroes automatically', async () => {
+  const submission = guestSubmission({
+    id: 'guest-scheduled-failed',
+    object_key: 'moments/event-hero/guest-scheduled-failed.jpg',
+    objectKey: 'moments/event-hero/guest-scheduled-failed.jpg',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [submission],
+    groupHeroes: [readyHero({
+      status: 'failed',
+      source_submission_ids: JSON.stringify(['guest-scheduled-failed']),
+      sourceSubmissionIds: JSON.stringify(['guest-scheduled-failed']),
+      error_message: 'temporary provider outage',
+      errorMessage: 'temporary provider outage',
+      updated_at: '2020-01-01T00:00:00.000Z',
+      updatedAt: '2020-01-01T00:00:00.000Z'
+    })]
+  });
+  const bucket = new FakeBucket([[submission.object_key, 'source-photo']]);
+  const waitUntil = [];
+  const calls = mockOpenAi();
+
+  try {
+    await worker.scheduled({}, envWithDb(db, bucket), { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.length, 1);
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-scheduled-failed']);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('older overlapping group hero generation cannot overwrite a newer result', async () => {
   const first = guestSubmission({
     id: 'guest-first',
@@ -1070,6 +1148,12 @@ async function waitForOpenAiCalls(calls, expectedCount) {
   }
 }
 
+async function drainWaitUntil(tasks) {
+  for (let index = 0; index < tasks.length; index += 1) {
+    await tasks[index];
+  }
+}
+
 function resolvePendingOpenAiCalls(calls) {
   for (const call of calls) {
     if (!call.resolved && typeof call.resolveSuccess === 'function') {
@@ -1328,6 +1412,21 @@ class GroupHeroFakeStatement {
   }
 
   async all() {
+    if (this.sql.includes('FROM event_group_heroes') && this.sql.includes("status = 'failed'")) {
+      const [cutoff, limit] = this.params;
+      return {
+        results: this.db.groupHeroes
+          .filter((hero) => hero.status === 'failed')
+          .filter((hero) => String(hero.updated_at || hero.updatedAt || '') <= String(cutoff))
+          .sort((left, right) => new Date(left.updated_at || left.updatedAt || 0) - new Date(right.updated_at || right.updatedAt || 0))
+          .slice(0, Number(limit) || 10)
+          .map((hero) => ({
+            eventId: hero.event_id || hero.eventId,
+            event_id: hero.event_id || hero.eventId
+          }))
+      };
+    }
+
     if (this.sql.includes('FROM submissions') && this.sql.includes('ai_artwork_consent_at IS NOT NULL')) {
       const [eventId, limit] = this.params;
       return {

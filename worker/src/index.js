@@ -48,6 +48,7 @@ const GROUP_HERO_TOKEN_TTL_SECONDS = 6 * 60 * 60;
 const GROUP_HERO_FORCE_RATE_LIMIT = 6;
 const GROUP_HERO_FORCE_RATE_WINDOW_SECONDS = 60 * 60;
 const GROUP_HERO_GENERATION_STALE_SECONDS = 5 * 60;
+const GROUP_HERO_FAILED_RETRY_LIMIT = 3;
 const GROUP_HERO_DEFAULT_MODEL = 'gpt-image-1.5';
 const GROUP_HERO_PROMPT = buildGroupHeroPrompt('the event');
 const STANDARD_RETENTION_DAYS = 90;
@@ -119,6 +120,7 @@ export default {
   async scheduled(event, env, ctx) {
     if (!env.MOMENTS_DB || !env.MOMENTS_BUCKET) return;
     ctx.waitUntil(cleanExpiredMedia(env, RETENTION_CLEANUP_LIMIT));
+    ctx.waitUntil(retryStaleFailedEventGroupHeroes(env));
   }
 };
 
@@ -1370,6 +1372,43 @@ async function queueEventGroupHeroRefreshIfIncluded(env, request, submission, ct
   await queueEventGroupHeroGeneration(env, request, eventId, { force: true }, ctx);
 }
 
+async function retryStaleFailedEventGroupHeroes(env, limit = GROUP_HERO_FAILED_RETRY_LIMIT) {
+  const staleHeroes = await getStaleFailedEventGroupHeroes(env, limit);
+  if (!staleHeroes.length) return { checked: 0, queued: 0 };
+
+  const request = buildScheduledGroupHeroRequest(env);
+  let queued = 0;
+
+  for (const hero of staleHeroes) {
+    const eventId = hero.eventId || hero.event_id;
+    if (!eventId) continue;
+    await queueEventGroupHeroGeneration(env, request, eventId, { force: false });
+    queued += 1;
+  }
+
+  return { checked: staleHeroes.length, queued };
+}
+
+async function getStaleFailedEventGroupHeroes(env, limit = GROUP_HERO_FAILED_RETRY_LIMIT) {
+  const cutoff = new Date(Date.now() - GROUP_HERO_GENERATION_STALE_SECONDS * 1000).toISOString();
+  const boundedLimit = Math.max(1, Math.min(Number(limit) || GROUP_HERO_FAILED_RETRY_LIMIT, GROUP_HERO_FAILED_RETRY_LIMIT));
+  const result = await env.MOMENTS_DB.prepare(`
+    SELECT event_id AS eventId
+    FROM event_group_heroes
+    WHERE status = 'failed'
+      AND updated_at <= ?
+    ORDER BY updated_at ASC
+    LIMIT ?
+  `).bind(cutoff, boundedLimit).all();
+
+  return result.results || [];
+}
+
+function buildScheduledGroupHeroRequest(env) {
+  const origin = (env.MOMENTS_API_URL || env.SITE_URL || 'https://williamsonwallflowers.com').replace(/\/$/, '');
+  return new Request(`${origin}/moments-api/scheduled/group-hero-retry`);
+}
+
 async function queueEventGroupHeroGeneration(env, request, eventId, options = {}, ctx) {
   if (!eventId) return;
 
@@ -2139,7 +2178,7 @@ function sourceIdsMatch(previous, next) {
 
 function isStaleGroupHeroGeneration(row) {
   const status = row?.status || '';
-  if (status !== 'queued' && status !== 'generating') return false;
+  if (status !== 'queued' && status !== 'generating' && status !== 'failed') return false;
 
   const updatedAt = row?.updated_at || row?.updatedAt || '';
   const updatedTime = new Date(updatedAt).getTime();
