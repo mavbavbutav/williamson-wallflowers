@@ -120,7 +120,7 @@ export default {
   async scheduled(event, env, ctx) {
     if (!env.MOMENTS_DB || !env.MOMENTS_BUCKET) return;
     ctx.waitUntil(cleanExpiredMedia(env, RETENTION_CLEANUP_LIMIT));
-    ctx.waitUntil(retryStaleEventGroupHeroes(env));
+    ctx.waitUntil(retryStaleEventGroupHeroes(env, ctx));
   }
 };
 
@@ -1372,7 +1372,7 @@ async function queueEventGroupHeroRefreshIfIncluded(env, request, submission, ct
   await queueEventGroupHeroGeneration(env, request, eventId, { force: true }, ctx);
 }
 
-async function retryStaleEventGroupHeroes(env, limit = GROUP_HERO_FAILED_RETRY_LIMIT) {
+async function retryStaleEventGroupHeroes(env, ctx, limit = GROUP_HERO_FAILED_RETRY_LIMIT) {
   const staleHeroes = await getStaleEventGroupHeroes(env, limit);
   if (!staleHeroes.length) return { checked: 0, queued: 0 };
 
@@ -1382,7 +1382,7 @@ async function retryStaleEventGroupHeroes(env, limit = GROUP_HERO_FAILED_RETRY_L
   for (const hero of staleHeroes) {
     const eventId = hero.eventId || hero.event_id;
     if (!eventId) continue;
-    await queueEventGroupHeroGeneration(env, request, eventId, { force: false });
+    await queueEventGroupHeroGeneration(env, request, eventId, { force: false }, ctx);
     queued += 1;
   }
 

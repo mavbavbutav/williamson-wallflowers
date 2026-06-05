@@ -493,6 +493,74 @@ test('scheduled task retries stale generating group heroes automatically', async
   }
 });
 
+test('scheduled task queues stale group hero retries without awaiting OpenAI generation', async () => {
+  const submission = guestSubmission({
+    id: 'guest-scheduled-nonblocking',
+    object_key: 'moments/event-hero/guest-scheduled-nonblocking.jpg',
+    objectKey: 'moments/event-hero/guest-scheduled-nonblocking.jpg',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [submission],
+    groupHeroes: [readyHero({
+      status: 'failed',
+      source_submission_ids: JSON.stringify(['guest-scheduled-nonblocking']),
+      sourceSubmissionIds: JSON.stringify(['guest-scheduled-nonblocking']),
+      error_message: 'temporary provider outage',
+      errorMessage: 'temporary provider outage',
+      updated_at: '2020-01-01T00:00:00.000Z',
+      updatedAt: '2020-01-01T00:00:00.000Z'
+    })]
+  });
+  const bucket = new FakeBucket([[submission.object_key, 'source-photo']]);
+  const waitUntil = [];
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  let resolveOpenAi;
+
+  globalThis.fetch = async (url, options) => {
+    if (String(url).includes('https://api.openai.com/v1/images/edits')) {
+      calls.push({ url, options });
+      return new Promise((resolve) => {
+        resolveOpenAi = () => resolve(new Response(JSON.stringify({
+          data: [{ b64_json: Buffer.from('generated-hero').toString('base64') }]
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        }));
+      });
+    }
+
+    return originalFetch(url, options);
+  };
+
+  try {
+    await worker.scheduled({}, envWithDb(db, bucket), { waitUntil: (work) => waitUntil.push(work) });
+    const initialScheduledWork = waitUntil.slice();
+    const queuedBeforeOpenAiFinishes = await Promise.race([
+      Promise.all(initialScheduledWork).then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 25))
+    ]);
+
+    assert.equal(queuedBeforeOpenAiFinishes, true);
+    assert.ok(waitUntil.length > initialScheduledWork.length);
+    for (let attempt = 0; attempt < 20 && calls.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    assert.equal(calls.length, 1);
+
+    resolveOpenAi();
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-scheduled-nonblocking']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('older overlapping group hero generation cannot overwrite a newer result', async () => {
   const first = guestSubmission({
     id: 'guest-first',
