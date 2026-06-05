@@ -120,7 +120,7 @@ export default {
   async scheduled(event, env, ctx) {
     if (!env.MOMENTS_DB || !env.MOMENTS_BUCKET) return;
     ctx.waitUntil(cleanExpiredMedia(env, RETENTION_CLEANUP_LIMIT));
-    ctx.waitUntil(retryStaleEventGroupHeroes(env, ctx));
+    await processDueEventGroupHeroes(env);
   }
 };
 
@@ -1372,31 +1372,35 @@ async function queueEventGroupHeroRefreshIfIncluded(env, request, submission, ct
   await queueEventGroupHeroGeneration(env, request, eventId, { force: true }, ctx);
 }
 
-async function retryStaleEventGroupHeroes(env, ctx, limit = GROUP_HERO_FAILED_RETRY_LIMIT) {
-  const staleHeroes = await getStaleEventGroupHeroes(env, limit);
-  if (!staleHeroes.length) return { checked: 0, queued: 0 };
+async function processDueEventGroupHeroes(env, limit = GROUP_HERO_FAILED_RETRY_LIMIT) {
+  const dueHeroes = await getDueEventGroupHeroes(env, limit);
+  if (!dueHeroes.length) return { checked: 0, processed: 0 };
 
   const request = buildScheduledGroupHeroRequest(env);
-  let queued = 0;
+  let processed = 0;
 
-  for (const hero of staleHeroes) {
+  for (const hero of dueHeroes) {
     const eventId = hero.eventId || hero.event_id;
     if (!eventId) continue;
-    await queueEventGroupHeroGeneration(env, request, eventId, { force: false }, ctx);
-    queued += 1;
+    try {
+      await queueEventGroupHeroGeneration(env, request, eventId, { force: false, processNow: true });
+      processed += 1;
+    } catch (error) {
+      console.error('Scheduled AI group hero processing failed', eventId, error);
+    }
   }
 
-  return { checked: staleHeroes.length, queued };
+  return { checked: dueHeroes.length, processed };
 }
 
-async function getStaleEventGroupHeroes(env, limit = GROUP_HERO_FAILED_RETRY_LIMIT) {
+async function getDueEventGroupHeroes(env, limit = GROUP_HERO_FAILED_RETRY_LIMIT) {
   const cutoff = new Date(Date.now() - GROUP_HERO_GENERATION_STALE_SECONDS * 1000).toISOString();
   const boundedLimit = Math.max(1, Math.min(Number(limit) || GROUP_HERO_FAILED_RETRY_LIMIT, GROUP_HERO_FAILED_RETRY_LIMIT));
   const result = await env.MOMENTS_DB.prepare(`
     SELECT event_id AS eventId
     FROM event_group_heroes
-    WHERE status IN ('queued', 'generating', 'failed')
-      AND updated_at <= ?
+    WHERE status = 'queued'
+      OR (status IN ('generating', 'failed') AND updated_at <= ?)
     ORDER BY updated_at ASC
     LIMIT ?
   `).bind(cutoff, boundedLimit).all();
@@ -1413,13 +1417,16 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
   if (!eventId) return;
 
   const force = Boolean(options.force);
+  const processNow = Boolean(options.processNow);
   const event = await getEventById(env, eventId);
   const prompt = buildGroupHeroPrompt(event?.name || event?.eventName || 'the event');
   const sources = await getGroupHeroSourceSubmissions(env, eventId);
   const sourceIds = sources.map((source) => source.id);
   const existing = await getEventGroupHero(env, eventId);
+  const existingStatus = existing?.status || '';
   const existingObjectKey = existing?.object_key || existing?.objectKey || '';
   const staleGeneration = isStaleGroupHeroGeneration(existing);
+  const shouldProcessQueued = processNow && existingStatus === 'queued';
 
   if (sources.length === 0) {
     await storeEventGroupHeroState(env, {
@@ -1445,7 +1452,7 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
     return;
   }
 
-  if (!force && sourceIdsMatch(getGroupHeroSourceIds(existing), sourceIds) && !staleGeneration) {
+  if (!force && sourceIdsMatch(getGroupHeroSourceIds(existing), sourceIds) && !staleGeneration && !shouldProcessQueued) {
     return;
   }
 
@@ -1471,6 +1478,11 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
     updatedAt: queuedUpdatedAt,
     sourceIds
   };
+
+  if (!processNow) {
+    return;
+  }
+
   const work = generateEventGroupHero(env, request, eventId, sources, sourceIds, prompt, existingObjectKey, existing, generationContext).catch(async (error) => {
     console.error('AI group hero generation failed', eventId, String(error.message || error));
     const failureSourceIds = generationContext.sourceIds || sourceIds;

@@ -34,7 +34,7 @@ test('guest upload stores AI artwork consent only when provided', async () => {
   assert.equal(aiReferencePut.metadata.customMetadata.mediaType, 'ai-reference');
 });
 
-test('approving an AI-consented photo generates a ready group hero from the latest 16 sources', async () => {
+test('scheduled task generates a ready group hero from a queued approval using the latest 16 sources', async () => {
   const submissions = Array.from({ length: 18 }, (_, index) => guestSubmission({
     id: `guest-${String(index + 1).padStart(2, '0')}`,
     object_key: `moments/event-hero/guest-${String(index + 1).padStart(2, '0')}.jpg`,
@@ -49,14 +49,22 @@ test('approving an AI-consented photo generates a ready group hero from the late
   }));
   const db = new GroupHeroFakeDb({ submissions });
   const bucket = new FakeBucket(submissions.map((submission) => [submission.object_key, `source-${submission.id}`]));
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
   const calls = mockOpenAi();
 
   try {
-    const response = await approveSubmission(envWithDb(db, bucket), 'guest-18');
+    const response = await approveSubmission(env, 'guest-18');
     const payload = await response.json();
 
     assert.equal(response.status, 200);
     assert.equal(payload.status, 'approved');
+    assert.equal(calls.length, 0);
+    assert.equal(db.groupHeroes[0].status, 'queued');
+
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
     assert.equal(calls.length, 1);
     assert.equal(calls[0].imageCount, 16);
     assert.equal(db.groupHeroes[0].status, 'ready');
@@ -85,6 +93,31 @@ test('approving an AI-consented photo generates a ready group hero from the late
   }
 });
 
+test('approving an AI-consented photo queues group hero generation without calling OpenAI', async () => {
+  const submission = guestSubmission({
+    id: 'guest-approval-queued',
+    object_key: 'moments/event-hero/guest-approval-queued.jpg',
+    objectKey: 'moments/event-hero/guest-approval-queued.jpg',
+    status: 'pending',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({ submissions: [submission] });
+  const bucket = new FakeBucket([[submission.object_key, 'source-photo']]);
+  const calls = mockOpenAi();
+
+  try {
+    const response = await approveSubmission(envWithDb(db, bucket), submission.id);
+
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 0);
+    assert.equal(db.groupHeroes[0].status, 'queued');
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-approval-queued']);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('group hero generation prefers a normalized AI reference over the original photo object', async () => {
   const submission = guestSubmission({
     id: 'guest-reference',
@@ -104,12 +137,20 @@ test('group hero generation prefers a normalized AI reference over the original 
     [submission.object_key, 'original-photo-bytes-that-should-not-be-sent'],
     ['moments/event-hero/ai-references/guest-reference.jpg', normalizedBytes]
   ]);
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
   const calls = mockOpenAi();
 
   try {
-    const response = await approveSubmission(envWithDb(db, bucket), submission.id);
+    const response = await approveSubmission(env, submission.id);
 
     assert.equal(response.status, 200);
+    assert.equal(calls.length, 0);
+    assert.equal(db.groupHeroes[0].status, 'queued');
+
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
     assert.equal(calls.length, 1);
     assert.equal(calls[0].imageCount, 1);
     assert.match(calls[0].imageNames[0], /guest-reference-ai-reference\.jpg$/);
@@ -175,6 +216,8 @@ test('group hero uses approved video thumbnails and an event-specific likeness p
     [photo.object_key, 'source-photo'],
     [video.thumbnail_object_key, 'source-video-thumbnail']
   ]);
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
   const calls = mockOpenAi();
 
   try {
@@ -184,9 +227,16 @@ test('group hero uses approved video thumbnails and an event-specific likeness p
         Origin: 'https://williamsonwallflowers.com',
         Authorization: 'Bearer host-token'
       }
-    }), envWithDb(db, bucket));
+    }), env);
 
     assert.equal(response.status, 202);
+    assert.equal(calls.length, 0);
+    assert.equal(db.groupHeroes[0].status, 'queued');
+
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.length, 1);
     assert.equal(calls[0].imageCount, 2);
     assert.match(calls[0].prompt, /AI Hero Test/);
     assert.match(calls[0].prompt, /recognizable/i);
@@ -240,14 +290,23 @@ test('group hero dedupes repeated guest names before generating artwork', async 
     [unique.object_key, 'source-mike'],
     [duplicateNew.object_key, 'source-linda-new']
   ]);
-  mockOpenAi();
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
+  const calls = mockOpenAi();
 
   try {
-    const response = await approveSubmission(envWithDb(db, bucket), duplicateNew.id);
+    const response = await approveSubmission(env, duplicateNew.id);
     const payload = await response.json();
 
     assert.equal(response.status, 200);
     assert.equal(payload.status, 'approved');
+    assert.equal(calls.length, 0);
+    assert.equal(db.groupHeroes[0].status, 'queued');
+
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.length, 1);
     assert.equal(db.groupHeroes[0].status, 'ready');
     assert.equal(db.groupHeroes[0].participant_count, 2);
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-linda-new', 'guest-mike']);
@@ -265,14 +324,23 @@ test('OpenAI failure stores failed group hero state without breaking approval', 
   });
   const db = new GroupHeroFakeDb({ submissions: [submission] });
   const bucket = new FakeBucket([[submission.object_key, 'source-photo']]);
-  mockOpenAi({ status: 500, body: { error: { message: 'provider failed with detail' } } });
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
+  const calls = mockOpenAi({ status: 500, body: { error: { message: 'provider failed with detail' } } });
 
   try {
-    const response = await approveSubmission(envWithDb(db, bucket), submission.id);
+    const response = await approveSubmission(env, submission.id);
     const payload = await response.json();
 
     assert.equal(response.status, 200);
     assert.equal(payload.status, 'approved');
+    assert.equal(calls.length, 0);
+    assert.equal(db.groupHeroes[0].status, 'queued');
+
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.length, 1);
     assert.equal(db.groupHeroes[0].status, 'failed');
     assert.match(db.groupHeroes[0].error_message, /provider failed/);
   } finally {
@@ -289,14 +357,22 @@ test('OpenAI timeout stores failed group hero state without leaving generation s
   });
   const db = new GroupHeroFakeDb({ submissions: [submission] });
   const bucket = new FakeBucket([[submission.object_key, 'source-photo']]);
-  mockOpenAi({ hang: true });
+  const env = envWithDb(db, bucket, { OPENAI_IMAGE_TIMEOUT_MS: '5' });
+  const waitUntil = [];
+  const calls = mockOpenAi({ hang: true });
 
   try {
-    const response = await approveSubmission(envWithDb(db, bucket, { OPENAI_IMAGE_TIMEOUT_MS: '5' }), submission.id);
+    const response = await approveSubmission(env, submission.id);
     const payload = await response.json();
 
     assert.equal(response.status, 200);
     assert.equal(payload.status, 'approved');
+    assert.equal(calls.length, 0);
+    assert.equal(db.groupHeroes[0].status, 'queued');
+
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
     assert.equal(db.groupHeroes[0].status, 'failed');
     assert.match(db.groupHeroes[0].error_message, /timed out/i);
   } finally {
@@ -329,14 +405,22 @@ test('stale generating group hero state can be retried with the same source set'
     [submission.object_key, 'source-photo'],
     ['moments/event-hero/generated/previous-group-hero.png', 'previous-generated']
   ]);
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
   const calls = mockOpenAi();
 
   try {
-    const response = await approveSubmission(envWithDb(db, bucket), submission.id);
+    const response = await approveSubmission(env, submission.id);
     const payload = await response.json();
 
     assert.equal(response.status, 200);
     assert.equal(payload.status, 'approved');
+    assert.equal(calls.length, 0);
+    assert.equal(db.groupHeroes[0].status, 'queued');
+
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
     assert.equal(calls.length, 1);
     assert.equal(db.groupHeroes[0].status, 'ready');
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-stale']);
@@ -372,12 +456,20 @@ test('stale failed group hero state can be retried with the same source set', as
     [submission.object_key, 'source-photo'],
     ['moments/event-hero/generated/previous-group-hero.png', 'previous-generated']
   ]);
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
   const calls = mockOpenAi();
 
   try {
-    const response = await approveSubmission(envWithDb(db, bucket), submission.id);
+    const response = await approveSubmission(env, submission.id);
 
     assert.equal(response.status, 200);
+    assert.equal(calls.length, 0);
+    assert.equal(db.groupHeroes[0].status, 'queued');
+
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
     assert.equal(calls.length, 1);
     assert.equal(db.groupHeroes[0].status, 'ready');
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-stale-failed']);
@@ -493,11 +585,11 @@ test('scheduled task retries stale generating group heroes automatically', async
   }
 });
 
-test('scheduled task queues stale group hero retries without awaiting OpenAI generation', async () => {
+test('scheduled task processes fresh queued group heroes automatically', async () => {
   const submission = guestSubmission({
-    id: 'guest-scheduled-nonblocking',
-    object_key: 'moments/event-hero/guest-scheduled-nonblocking.jpg',
-    objectKey: 'moments/event-hero/guest-scheduled-nonblocking.jpg',
+    id: 'guest-scheduled-fresh-queued',
+    object_key: 'moments/event-hero/guest-scheduled-fresh-queued.jpg',
+    objectKey: 'moments/event-hero/guest-scheduled-fresh-queued.jpg',
     status: 'approved',
     ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
     aiArtworkConsentAt: '2026-09-19T20:00:00.000Z'
@@ -505,59 +597,24 @@ test('scheduled task queues stale group hero retries without awaiting OpenAI gen
   const db = new GroupHeroFakeDb({
     submissions: [submission],
     groupHeroes: [readyHero({
-      status: 'failed',
-      source_submission_ids: JSON.stringify(['guest-scheduled-nonblocking']),
-      sourceSubmissionIds: JSON.stringify(['guest-scheduled-nonblocking']),
-      error_message: 'temporary provider outage',
-      errorMessage: 'temporary provider outage',
-      updated_at: '2020-01-01T00:00:00.000Z',
-      updatedAt: '2020-01-01T00:00:00.000Z'
+      status: 'queued',
+      source_submission_ids: JSON.stringify(['guest-scheduled-fresh-queued']),
+      sourceSubmissionIds: JSON.stringify(['guest-scheduled-fresh-queued'])
     })]
   });
   const bucket = new FakeBucket([[submission.object_key, 'source-photo']]);
   const waitUntil = [];
-  const originalFetch = globalThis.fetch;
-  const calls = [];
-  let resolveOpenAi;
-
-  globalThis.fetch = async (url, options) => {
-    if (String(url).includes('https://api.openai.com/v1/images/edits')) {
-      calls.push({ url, options });
-      return new Promise((resolve) => {
-        resolveOpenAi = () => resolve(new Response(JSON.stringify({
-          data: [{ b64_json: Buffer.from('generated-hero').toString('base64') }]
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' }
-        }));
-      });
-    }
-
-    return originalFetch(url, options);
-  };
+  const calls = mockOpenAi();
 
   try {
     await worker.scheduled({}, envWithDb(db, bucket), { waitUntil: (work) => waitUntil.push(work) });
-    const initialScheduledWork = waitUntil.slice();
-    const queuedBeforeOpenAiFinishes = await Promise.race([
-      Promise.all(initialScheduledWork).then(() => true),
-      new Promise((resolve) => setTimeout(() => resolve(false), 25))
-    ]);
-
-    assert.equal(queuedBeforeOpenAiFinishes, true);
-    assert.ok(waitUntil.length > initialScheduledWork.length);
-    for (let attempt = 0; attempt < 20 && calls.length === 0; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    assert.equal(calls.length, 1);
-
-    resolveOpenAi();
     await drainWaitUntil(waitUntil);
 
+    assert.equal(calls.length, 1);
     assert.equal(db.groupHeroes[0].status, 'ready');
-    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-scheduled-nonblocking']);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-scheduled-fresh-queued']);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   }
 });
 
@@ -593,35 +650,30 @@ test('older overlapping group hero generation cannot overwrite a newer result', 
   ]);
   const env = envWithDb(db, bucket);
   const calls = mockOpenAiDeferred();
-  const waitUntil = [];
-  const ctx = { waitUntil: (work) => waitUntil.push(work) };
 
   try {
-    const firstResponse = await approveSubmission(env, first.id, ctx);
+    const firstResponse = await approveSubmission(env, first.id);
+    const firstScheduled = worker.scheduled({}, env, { waitUntil() {} });
     await waitForOpenAiCalls(calls, 1);
-    const firstHeroWork = waitUntil.at(-1);
 
-    const secondResponse = await approveSubmission(env, second.id, ctx);
+    const secondResponse = await approveSubmission(env, second.id);
+    const secondScheduled = worker.scheduled({}, env, { waitUntil() {} });
 
     assert.equal(firstResponse.status, 200);
     assert.equal(secondResponse.status, 200);
     await waitForOpenAiCalls(calls, 2);
-    const secondHeroWork = waitUntil.at(-1);
     assert.equal(calls.length, 2);
-    assert.ok(firstHeroWork);
-    assert.ok(secondHeroWork);
-    assert.notEqual(firstHeroWork, secondHeroWork);
     assert.match(calls[0].imageNames[0], /guest-first/);
     assert.equal(calls[1].imageCount, 2);
 
     calls[1].resolveSuccess('newer-generated-png');
-    await secondHeroWork;
+    await secondScheduled;
 
     assert.equal(db.groupHeroes[0].status, 'ready');
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-second', 'guest-first']);
 
     calls[0].resolveSuccess('older-generated-png');
-    await firstHeroWork;
+    await firstScheduled;
 
     assert.equal(db.groupHeroes[0].status, 'ready');
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-second', 'guest-first']);
@@ -662,6 +714,7 @@ test('group hero retries without an OpenAI-rejected input image', async () => {
     [invalid.object_key, 'bad-image-bytes'],
     [valid.object_key, 'good-image-bytes']
   ]);
+  const env = envWithDb(db, bucket);
   const calls = mockOpenAi({
     responses: [
       {
@@ -673,11 +726,16 @@ test('group hero retries without an OpenAI-rejected input image', async () => {
   });
 
   try {
-    const response = await approveSubmission(envWithDb(db, bucket), valid.id);
+    const response = await approveSubmission(env, valid.id);
     const payload = await response.json();
 
     assert.equal(response.status, 200);
     assert.equal(payload.status, 'approved');
+    assert.equal(calls.length, 0);
+    assert.equal(db.groupHeroes[0].status, 'queued');
+
+    await runScheduled(env);
+
     assert.equal(calls.length, 2);
     assert.equal(calls[0].imageCount, 2);
     assert.equal(calls[1].imageCount, 1);
@@ -720,6 +778,7 @@ test('group hero handles alternate OpenAI rejected-image index wording', async (
     [invalid.object_key, 'bad-image-bytes'],
     [valid.object_key, 'good-image-bytes']
   ]);
+  const env = envWithDb(db, bucket);
   const calls = mockOpenAi({
     responses: [
       {
@@ -731,9 +790,14 @@ test('group hero handles alternate OpenAI rejected-image index wording', async (
   });
 
   try {
-    const response = await approveSubmission(envWithDb(db, bucket), valid.id);
+    const response = await approveSubmission(env, valid.id);
 
     assert.equal(response.status, 200);
+    assert.equal(calls.length, 0);
+    assert.equal(db.groupHeroes[0].status, 'queued');
+
+    await runScheduled(env);
+
     assert.equal(calls.length, 2);
     assert.equal(calls[0].imageCount, 2);
     assert.equal(calls[1].imageCount, 1);
@@ -775,6 +839,7 @@ test('group hero isolates an unindexed OpenAI source-image rejection', async () 
     [invalid.object_key, 'bad-image-bytes'],
     [valid.object_key, 'good-image-bytes']
   ]);
+  const env = envWithDb(db, bucket);
   const calls = mockOpenAi({
     responses: [
       {
@@ -786,9 +851,14 @@ test('group hero isolates an unindexed OpenAI source-image rejection', async () 
   });
 
   try {
-    const response = await approveSubmission(envWithDb(db, bucket), valid.id);
+    const response = await approveSubmission(env, valid.id);
 
     assert.equal(response.status, 200);
+    assert.equal(calls.length, 0);
+    assert.equal(db.groupHeroes[0].status, 'queued');
+
+    await runScheduled(env);
+
     assert.equal(calls.length, 2);
     assert.equal(calls[0].imageCount, 2);
     assert.equal(calls[1].imageCount, 1);
@@ -832,6 +902,7 @@ test('group hero tries to normalize an OpenAI-rejected photo before excluding it
     [invalid.object_key, 'bad-image-bytes'],
     [valid.object_key, 'good-image-bytes']
   ]);
+  const env = envWithDb(db, bucket);
   const calls = mockOpenAi({
     normalizationBody: normalizedBytes,
     responses: [
@@ -844,11 +915,16 @@ test('group hero tries to normalize an OpenAI-rejected photo before excluding it
   });
 
   try {
-    const response = await approveSubmission(envWithDb(db, bucket), valid.id);
+    const response = await approveSubmission(env, valid.id);
     const payload = await response.json();
 
     assert.equal(response.status, 200);
     assert.equal(payload.status, 'approved');
+    assert.equal(calls.length, 0);
+    assert.equal(db.groupHeroes[0].status, 'queued');
+
+    await runScheduled(env);
+
     assert.equal(calls.length, 2);
     assert.equal(calls[0].imageCount, 2);
     assert.equal(calls[1].imageCount, 2);
@@ -885,12 +961,18 @@ test('group hero includes legacy photo MIME variants when an AI reference is ava
     [heic.object_key, 'original-heic-bytes'],
     ['moments/event-hero/ai-references/guest-heic.jpg', normalizedBytes]
   ]);
+  const env = envWithDb(db, bucket);
   const calls = mockOpenAi();
 
   try {
-    const response = await approveSubmission(envWithDb(db, bucket), heic.id);
+    const response = await approveSubmission(env, heic.id);
 
     assert.equal(response.status, 200);
+    assert.equal(calls.length, 0);
+    assert.equal(db.groupHeroes[0].status, 'queued');
+
+    await runScheduled(env);
+
     assert.equal(calls.length, 1);
     assert.equal(calls[0].imageCount, 1);
     assert.match(calls[0].imageNames[0], /guest-heic-ai-reference\.jpg$/);
@@ -938,6 +1020,7 @@ test('host can backfill a normalized AI reference for an approved legacy photo a
     assert.ok(bucket.objects.has('moments/event-hero/ai-references/guest-legacy-invalid.jpg'));
 
     await Promise.all(waitUntil);
+    await runScheduled(env);
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].imageCount, 1);
@@ -998,7 +1081,7 @@ test('guest and host group hero endpoints enforce access tokens', async () => {
   }), env);
   assert.equal(badHost.status, 403);
 
-  mockOpenAi();
+  const calls = mockOpenAi();
   try {
     let waitUntilCalled = false;
     const ctx = {
@@ -1015,7 +1098,8 @@ test('guest and host group hero endpoints enforce access tokens', async () => {
     }), env, ctx);
     assert.equal(goodHost.status, 202);
     assert.equal(waitUntilCalled, false);
-    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.equal(calls.length, 0);
+    assert.equal(db.groupHeroes[0].status, 'queued');
   } finally {
     restoreFetch();
   }
@@ -1051,6 +1135,7 @@ test('rejecting or deleting included submissions rebuilds or clears the group he
     [second.object_key, 'source-b'],
     ['moments/event-hero/generated/group-hero.png', 'old-generated']
   ]);
+  const env = envWithDb(db, bucket);
   mockOpenAi();
 
   try {
@@ -1062,9 +1147,13 @@ test('rejecting or deleting included submissions rebuilds or clears the group he
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ status: 'rejected' })
-    }), envWithDb(db, bucket));
+    }), env);
 
     assert.equal(rejectResponse.status, 200);
+    assert.equal(db.groupHeroes[0].status, 'queued');
+
+    await runScheduled(env);
+
     assert.equal(db.groupHeroes[0].status, 'ready');
     assert.equal(db.groupHeroes[0].participant_count, 1);
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-b']);
@@ -1075,7 +1164,7 @@ test('rejecting or deleting included submissions rebuilds or clears the group he
         Origin: 'https://williamsonwallflowers.com',
         Authorization: 'Bearer host-token'
       }
-    }), envWithDb(db, bucket));
+    }), env);
 
     assert.equal(deleteResponse.status, 200);
     assert.equal(db.groupHeroes[0].status, 'empty');
@@ -1290,6 +1379,12 @@ async function drainWaitUntil(tasks) {
   for (let index = 0; index < tasks.length; index += 1) {
     await tasks[index];
   }
+}
+
+async function runScheduled(env) {
+  const waitUntil = [];
+  await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+  await drainWaitUntil(waitUntil);
 }
 
 function resolvePendingOpenAiCalls(calls) {
@@ -1550,13 +1645,13 @@ class GroupHeroFakeStatement {
   }
 
   async all() {
-    if (this.sql.includes('FROM event_group_heroes') && this.sql.includes("status IN ('queued', 'generating', 'failed')")) {
+    if (this.sql.includes('FROM event_group_heroes') && this.sql.includes("status = 'queued'")) {
       const [cutoff, limit] = this.params;
-      const staleStatuses = new Set(['queued', 'generating', 'failed']);
+      const staleStatuses = new Set(['generating', 'failed']);
       return {
         results: this.db.groupHeroes
-          .filter((hero) => staleStatuses.has(hero.status))
-          .filter((hero) => String(hero.updated_at || hero.updatedAt || '') <= String(cutoff))
+          .filter((hero) => hero.status === 'queued' || staleStatuses.has(hero.status))
+          .filter((hero) => hero.status === 'queued' || String(hero.updated_at || hero.updatedAt || '') <= String(cutoff))
           .sort((left, right) => new Date(left.updated_at || left.updatedAt || 0) - new Date(right.updated_at || right.updatedAt || 0))
           .slice(0, Number(limit) || 10)
           .map((hero) => ({
