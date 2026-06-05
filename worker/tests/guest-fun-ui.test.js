@@ -96,6 +96,18 @@ test('guest Party View audio cards keep controls clear of metadata overlays', as
   assert.match(styles, /\.party-card\.is-audio \.party-card-body\s*\{[\s\S]*?pointer-events: auto/);
 });
 
+test('guest Party View updates are incremental when media updates arrive', async () => {
+  const guestJs = await readText('../../moments/app.js');
+
+  assert.match(guestJs, /const HOST_POSTS_POLL_INTERVAL_MS = 10000/);
+  assert.match(guestJs, /function hostPostsMatch/);
+  assert.match(guestJs, /function isPartyViewMediaPlaying/);
+  assert.match(guestJs, /function syncGuestPartyPostVisibility/);
+  assert.match(guestJs, /function applyHostPostsDiff/);
+  assert.match(guestJs, /function patchHostPostsInContainer/);
+  assert.match(guestJs, /if \(item\?\.id\) card\.dataset\.hostPostId = item\.id;/);
+});
+
 async function readText(path) {
   return readFile(new URL(path, import.meta.url), 'utf8');
 }

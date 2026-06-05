@@ -10,6 +10,7 @@ const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "webm", "3gp", "3gpp", "3g2"];
 const AUDIO_EXTENSIONS = ["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav", "weba", "webm"];
 const GUEST_PARTY_SWIPE_QUERY = "(max-width: 767px)";
 const guestPartySwipeMedia = window.matchMedia(GUEST_PARTY_SWIPE_QUERY);
+const HOST_POSTS_POLL_INTERVAL_MS = 10000;
 
 const state = {
   tagCode: getParam("t"),
@@ -29,6 +30,7 @@ const state = {
   recordStartedAt: 0,
   timerId: 0,
   hostPosts: [],
+  hasLoadedHostPosts: false,
   isLocalDemo: false,
   hostPostsTimerId: 0,
   countdownTimerId: 0,
@@ -129,6 +131,7 @@ function bindEvents() {
 async function loadHostPosts({ silent = false } = {}) {
   if (!state.event?.id || !state.uploadToken) return;
   if (state.isLocalDemo) {
+    state.hasLoadedHostPosts = true;
     renderHostPosts();
     if (!silent) setNotice(qs("#hostPostsNotice"), `${getGuestPartyViewName()} refreshed.`, "success");
     return;
@@ -145,8 +148,22 @@ async function loadHostPosts({ silent = false } = {}) {
         ...payload.event
       };
     }
-    state.hostPosts = payload.items || [];
-    renderHostPosts();
+    const nextHostPosts = (payload.items || [])
+      .slice()
+      .sort((a, b) => new Date(b.capturedAt || b.createdAt || 0) - new Date(a.capturedAt || a.createdAt || 0));
+
+    const hasHostPostsChanged = !state.hasLoadedHostPosts || !hostPostsMatch(state.hostPosts, nextHostPosts);
+    state.hostPosts = nextHostPosts;
+    state.hasLoadedHostPosts = true;
+
+    if (!hasHostPostsChanged) {
+      syncGuestPartyPostVisibility(nextHostPosts);
+    } else if (isPartyViewMediaPlaying()) {
+      applyHostPostsDiff(nextHostPosts);
+    } else {
+      renderHostPosts();
+    }
+
     if (!silent && state.hostPosts.length === 0) {
       setNotice(qs("#hostPostsNotice"), `No ${getGuestPartyViewName()} moments yet. Check back soon.`, "");
     } else if (!silent) {
@@ -165,7 +182,7 @@ async function loadHostPosts({ silent = false } = {}) {
 function startHostPostsPolling() {
   if (state.isLocalDemo) return;
   if (state.hostPostsTimerId) window.clearInterval(state.hostPostsTimerId);
-  state.hostPostsTimerId = window.setInterval(() => loadHostPosts({ silent: true }), 30000);
+  state.hostPostsTimerId = window.setInterval(() => loadHostPosts({ silent: true }), HOST_POSTS_POLL_INTERVAL_MS);
 }
 
 function renderHostPosts() {
@@ -173,28 +190,22 @@ function renderHostPosts() {
   const grid = qs("#guestHostPostsGrid");
   const swipeFeed = qs("#guestPartySwipeFeed");
   updateGuestPartyViewLanguage();
+  if (!view || !grid || !swipeFeed) return;
   const posts = state.hostPosts
     .slice()
     .sort((a, b) => new Date(b.capturedAt || b.createdAt || 0) - new Date(a.capturedAt || a.createdAt || 0));
-  const swipeEnabled = isGuestPartySwipeEnabled() && posts.length > 0;
-  const showSwipe = swipeEnabled && isGuestPartySwipeViewport();
-
-  view.hidden = posts.length === 0;
-  grid.innerHTML = "";
-  swipeFeed.innerHTML = "";
+  const showSwipe = syncGuestPartyPostVisibility(posts);
 
   if (posts.length === 0) {
-    grid.hidden = false;
-    swipeFeed.hidden = true;
+    grid.innerHTML = "";
+    swipeFeed.innerHTML = "";
     return;
   }
-
-  grid.hidden = showSwipe;
-  swipeFeed.hidden = !showSwipe;
 
   if (showSwipe) {
     renderGuestPartySwipeFeed(posts);
   } else {
+    grid.innerHTML = "";
     posts.forEach((item) => {
       grid.append(renderHostPostCard(item));
     });
@@ -209,16 +220,114 @@ function isGuestPartySwipeViewport() {
   return guestPartySwipeMedia.matches;
 }
 
+function applyHostPostsDiff(posts) {
+  syncGuestPartyPostVisibility(posts);
+  const allTargets = [
+    { container: qs("#guestHostPostsGrid"), renderCard: renderHostPostCard },
+    { container: qs("#guestPartySwipeFeed"), renderCard: renderGuestPartySwipeCard }
+  ];
+  allTargets.forEach(({ container, renderCard }) => {
+    if (!container) return;
+    patchHostPostsInContainer(container, posts, renderCard);
+  });
+}
+
+function patchHostPostsInContainer(container, posts, renderCard) {
+  if (!container) return;
+
+  const postOrder = new Map();
+  posts.forEach((item, index) => {
+    if (item?.id) postOrder.set(item.id, index);
+  });
+
+  const existing = new Map();
+  for (const child of [...container.children]) {
+    const id = child.dataset?.hostPostId;
+    if (!id) continue;
+    if (!postOrder.has(id)) {
+      child.remove();
+      continue;
+    }
+    existing.set(id, child);
+  }
+
+  for (const item of posts) {
+    if (!item?.id) continue;
+    if (existing.has(item.id)) continue;
+
+    const card = renderCard(item);
+    card.dataset.hostPostId = item.id;
+
+    let insertBefore = null;
+    for (const child of [...container.children]) {
+      const childId = child.dataset?.hostPostId;
+      if (!childId || !postOrder.has(childId)) continue;
+      if (postOrder.get(item.id) < postOrder.get(childId)) {
+        insertBefore = child;
+        break;
+      }
+    }
+    if (insertBefore) container.insertBefore(card, insertBefore);
+    else container.append(card);
+  }
+}
+
+function syncGuestPartyPostVisibility(posts) {
+  const view = qs("#hostPostsView");
+  const grid = qs("#guestHostPostsGrid");
+  const swipeFeed = qs("#guestPartySwipeFeed");
+
+  if (!view || !grid || !swipeFeed) return false;
+
+  const swipeEnabled = isGuestPartySwipeEnabled() && posts.length > 0;
+  const showSwipe = swipeEnabled && isGuestPartySwipeViewport();
+
+  view.hidden = posts.length === 0;
+  if (posts.length === 0) {
+    grid.hidden = false;
+    swipeFeed.hidden = true;
+    return false;
+  }
+
+  grid.hidden = showSwipe;
+  swipeFeed.hidden = !showSwipe;
+  return showSwipe;
+}
+
+function hostPostsMatch(previousPosts, nextPosts) {
+  if (!Array.isArray(previousPosts) || !Array.isArray(nextPosts)) return false;
+  if (previousPosts.length !== nextPosts.length) return false;
+
+  for (let index = 0; index < previousPosts.length; index += 1) {
+    if (previousPosts[index]?.id !== nextPosts[index]?.id) return false;
+  }
+
+  return true;
+}
+
+function isPartyViewMediaPlaying() {
+  const hostPostsView = qs("#hostPostsView");
+  if (!hostPostsView) return false;
+  const mediaElements = qsa("audio, video", hostPostsView);
+  return mediaElements.some((media) => !media.paused && !media.ended);
+}
+
 function renderGuestPartySwipeFeed(posts) {
   const feed = qs("#guestPartySwipeFeed");
+  if (!feed) return;
+  feed.innerHTML = "";
+
   posts.forEach((item) => {
-    feed.append(renderGuestPartySwipeCard(item));
+    const card = renderGuestPartySwipeCard(item);
+    if (item?.id) card.dataset.hostPostId = item.id;
+    feed.append(card);
   });
 }
 
 function renderGuestPartySwipeCard(item) {
   const card = document.createElement("article");
   card.className = `capsule-feed-card guest-party-swipe-card is-${item.mediaType}`;
+  if (item?.id) card.dataset.hostPostId = item.id;
   const partyViewName = getGuestPartyViewName();
   const mediaUrl = inlineMediaUrl(item.mediaUrl);
 
@@ -283,6 +392,7 @@ function renderGuestPartySwipeCard(item) {
 function renderHostPostCard(item) {
   const card = document.createElement("article");
   card.className = `party-card is-${item.mediaType}`;
+  if (item?.id) card.dataset.hostPostId = item.id;
   const partyViewName = getGuestPartyViewName();
 
   const mediaUrl = inlineMediaUrl(item.mediaUrl);
