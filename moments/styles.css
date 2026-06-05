@@ -413,7 +413,7 @@ a {
 }
 
 .guest-page .hero-main h1 {
-  font-size: clamp(3.2rem, 7vw, 6.35rem);
+  font-size: 5.35rem;
 }
 
 .guest-page .countdown-banner {
@@ -4004,7 +4004,7 @@ tr:last-child td {
 
   .guest-page .mode-title {
     grid-area: title;
-    font-size: clamp(1.65rem, 9vw, 2.1rem);
+    font-size: 1.85rem;
   }
 
   .guest-page .mode-detail {
