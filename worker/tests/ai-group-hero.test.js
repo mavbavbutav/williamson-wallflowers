@@ -15,10 +15,11 @@ const BASE_ENV = {
 
 test('guest upload stores AI artwork consent only when provided', async () => {
   const db = new GroupHeroFakeDb();
-  const env = envWithDb(db, new FakeBucket());
+  const bucket = new FakeBucket();
+  const env = envWithDb(db, bucket);
   const token = await getUploadToken(env);
 
-  const consentResponse = await submitGuestPhoto(env, token, { aiArtworkConsent: true });
+  const consentResponse = await submitGuestPhoto(env, token, { aiArtworkConsent: true, aiReference: true });
   const privateResponse = await submitGuestPhoto(env, token, { filename: 'private.jpg' });
 
   assert.equal(consentResponse.status, 201);
@@ -26,6 +27,11 @@ test('guest upload stores AI artwork consent only when provided', async () => {
   assert.equal(db.submissions.length, 2);
   assert.ok(db.submissions[0].ai_artwork_consent_at);
   assert.equal(db.submissions[1].ai_artwork_consent_at, null);
+  const aiReferencePut = bucket.puts.find((put) => put.key.includes('/ai-references/'));
+  assert.ok(aiReferencePut);
+  assert.match(aiReferencePut.key, /^moments\/event-hero\/ai-references\/.+\.jpg$/);
+  assert.equal(aiReferencePut.metadata.httpMetadata.contentType, 'image/jpeg');
+  assert.equal(aiReferencePut.metadata.customMetadata.mediaType, 'ai-reference');
 });
 
 test('approving an AI-consented photo generates a ready group hero from the latest 16 sources', async () => {
@@ -74,6 +80,42 @@ test('approving an AI-consented photo generates a ready group hero from the late
       'guest-03'
     ]);
     assert.equal(bucket.puts.at(-1).metadata.httpMetadata.contentType, 'image/png');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('group hero generation prefers a normalized AI reference over the original photo object', async () => {
+  const submission = guestSubmission({
+    id: 'guest-reference',
+    object_key: 'moments/event-hero/guest-reference-original.jpg',
+    objectKey: 'moments/event-hero/guest-reference-original.jpg',
+    guest_name: 'Reference Source',
+    guestName: 'Reference Source',
+    status: 'pending',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:03:00.000Z',
+    createdAt: '2026-09-19T20:03:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({ submissions: [submission] });
+  const normalizedBytes = 'normalized-reference-bytes';
+  const bucket = new FakeBucket([
+    [submission.object_key, 'original-photo-bytes-that-should-not-be-sent'],
+    ['moments/event-hero/ai-references/guest-reference.jpg', normalizedBytes]
+  ]);
+  const calls = mockOpenAi();
+
+  try {
+    const response = await approveSubmission(envWithDb(db, bucket), submission.id);
+
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].imageCount, 1);
+    assert.match(calls[0].imageNames[0], /guest-reference-ai-reference\.jpg$/);
+    assert.equal(calls[0].imageSizes[0], new TextEncoder().encode(normalizedBytes).byteLength);
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.equal(db.groupHeroes[0].participant_count, 1);
   } finally {
     restoreFetch();
   }
@@ -296,6 +338,67 @@ test('group hero retries without an OpenAI-rejected input image', async () => {
   }
 });
 
+test('group hero tries to normalize an OpenAI-rejected photo before excluding it', async () => {
+  const invalid = guestSubmission({
+    id: 'guest-invalid',
+    object_key: 'moments/event-hero/guest-invalid.jpg',
+    objectKey: 'moments/event-hero/guest-invalid.jpg',
+    guest_name: 'Invalid Source',
+    guestName: 'Invalid Source',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:02:00.000Z',
+    createdAt: '2026-09-19T20:02:00.000Z'
+  });
+  const valid = guestSubmission({
+    id: 'guest-valid',
+    object_key: 'moments/event-hero/guest-valid.jpg',
+    objectKey: 'moments/event-hero/guest-valid.jpg',
+    guest_name: 'Valid Source',
+    guestName: 'Valid Source',
+    status: 'pending',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:01:00.000Z',
+    createdAt: '2026-09-19T20:01:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({ submissions: [valid, invalid] });
+  const normalizedBytes = 'normalized-bad-image-bytes';
+  const bucket = new FakeBucket([
+    [invalid.object_key, 'bad-image-bytes'],
+    [valid.object_key, 'good-image-bytes']
+  ]);
+  const calls = mockOpenAi({
+    normalizationBody: normalizedBytes,
+    responses: [
+      {
+        status: 400,
+        body: { error: { message: 'Invalid image file or mode for image 1, please check your image file.' } }
+      },
+      { status: 200, body: { data: [{ b64_json: btoa('generated-png') }] } }
+    ]
+  });
+
+  try {
+    const response = await approveSubmission(envWithDb(db, bucket), valid.id);
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.status, 'approved');
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].imageCount, 2);
+    assert.equal(calls[1].imageCount, 2);
+    assert.match(calls[1].imageNames[0], /guest-invalid-ai-reference\.jpg$/);
+    assert.equal(calls[1].imageSizes[0], new TextEncoder().encode(normalizedBytes).byteLength);
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.equal(db.groupHeroes[0].participant_count, 2);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-invalid', 'guest-valid']);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('guest and host group hero endpoints enforce access tokens', async () => {
   const source = guestSubmission({
     id: 'guest-source',
@@ -444,9 +547,11 @@ test('frontends expose AI group hero UI and cache-busted assets', async () => {
   assert.match(guestHtml, /AI event artwork use/);
   assert.match(guestHtml, /data-group-hero-panel/);
   assert.match(guestHtml, /styles\.css\?v=20260605-ai-hero-contain-1/);
-  assert.match(guestHtml, /app\.js\?v=20260605-ai-group-hero-1/);
+  assert.match(guestHtml, /app\.js\?v=20260605-ai-reference-1/);
   assert.match(guestJs, /function renderGroupHero/);
   assert.match(guestJs, /formData\.append\("aiArtworkConsent", "true"\)/);
+  assert.match(guestJs, /function createAiReferenceFile/);
+  assert.match(guestJs, /formData\.append\("aiReference", aiReferenceFile\)/);
   assert.match(hostHtml, /id="groupHeroHostCard"/);
   assert.match(hostHtml, /styles\.css\?v=20260605-ai-hero-contain-1/);
   assert.match(hostHtml, /host\.js\?v=20260605-ai-group-hero-1/);
@@ -496,6 +601,9 @@ async function submitGuestPhoto(env, uploadToken, options = {}) {
   formData.set('guestNote', 'Loved this wall');
   formData.set('consent', 'true');
   if (options.aiArtworkConsent) formData.set('aiArtworkConsent', 'true');
+  if (options.aiReference) {
+    formData.set('aiReference', new File(['normalized-photo'], 'ai-reference.jpg', { type: 'image/jpeg' }));
+  }
   formData.set('uploadToken', uploadToken);
 
   return worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/events/event-hero/submissions', {
@@ -519,12 +627,27 @@ function approveSubmission(env, submissionId) {
 
 let originalFetch = null;
 
-function mockOpenAi({ status = 200, body = { data: [{ b64_json: btoa('generated-png') }] }, responses = null } = {}) {
+function mockOpenAi({
+  status = 200,
+  body = { data: [{ b64_json: btoa('generated-png') }] },
+  responses = null,
+  normalizationBody = null
+} = {}) {
   originalFetch = globalThis.fetch;
   const calls = [];
   let callIndex = 0;
   globalThis.fetch = async (url, init = {}) => {
-    if (String(url).includes('api.openai.com/v1/images/edits')) {
+    const urlText = String(url);
+    if (urlText.includes('/moments-api/media/') || urlText.includes('/moments-api/thumbnails/')) {
+      if (normalizationBody !== null) {
+        return new Response(normalizationBody, {
+          status: 200,
+          headers: { 'Content-Type': 'image/jpeg' }
+        });
+      }
+      return new Response('', { status: 502 });
+    }
+    if (urlText.includes('api.openai.com/v1/images/edits')) {
       const entries = Array.from(init.body.entries());
       const images = entries.filter(([key]) => key === 'image[]');
       calls.push({
@@ -532,7 +655,8 @@ function mockOpenAi({ status = 200, body = { data: [{ b64_json: btoa('generated-
         model: entries.find(([key]) => key === 'model')?.[1],
         prompt: entries.find(([key]) => key === 'prompt')?.[1],
         imageCount: images.length,
-        imageNames: images.map(([, image]) => image?.name || '')
+        imageNames: images.map(([, image]) => image?.name || ''),
+        imageSizes: images.map(([, image]) => image?.size || 0)
       });
       const response = Array.isArray(responses)
         ? responses[Math.min(callIndex, responses.length - 1)]

@@ -6,6 +6,8 @@ const MAX_AUDIO_SECONDS = 60;
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
+const AI_REFERENCE_MAX_DIMENSION = 1536;
+const AI_REFERENCE_QUALITY = 0.9;
 const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "webm", "3gp", "3gpp", "3g2"];
 const AUDIO_EXTENSIONS = ["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav", "weba", "webm"];
 const GUEST_PARTY_SWIPE_QUERY = "(max-width: 767px)";
@@ -1058,6 +1060,10 @@ async function submitMoment(event) {
     return;
   }
 
+  const aiReferenceFile = state.mediaType === "photo"
+    ? await createAiReferenceFile(state.mediaFile)
+    : null;
+
   const formData = new FormData();
   formData.append("media", state.mediaFile);
   formData.append("mediaType", state.mediaType);
@@ -1069,6 +1075,9 @@ async function submitMoment(event) {
   formData.append("uploadToken", state.uploadToken);
   if (state.mediaType === "video" && state.thumbnailFile) {
     formData.append("thumbnail", state.thumbnailFile);
+  }
+  if (aiReferenceFile) {
+    formData.append("aiReference", aiReferenceFile);
   }
 
   qs("#submitButton").disabled = true;
@@ -1087,6 +1096,68 @@ async function submitMoment(event) {
   } finally {
     qs("#submitButton").disabled = isCountdownLocked();
   }
+}
+
+async function createAiReferenceFile(file) {
+  if (!file || !getBaseMimeType(file.type).startsWith("image/")) return null;
+
+  try {
+    const image = await decodeImageFile(file);
+    const sourceWidth = image.width || image.naturalWidth || 1;
+    const sourceHeight = image.height || image.naturalHeight || 1;
+    const { width, height } = getScaledDimensions(sourceWidth, sourceHeight, AI_REFERENCE_MAX_DIMENSION);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext("2d").drawImage(image, 0, 0, width, height);
+    if (typeof image.close === "function") image.close();
+
+    const blob = await new Promise((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", AI_REFERENCE_QUALITY);
+    });
+    if (!blob) return null;
+
+    return new File([blob], `wallflower-ai-reference-${Date.now()}.jpg`, { type: "image/jpeg" });
+  } catch {
+    return null;
+  }
+}
+
+async function decodeImageFile(file) {
+  if ("createImageBitmap" in window) {
+    try {
+      return await createImageBitmap(file, { imageOrientation: "from-image" });
+    } catch {
+      return decodeImageElement(file);
+    }
+  }
+
+  return decodeImageElement(file);
+}
+
+function decodeImageElement(file) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const url = URL.createObjectURL(file);
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Image could not be decoded."));
+    };
+    image.src = url;
+  });
+}
+
+function getScaledDimensions(width, height, maxDimension) {
+  const longestSide = Math.max(width, height, 1);
+  const scale = Math.min(1, maxDimension / longestSide);
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale))
+  };
 }
 
 function uploadWithProgress(path, formData) {

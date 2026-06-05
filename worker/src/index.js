@@ -14,6 +14,11 @@ const PHOTO_MAX_BYTES = 8 * 1024 * 1024;
 const VIDEO_MAX_BYTES = 50 * 1024 * 1024;
 const AUDIO_MAX_BYTES = 20 * 1024 * 1024;
 const THUMBNAIL_MAX_BYTES = 768 * 1024;
+const AI_REFERENCE_MAX_BYTES = 5 * 1024 * 1024;
+const AI_REFERENCE_MIME_TYPE = 'image/jpeg';
+const AI_REFERENCE_EXTENSION = 'jpg';
+const AI_REFERENCE_WIDTH = 1536;
+const AI_REFERENCE_QUALITY = 92;
 const VIDEO_MAX_SECONDS = 30;
 const AUDIO_MAX_SECONDS = 60;
 const UPLOAD_TOKEN_TTL_SECONDS = 12 * 60 * 60;
@@ -413,6 +418,11 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
     return json({ ok: false, message: thumbnail.error }, 400, corsHeaders);
   }
 
+  const aiReference = validateAiReference(formData.get('aiReference'), mediaType, aiArtworkConsent);
+  if (aiReference.error) {
+    return json({ ok: false, message: aiReference.error }, 400, corsHeaders);
+  }
+
   const quotaError = await validateEventQuota(env, eventId, media.size);
   if (quotaError) {
     return json({ ok: false, message: quotaError }, 429, corsHeaders);
@@ -442,6 +452,10 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
   const thumbnailRecord = thumbnail.file
     ? await storeVideoThumbnail(env, eventId, id, thumbnail.file, now)
     : emptyThumbnailRecord();
+
+  if (aiReference.file) {
+    await storeAiReferenceImage(env, eventId, id, aiReference.file, now);
+  }
 
   await env.MOMENTS_DB.prepare(`
     INSERT INTO submissions (
@@ -1421,7 +1435,45 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
       const invalidImageIndex = getOpenAiInvalidImageIndex(error.message || '');
       const rejectedSource = invalidImageIndex === null ? null : activeSources[invalidImageIndex];
 
-      if (!rejectedSource || activeSources.length <= 1) {
+      if (!rejectedSource) {
+        throw error;
+      }
+
+      const normalizedSource = await normalizeGroupHeroSourceImage(env, request, eventId, rejectedSource)
+        .catch((normalizeError) => {
+          console.warn(
+            'AI group hero source normalization failed',
+            eventId,
+            rejectedSource.id,
+            String(normalizeError.message || normalizeError)
+          );
+          return null;
+        });
+
+      if (normalizedSource) {
+        console.warn('AI group hero source normalized after OpenAI rejection', eventId, rejectedSource.id);
+        activeSources = activeSources.map((source, index) => (
+          index === invalidImageIndex ? normalizedSource : source
+        ));
+        activeSourceIds = activeSources.map((source) => source.id);
+
+        await storeEventGroupHeroState(env, {
+          eventId,
+          status: 'generating',
+          objectKey: previousObjectKey || null,
+          mimeType: 'image/png',
+          size: 0,
+          participantCount: activeSources.length,
+          sourceIds: activeSourceIds,
+          model: getOpenAiImageModel(env),
+          prompt,
+          errorMessage: '',
+          generatedAt: null
+        });
+        continue;
+      }
+
+      if (activeSources.length <= 1) {
         throw error;
       }
 
@@ -1495,13 +1547,10 @@ async function requestOpenAiGroupHeroImage(env, apiKey, sources, prompt) {
   formData.append('n', '1');
 
   for (const source of sources) {
-    const object = await env.MOMENTS_BUCKET.get(source.objectKey || source.object_key);
-    if (!object) {
-      throw new Error(`Source image is missing from storage: ${source.id}`);
-    }
-    const bytes = await r2ObjectToArrayBuffer(object);
-    const mimeType = source.mimeType || source.mime_type || 'image/jpeg';
-    const filename = `${source.id}.${extensionFor(mimeType, source.originalFilename || source.original_filename || '')}`;
+    const sourceObject = await getGroupHeroSourceObject(env, source);
+    const bytes = await r2ObjectToArrayBuffer(sourceObject.object);
+    const mimeType = sourceObject.mimeType;
+    const filename = sourceObject.filename;
     formData.append('image[]', new Blob([bytes], { type: mimeType }), filename);
   }
 
@@ -1519,6 +1568,81 @@ async function requestOpenAiGroupHeroImage(env, apiKey, sources, prompt) {
   }
 
   return getOpenAiImageBytes(payload);
+}
+
+async function getGroupHeroSourceObject(env, source) {
+  const aiReferenceObjectKey = source.aiReferenceObjectKey || source.ai_reference_object_key || '';
+  if (aiReferenceObjectKey) {
+    const aiReferenceObject = await env.MOMENTS_BUCKET.get(aiReferenceObjectKey);
+    if (aiReferenceObject) {
+      return {
+        object: aiReferenceObject,
+        objectKey: aiReferenceObjectKey,
+        mimeType: source.aiReferenceMimeType || source.ai_reference_mime_type || AI_REFERENCE_MIME_TYPE,
+        filename: `${source.id}-ai-reference.${AI_REFERENCE_EXTENSION}`
+      };
+    }
+  }
+
+  const objectKey = source.objectKey || source.object_key;
+  const object = await env.MOMENTS_BUCKET.get(objectKey);
+  if (!object) {
+    throw new Error(`Source image is missing from storage: ${source.id}`);
+  }
+
+  const mimeType = source.mimeType || source.mime_type || 'image/jpeg';
+  return {
+    object,
+    objectKey,
+    mimeType,
+    filename: `${source.id}.${extensionFor(mimeType, source.originalFilename || source.original_filename || '')}`
+  };
+}
+
+async function normalizeGroupHeroSourceImage(env, request, eventId, source) {
+  const mediaType = source.mediaType || source.media_type || '';
+  if (mediaType !== 'photo' || source.aiReferenceWasGenerated) return null;
+
+  const sourceUrl = await buildMediaAccessUrl(request, env, source.id);
+  const response = await fetch(sourceUrl, {
+    cf: {
+      image: {
+        fit: 'scale-down',
+        width: AI_REFERENCE_WIDTH,
+        format: 'jpeg',
+        quality: AI_REFERENCE_QUALITY
+      }
+    }
+  });
+
+  if (!response.ok) return null;
+
+  const contentType = getBaseMimeType(response.headers.get('Content-Type') || '');
+  if (contentType && contentType !== AI_REFERENCE_MIME_TYPE) return null;
+
+  const bytes = await response.arrayBuffer();
+  if (!bytes || bytes.byteLength === 0 || bytes.byteLength > AI_REFERENCE_MAX_BYTES) return null;
+
+  const objectKey = getAiReferenceObjectKey(eventId, source.id);
+  await env.MOMENTS_BUCKET.put(objectKey, new Uint8Array(bytes), {
+    httpMetadata: {
+      contentType: AI_REFERENCE_MIME_TYPE,
+      contentDisposition: `inline; filename="${source.id}-ai-reference.${AI_REFERENCE_EXTENSION}"`
+    },
+    customMetadata: {
+      eventId,
+      submissionId: source.id,
+      mediaType: 'ai-reference',
+      source: 'normalization'
+    }
+  });
+
+  return {
+    ...source,
+    aiReferenceObjectKey: objectKey,
+    aiReferenceMimeType: AI_REFERENCE_MIME_TYPE,
+    aiReferenceWasGenerated: true
+  };
 }
 
 async function getEventGroupHeroClient(env, eventId, request) {
@@ -1604,7 +1728,9 @@ async function getGroupHeroSourceSubmissions(env, eventId) {
     return {
       ...row,
       objectKey: row.photoObjectKey || row.objectKey || row.object_key,
-      mimeType: row.photoMimeType || row.mimeType || row.mime_type
+      mimeType: row.photoMimeType || row.mimeType || row.mime_type,
+      aiReferenceObjectKey: getAiReferenceObjectKey(row.eventId || row.event_id || eventId, row.id),
+      aiReferenceMimeType: AI_REFERENCE_MIME_TYPE
     };
   });
 
@@ -1800,6 +1926,7 @@ async function deleteHostSubmission(request, env, url, corsHeaders, submissionId
   try {
     await env.MOMENTS_BUCKET.delete(submission.objectKey);
     if (submission.thumbnailObjectKey) await env.MOMENTS_BUCKET.delete(submission.thumbnailObjectKey);
+    await deleteAiReferenceImage(env, submission.eventId, submission.id);
     if (submission.streamUid) await deleteStreamVideo(env, submission.streamUid);
   } catch (error) {
     console.error('R2 delete failed for host-deleted submission', submissionId, error);
@@ -4293,6 +4420,31 @@ function validateVideoThumbnail(thumbnail, mediaType) {
   return { file: thumbnail, error: '' };
 }
 
+function validateAiReference(aiReference, mediaType, aiArtworkConsent) {
+  if (!aiArtworkConsent || mediaType !== 'photo' || !aiReference) return { file: null, error: '' };
+  if (typeof aiReference === 'string' || typeof aiReference.stream !== 'function') return { file: null, error: '' };
+
+  if (!isAllowedAiReference(aiReference)) {
+    return { file: null, error: 'AI artwork references must be JPEG images.' };
+  }
+
+  if (aiReference.size > AI_REFERENCE_MAX_BYTES) {
+    return { file: null, error: 'AI artwork references must be 5 MB or smaller.' };
+  }
+
+  return { file: aiReference, error: '' };
+}
+
+function isAllowedAiReference(aiReference) {
+  const baseMimeType = getBaseMimeType(aiReference.type);
+  const extension = getFileExtension(aiReference.name);
+
+  if (baseMimeType === AI_REFERENCE_MIME_TYPE) return true;
+  if ((!baseMimeType || baseMimeType === 'application/octet-stream') && ['jpg', 'jpeg'].includes(extension)) return true;
+
+  return false;
+}
+
 function isAllowedVideoThumbnail(thumbnail) {
   const baseMimeType = getBaseMimeType(thumbnail.type);
   const extension = getFileExtension(thumbnail.name);
@@ -4326,6 +4478,39 @@ async function storeVideoThumbnail(env, eventId, submissionId, thumbnail, now = 
     size: thumbnail.size || 0,
     createdAt: now
   };
+}
+
+async function storeAiReferenceImage(env, eventId, submissionId, aiReference, now = new Date().toISOString()) {
+  const originalFilename = sanitizeFilename(aiReference.name || `${submissionId}-ai-reference.${AI_REFERENCE_EXTENSION}`);
+  const objectKey = getAiReferenceObjectKey(eventId, submissionId);
+
+  await env.MOMENTS_BUCKET.put(objectKey, aiReference.stream(), {
+    httpMetadata: {
+      contentType: AI_REFERENCE_MIME_TYPE,
+      contentDisposition: `inline; filename="${originalFilename}"`
+    },
+    customMetadata: {
+      eventId,
+      submissionId,
+      mediaType: 'ai-reference'
+    }
+  });
+
+  return {
+    objectKey,
+    mimeType: AI_REFERENCE_MIME_TYPE,
+    size: aiReference.size || 0,
+    createdAt: now
+  };
+}
+
+function getAiReferenceObjectKey(eventId, submissionId) {
+  return `moments/${eventId}/ai-references/${submissionId}.${AI_REFERENCE_EXTENSION}`;
+}
+
+async function deleteAiReferenceImage(env, eventId, submissionId) {
+  if (!eventId || !submissionId) return;
+  await env.MOMENTS_BUCKET.delete(getAiReferenceObjectKey(eventId, submissionId));
 }
 
 function emptyThumbnailRecord() {
