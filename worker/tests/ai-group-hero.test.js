@@ -238,6 +238,64 @@ test('OpenAI failure stores failed group hero state without breaking approval', 
   }
 });
 
+test('group hero retries without an OpenAI-rejected input image', async () => {
+  const invalid = guestSubmission({
+    id: 'guest-invalid',
+    object_key: 'moments/event-hero/guest-invalid.jpg',
+    objectKey: 'moments/event-hero/guest-invalid.jpg',
+    guest_name: 'Invalid Source',
+    guestName: 'Invalid Source',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:02:00.000Z',
+    createdAt: '2026-09-19T20:02:00.000Z'
+  });
+  const valid = guestSubmission({
+    id: 'guest-valid',
+    object_key: 'moments/event-hero/guest-valid.jpg',
+    objectKey: 'moments/event-hero/guest-valid.jpg',
+    guest_name: 'Valid Source',
+    guestName: 'Valid Source',
+    status: 'pending',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:01:00.000Z',
+    createdAt: '2026-09-19T20:01:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({ submissions: [valid, invalid] });
+  const bucket = new FakeBucket([
+    [invalid.object_key, 'bad-image-bytes'],
+    [valid.object_key, 'good-image-bytes']
+  ]);
+  const calls = mockOpenAi({
+    responses: [
+      {
+        status: 400,
+        body: { error: { message: 'Invalid image file or mode for image 1, please check your image file.' } }
+      },
+      { status: 200, body: { data: [{ b64_json: btoa('generated-png') }] } }
+    ]
+  });
+
+  try {
+    const response = await approveSubmission(envWithDb(db, bucket), valid.id);
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.status, 'approved');
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].imageCount, 2);
+    assert.equal(calls[1].imageCount, 1);
+    assert.match(calls[1].imageNames[0], /guest-valid/);
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.equal(db.groupHeroes[0].participant_count, 1);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-valid']);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('guest and host group hero endpoints enforce access tokens', async () => {
   const source = guestSubmission({
     id: 'guest-source',
@@ -461,20 +519,27 @@ function approveSubmission(env, submissionId) {
 
 let originalFetch = null;
 
-function mockOpenAi({ status = 200, body = { data: [{ b64_json: btoa('generated-png') }] } } = {}) {
+function mockOpenAi({ status = 200, body = { data: [{ b64_json: btoa('generated-png') }] }, responses = null } = {}) {
   originalFetch = globalThis.fetch;
   const calls = [];
+  let callIndex = 0;
   globalThis.fetch = async (url, init = {}) => {
     if (String(url).includes('api.openai.com/v1/images/edits')) {
       const entries = Array.from(init.body.entries());
+      const images = entries.filter(([key]) => key === 'image[]');
       calls.push({
         url,
         model: entries.find(([key]) => key === 'model')?.[1],
         prompt: entries.find(([key]) => key === 'prompt')?.[1],
-        imageCount: entries.filter(([key]) => key === 'image[]').length
+        imageCount: images.length,
+        imageNames: images.map(([, image]) => image?.name || '')
       });
-      return new Response(JSON.stringify(body), {
-        status,
+      const response = Array.isArray(responses)
+        ? responses[Math.min(callIndex, responses.length - 1)]
+        : { status, body };
+      callIndex += 1;
+      return new Response(JSON.stringify(response.body), {
+        status: response.status,
         headers: { 'Content-Type': 'application/json' }
       });
     }

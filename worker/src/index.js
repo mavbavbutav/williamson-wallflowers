@@ -1409,6 +1409,83 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
     throw new Error('OpenAI API key is not configured.');
   }
 
+  let activeSources = sources;
+  let activeSourceIds = sourceIds;
+  let imageBytes = null;
+
+  while (activeSources.length > 0) {
+    try {
+      imageBytes = await requestOpenAiGroupHeroImage(env, apiKey, activeSources, prompt);
+      break;
+    } catch (error) {
+      const invalidImageIndex = getOpenAiInvalidImageIndex(error.message || '');
+      const rejectedSource = invalidImageIndex === null ? null : activeSources[invalidImageIndex];
+
+      if (!rejectedSource || activeSources.length <= 1) {
+        throw error;
+      }
+
+      console.warn('AI group hero source rejected by OpenAI', eventId, rejectedSource.id);
+      activeSources = activeSources.filter((_, index) => index !== invalidImageIndex);
+      activeSourceIds = activeSources.map((source) => source.id);
+
+      await storeEventGroupHeroState(env, {
+        eventId,
+        status: 'generating',
+        objectKey: previousObjectKey || null,
+        mimeType: 'image/png',
+        size: 0,
+        participantCount: activeSources.length,
+        sourceIds: activeSourceIds,
+        model: getOpenAiImageModel(env),
+        prompt,
+        errorMessage: '',
+        generatedAt: null
+      });
+    }
+  }
+
+  if (!imageBytes?.byteLength) {
+    throw new Error('OpenAI did not return generated image data.');
+  }
+
+  const objectKey = `moments/${eventId}/generated/group-hero-${Date.now()}.png`;
+  await env.MOMENTS_BUCKET.put(objectKey, imageBytes, {
+    httpMetadata: {
+      contentType: 'image/png',
+      contentDisposition: `inline; filename="${eventId}-wallflower-group-hero.png"`
+    },
+    customMetadata: {
+      eventId,
+      mediaType: 'group-hero',
+      sourceSubmissionIds: JSON.stringify(activeSourceIds)
+    }
+  });
+
+  await storeEventGroupHeroState(env, {
+    eventId,
+    status: 'ready',
+    objectKey,
+    mimeType: 'image/png',
+    size: imageBytes.byteLength,
+    participantCount: activeSources.length,
+    sourceIds: activeSourceIds,
+    model: getOpenAiImageModel(env),
+    prompt,
+    errorMessage: '',
+    generatedAt: now
+  });
+
+  if (previousObjectKey && previousObjectKey !== objectKey) {
+    try {
+      await env.MOMENTS_BUCKET.delete(previousObjectKey);
+    } catch (error) {
+      console.error('R2 delete failed for replaced group hero', eventId, error);
+    }
+  }
+}
+
+async function requestOpenAiGroupHeroImage(env, apiKey, sources, prompt) {
   const formData = new FormData();
   formData.append('model', getOpenAiImageModel(env));
   formData.append('prompt', prompt);
@@ -1441,45 +1518,7 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
     throw new Error(getOpenAiErrorMessage(payload, response.status));
   }
 
-  const imageBytes = await getOpenAiImageBytes(payload);
-  if (!imageBytes?.byteLength) {
-    throw new Error('OpenAI did not return generated image data.');
-  }
-
-  const objectKey = `moments/${eventId}/generated/group-hero-${Date.now()}.png`;
-  await env.MOMENTS_BUCKET.put(objectKey, imageBytes, {
-    httpMetadata: {
-      contentType: 'image/png',
-      contentDisposition: `inline; filename="${eventId}-wallflower-group-hero.png"`
-    },
-    customMetadata: {
-      eventId,
-      mediaType: 'group-hero',
-      sourceSubmissionIds: JSON.stringify(sourceIds)
-    }
-  });
-
-  await storeEventGroupHeroState(env, {
-    eventId,
-    status: 'ready',
-    objectKey,
-    mimeType: 'image/png',
-    size: imageBytes.byteLength,
-    participantCount: sources.length,
-    sourceIds,
-    model: getOpenAiImageModel(env),
-    prompt,
-    errorMessage: '',
-    generatedAt: now
-  });
-
-  if (previousObjectKey && previousObjectKey !== objectKey) {
-    try {
-      await env.MOMENTS_BUCKET.delete(previousObjectKey);
-    } catch (error) {
-      console.error('R2 delete failed for replaced group hero', eventId, error);
-    }
-  }
+  return getOpenAiImageBytes(payload);
 }
 
 async function getEventGroupHeroClient(env, eventId, request) {
@@ -1731,6 +1770,14 @@ function getOpenAiImageModel(env) {
 function getOpenAiErrorMessage(payload, status) {
   const message = payload?.error?.message || payload?.message || `OpenAI image generation failed with status ${status}.`;
   return cleanText(message, 500);
+}
+
+function getOpenAiInvalidImageIndex(message) {
+  const match = String(message || '').match(/\binvalid image file or mode for image\s+(\d+)/i);
+  if (!match) return null;
+
+  const index = Number(match[1]) - 1;
+  return Number.isInteger(index) && index >= 0 ? index : null;
 }
 
 async function deleteHostSubmission(request, env, url, corsHeaders, submissionId, ctx) {
