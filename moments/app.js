@@ -51,7 +51,8 @@ const state = {
   isLocalDemo: false,
   hostPostsTimerId: 0,
   countdownTimerId: 0,
-  isCountdownLocked: false
+  isCountdownLocked: false,
+  pendingLikeSubmissionKeys: new Set()
 };
 
 const views = {
@@ -496,7 +497,8 @@ function renderHostPostCard(item) {
 function buildMomentInteractionsMarkup(item) {
   const interactions = normalizeMomentInteractions(item.interactions);
   const submissionId = item?.submissionId || "";
-  const hasLiked = hasLikedSubmission(submissionId);
+  const hasUsedLike = isMomentLikeLocked(submissionId);
+  const displayedLikeCount = getDisplayedReactionCount(interactions, submissionId, MOMENT_PRIMARY_REACTION_ID);
   const reactionPickerButtons = MOMENT_REACTION_PIVOT_OPTIONS.map((reaction) => `
     <button
       class="moment-action-button moment-reaction-option"
@@ -527,15 +529,15 @@ function buildMomentInteractionsMarkup(item) {
             data-moment-action="reaction"
             data-reaction="${MOMENT_PRIMARY_REACTION_ID}"
             data-moment-primary-reaction="1"
-            ${hasLiked ? "data-moment-liked=\"1\"" : ""}
-            ${hasLiked ? "disabled" : ""}
+            ${hasUsedLike ? "data-moment-liked=\"1\"" : ""}
+            ${hasUsedLike ? "disabled" : ""}
             aria-label="Like"
             aria-expanded="false"
             aria-controls="moment-reaction-picker-${item.submissionId}"
           >
             <span class="moment-reaction-emoji" aria-hidden="true">&#x1F44D;</span>
             <span class="moment-reaction-count" data-moment-reaction-count="${MOMENT_PRIMARY_REACTION_ID}">
-              ${interactions.counts[MOMENT_PRIMARY_REACTION_ID]}
+              ${displayedLikeCount}
             </span>
           </button>
           <div
@@ -778,7 +780,8 @@ function closeAllMomentReactionPickers(excludeCard = null) {
 
 async function submitMomentReaction(card, submissionId, reaction, button) {
   if (!button) return;
-  if (reaction === MOMENT_PRIMARY_REACTION_ID && hasLikedSubmission(submissionId)) {
+  const isLikeReaction = reaction === MOMENT_PRIMARY_REACTION_ID;
+  if (isLikeReaction && isMomentLikeLocked(submissionId)) {
     setNotice(qs("#hostPostsNotice"), "You already liked this moment.", "error");
     return;
   }
@@ -790,6 +793,11 @@ async function submitMomentReaction(card, submissionId, reaction, button) {
   const originalText = button.innerHTML;
   button.disabled = true;
 
+  if (isLikeReaction) {
+    markMomentLikePending(submissionId);
+    syncMomentLikeState(card, submissionId);
+  }
+
   try {
     const payload = await requestJson(`/events/${encodeURIComponent(state.event.id)}/submissions/${encodeURIComponent(submissionId)}/reactions`, {
       method: "POST",
@@ -799,28 +807,129 @@ async function submitMomentReaction(card, submissionId, reaction, button) {
       body: JSON.stringify({ reaction, sessionId: state.guestSessionId })
     });
     if (payload?.interactions && payload.submissionId) {
-      syncHostPostInteractions(payload.submissionId, payload.interactions);
-      if (reaction === MOMENT_PRIMARY_REACTION_ID) {
+      if (isLikeReaction) {
+        clearMomentLikePending(submissionId);
         markLikedSubmission(submissionId);
-        if (card) {
-          syncMomentLikeState(card, submissionId);
-        }
       }
+      syncHostPostInteractions(payload.submissionId, payload.interactions);
     } else {
       setNotice(qs("#hostPostsNotice"), payload?.message || "That reaction could not be sent.", "error");
+      if (isLikeReaction) {
+        clearMomentLikePending(submissionId);
+      }
     }
   } catch (error) {
     if (countNode) countNode.textContent = `${Math.max(0, previousCount)}`;
     setNotice(qs("#hostPostsNotice"), error.message || "That reaction could not be sent.", "error");
+    if (isLikeReaction) {
+      clearMomentLikePending(submissionId);
+    }
   } finally {
     button.disabled = false;
     button.innerHTML = originalText;
-    if (button.dataset && button.dataset.momentPrimaryReaction === "1") {
-      if (hasLikedSubmission(submissionId)) {
-        button.disabled = true;
-      }
+    if (button.dataset && button.dataset.momentPrimaryReaction === "1" && card) {
+      syncMomentLikeState(card, submissionId);
     }
   }
+}
+
+function getSubmissionReactionKey(submissionId) {
+  if (!submissionId) return "";
+  return getGuestReactionKey(submissionId);
+}
+
+function isMomentLikeLocked(submissionId) {
+  const key = getSubmissionReactionKey(submissionId);
+  return !!(key && (state.pendingLikeSubmissionKeys.has(key) || hasLikedSubmission(submissionId)));
+}
+
+function markMomentLikePending(submissionId) {
+  const key = getSubmissionReactionKey(submissionId);
+  if (!key) return;
+  state.pendingLikeSubmissionKeys.add(key);
+}
+
+function clearMomentLikePending(submissionId) {
+  const key = getSubmissionReactionKey(submissionId);
+  if (!key) return;
+  state.pendingLikeSubmissionKeys.delete(key);
+}
+
+function getDisplayedReactionCount(interactions, submissionId, reactionId) {
+  const baseCount = Number(interactions?.counts?.[reactionId] || 0);
+  if (reactionId !== MOMENT_PRIMARY_REACTION_ID) {
+    return baseCount;
+  }
+
+  if (isMomentLikePending(submissionId)) {
+    return baseCount + 1;
+  }
+
+  return baseCount;
+}
+
+function isMomentLikePending(submissionId) {
+  const key = getSubmissionReactionKey(submissionId);
+  return !!(key && state.pendingLikeSubmissionKeys.has(key));
+}
+
+function syncMomentLikeState(card, submissionId) {
+  if (!card) return;
+
+  const likeButton = card.querySelector('[data-moment-action="reaction"][data-moment-primary-reaction="1"]');
+  if (!likeButton) return;
+
+  const isLocked = isMomentLikeLocked(submissionId);
+  likeButton.classList.toggle("moment-reaction-liked", isLocked);
+  if (isLocked) {
+    likeButton.dataset.momentLiked = "1";
+  } else {
+    likeButton.removeAttribute("data-moment-liked");
+  }
+  likeButton.disabled = isLocked;
+  likeButton.setAttribute("aria-pressed", isLocked ? "true" : "false");
+}
+
+function applyMomentInteractionsToCard(card, item) {
+  const interactions = normalizeMomentInteractions(item.interactions);
+  const row = card.querySelector(".moment-reaction-row");
+  if (row) {
+    row.querySelectorAll(".moment-action-button[data-reaction]").forEach((button) => {
+      const type = button.dataset.reaction;
+      const countNode = button.querySelector(`[data-moment-reaction-count="${type}"]`);
+      const displayCount = getDisplayedReactionCount(interactions, item.submissionId, type);
+      if (countNode) countNode.textContent = `${Number(displayCount)}`;
+    });
+
+    const commentCountNode = row.querySelector("[data-moment-comment-count]");
+    if (commentCountNode) {
+      commentCountNode.textContent = `${interactions.commentCount}`;
+    }
+  }
+
+  const commentWrap = card.querySelector("[data-moment-comment-wrap]");
+  if (commentWrap) {
+    const list = commentWrap.querySelector("[data-moment-comment-list]");
+    if (list) {
+      list.innerHTML = interactions.comments
+        .map((comment) => `<li><span>${escapeHtml(comment.text)}</span></li>`)
+        .join("");
+    }
+  }
+
+  syncMomentLikeState(card, item.submissionId);
+}
+
+function syncHostPostInteractions(submissionId, interactions) {
+  const target = state.hostPosts.find((item) => item.submissionId === submissionId);
+  if (!target) return;
+
+  target.interactions = interactions;
+
+  qsa("[data-submission-id]").forEach((card) => {
+    if (card.dataset.submissionId !== submissionId) return;
+    applyMomentInteractionsToCard(card, target);
+  });
 }
 
 async function handleMomentCommentSubmit(event) {
@@ -872,64 +981,6 @@ async function handleMomentCommentSubmit(event) {
       submitButton.textContent = previousLabel || "Post";
     }
   }
-}
-
-function syncHostPostInteractions(submissionId, interactions) {
-  const target = state.hostPosts.find((item) => item.submissionId === submissionId);
-  if (!target) return;
-
-  target.interactions = interactions;
-
-  qsa("[data-submission-id]").forEach((card) => {
-    if (card.dataset.submissionId !== submissionId) return;
-    applyMomentInteractionsToCard(card, target);
-  });
-}
-
-function applyMomentInteractionsToCard(card, item) {
-  const interactions = normalizeMomentInteractions(item.interactions);
-  const row = card.querySelector(".moment-reaction-row");
-  if (row) {
-    row.querySelectorAll(".moment-action-button[data-reaction]").forEach((button) => {
-      const type = button.dataset.reaction;
-      const countNode = button.querySelector(`[data-moment-reaction-count="${type}"]`);
-      if (countNode) countNode.textContent = `${Number(interactions.counts[type] || 0)}`;
-    });
-
-    const commentCountNode = row.querySelector("[data-moment-comment-count]");
-    if (commentCountNode) {
-      commentCountNode.textContent = `${interactions.commentCount}`;
-    }
-  }
-
-  const commentWrap = card.querySelector("[data-moment-comment-wrap]");
-  if (commentWrap) {
-    const list = commentWrap.querySelector("[data-moment-comment-list]");
-    if (list) {
-      list.innerHTML = interactions.comments
-        .map((comment) => `<li><span>${escapeHtml(comment.text)}</span></li>`)
-        .join("");
-    }
-  }
-
-  syncMomentLikeState(card, item.submissionId);
-}
-
-function syncMomentLikeState(card, submissionId) {
-  if (!card) return;
-
-  const likeButton = card.querySelector('[data-moment-action="reaction"][data-moment-primary-reaction="1"]');
-  if (!likeButton) return;
-
-  const hasLiked = hasLikedSubmission(submissionId);
-  likeButton.classList.toggle("moment-reaction-liked", hasLiked);
-  if (hasLiked) {
-    likeButton.dataset.momentLiked = "1";
-  } else {
-    likeButton.removeAttribute("data-moment-liked");
-  }
-  likeButton.disabled = hasLiked;
-  likeButton.setAttribute("aria-pressed", hasLiked ? "true" : "false");
 }
 
 function getOrCreateGuestSessionId() {
