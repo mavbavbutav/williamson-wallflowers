@@ -423,6 +423,76 @@ test('scheduled task retries stale failed group heroes automatically', async () 
   }
 });
 
+test('scheduled task retries stale queued group heroes automatically', async () => {
+  const submission = guestSubmission({
+    id: 'guest-scheduled-queued',
+    object_key: 'moments/event-hero/guest-scheduled-queued.jpg',
+    objectKey: 'moments/event-hero/guest-scheduled-queued.jpg',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [submission],
+    groupHeroes: [readyHero({
+      status: 'queued',
+      source_submission_ids: JSON.stringify(['guest-scheduled-queued']),
+      sourceSubmissionIds: JSON.stringify(['guest-scheduled-queued']),
+      updated_at: '2020-01-01T00:00:00.000Z',
+      updatedAt: '2020-01-01T00:00:00.000Z'
+    })]
+  });
+  const bucket = new FakeBucket([[submission.object_key, 'source-photo']]);
+  const waitUntil = [];
+  const calls = mockOpenAi();
+
+  try {
+    await worker.scheduled({}, envWithDb(db, bucket), { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.length, 1);
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-scheduled-queued']);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('scheduled task retries stale generating group heroes automatically', async () => {
+  const submission = guestSubmission({
+    id: 'guest-scheduled-generating',
+    object_key: 'moments/event-hero/guest-scheduled-generating.jpg',
+    objectKey: 'moments/event-hero/guest-scheduled-generating.jpg',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [submission],
+    groupHeroes: [readyHero({
+      status: 'generating',
+      source_submission_ids: JSON.stringify(['guest-scheduled-generating']),
+      sourceSubmissionIds: JSON.stringify(['guest-scheduled-generating']),
+      updated_at: '2020-01-01T00:00:00.000Z',
+      updatedAt: '2020-01-01T00:00:00.000Z'
+    })]
+  });
+  const bucket = new FakeBucket([[submission.object_key, 'source-photo']]);
+  const waitUntil = [];
+  const calls = mockOpenAi();
+
+  try {
+    await worker.scheduled({}, envWithDb(db, bucket), { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.length, 1);
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-scheduled-generating']);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('older overlapping group hero generation cannot overwrite a newer result', async () => {
   const first = guestSubmission({
     id: 'guest-first',
@@ -1412,11 +1482,12 @@ class GroupHeroFakeStatement {
   }
 
   async all() {
-    if (this.sql.includes('FROM event_group_heroes') && this.sql.includes("status = 'failed'")) {
+    if (this.sql.includes('FROM event_group_heroes') && this.sql.includes("status IN ('queued', 'generating', 'failed')")) {
       const [cutoff, limit] = this.params;
+      const staleStatuses = new Set(['queued', 'generating', 'failed']);
       return {
         results: this.db.groupHeroes
-          .filter((hero) => hero.status === 'failed')
+          .filter((hero) => staleStatuses.has(hero.status))
           .filter((hero) => String(hero.updated_at || hero.updatedAt || '') <= String(cutoff))
           .sort((left, right) => new Date(left.updated_at || left.updatedAt || 0) - new Date(right.updated_at || right.updatedAt || 0))
           .slice(0, Number(limit) || 10)

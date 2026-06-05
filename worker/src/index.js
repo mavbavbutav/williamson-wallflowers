@@ -120,7 +120,7 @@ export default {
   async scheduled(event, env, ctx) {
     if (!env.MOMENTS_DB || !env.MOMENTS_BUCKET) return;
     ctx.waitUntil(cleanExpiredMedia(env, RETENTION_CLEANUP_LIMIT));
-    ctx.waitUntil(retryStaleFailedEventGroupHeroes(env));
+    ctx.waitUntil(retryStaleEventGroupHeroes(env));
   }
 };
 
@@ -1372,8 +1372,8 @@ async function queueEventGroupHeroRefreshIfIncluded(env, request, submission, ct
   await queueEventGroupHeroGeneration(env, request, eventId, { force: true }, ctx);
 }
 
-async function retryStaleFailedEventGroupHeroes(env, limit = GROUP_HERO_FAILED_RETRY_LIMIT) {
-  const staleHeroes = await getStaleFailedEventGroupHeroes(env, limit);
+async function retryStaleEventGroupHeroes(env, limit = GROUP_HERO_FAILED_RETRY_LIMIT) {
+  const staleHeroes = await getStaleEventGroupHeroes(env, limit);
   if (!staleHeroes.length) return { checked: 0, queued: 0 };
 
   const request = buildScheduledGroupHeroRequest(env);
@@ -1389,13 +1389,13 @@ async function retryStaleFailedEventGroupHeroes(env, limit = GROUP_HERO_FAILED_R
   return { checked: staleHeroes.length, queued };
 }
 
-async function getStaleFailedEventGroupHeroes(env, limit = GROUP_HERO_FAILED_RETRY_LIMIT) {
+async function getStaleEventGroupHeroes(env, limit = GROUP_HERO_FAILED_RETRY_LIMIT) {
   const cutoff = new Date(Date.now() - GROUP_HERO_GENERATION_STALE_SECONDS * 1000).toISOString();
   const boundedLimit = Math.max(1, Math.min(Number(limit) || GROUP_HERO_FAILED_RETRY_LIMIT, GROUP_HERO_FAILED_RETRY_LIMIT));
   const result = await env.MOMENTS_DB.prepare(`
     SELECT event_id AS eventId
     FROM event_group_heroes
-    WHERE status = 'failed'
+    WHERE status IN ('queued', 'generating', 'failed')
       AND updated_at <= ?
     ORDER BY updated_at ASC
     LIMIT ?
