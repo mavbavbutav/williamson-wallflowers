@@ -83,6 +83,19 @@ test('guest upload flow stays above Party View media when host posts exist', asy
   assert.match(guestJs, /scrollIntoView/);
 });
 
+test('guest Party View audio cards keep controls clear of metadata overlays', async () => {
+  const [guestJs, styles] = await Promise.all([
+    readText('../../moments/app.js'),
+    readText('../../moments/styles.css')
+  ]);
+
+  assert.match(guestJs, /party-card is-\$\{item\.mediaType\}/);
+  assert.match(guestJs, /media\.className = `party-card-media is-\$\{item\.mediaType\}`/);
+  assert.match(styles, /\.party-card\.is-audio \.party-card-media\s*\{[\s\S]*?grid-area: auto/);
+  assert.match(styles, /\.party-card\.is-audio \.party-card-body\s*\{[\s\S]*?grid-area: auto/);
+  assert.match(styles, /\.party-card\.is-audio \.party-card-body\s*\{[\s\S]*?pointer-events: auto/);
+});
+
 async function readText(path) {
   return readFile(new URL(path, import.meta.url), 'utf8');
 }

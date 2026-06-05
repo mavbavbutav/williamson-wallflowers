@@ -2143,6 +2143,22 @@ textarea:focus-visible {
   width: 100%;
 }
 
+.party-card.is-audio {
+  grid-template-rows: auto auto;
+}
+
+.party-card.is-audio .party-card-media {
+  grid-area: auto;
+}
+
+.party-card.is-audio .party-card-body {
+  grid-area: auto;
+  align-self: stretch;
+  padding: 0 1rem 1rem;
+  background: #171514;
+  pointer-events: auto;
+}
+
 .party-card-body {
   position: relative;
   z-index: 2;
