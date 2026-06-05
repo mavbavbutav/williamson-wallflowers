@@ -679,12 +679,35 @@ async function listHostSubmissions(request, env, url, corsHeaders, eventId) {
     WHERE event_id = ? AND deleted_at IS NULL AND status != 'deleted'
     ORDER BY created_at DESC
   `).bind(eventId).all();
+  const guestLink = await getHostGuestLink(env, event.id);
 
   return json({
     ok: true,
-    event: toEventClient(event, env),
+    event: {
+      ...toEventClient(event, env),
+      guestLink
+    },
     submissions: await Promise.all((result.results || []).map((row) => toSubmissionClient(row, request, env)))
   }, 200, corsHeaders);
+}
+
+async function getHostGuestLink(env, eventId) {
+  const tag = await env.MOMENTS_DB.prepare(`
+    SELECT id, public_code AS publicCode, label
+    FROM tags
+    WHERE active_event_id = ? AND status = 'active'
+    ORDER BY updated_at DESC, created_at DESC
+    LIMIT 1
+  `).bind(eventId).first();
+
+  if (!tag?.publicCode) return null;
+
+  return {
+    id: tag.id,
+    label: tag.label || 'Guest link',
+    publicCode: tag.publicCode,
+    url: `${getSiteUrl(env)}/moments/?t=${encodeURIComponent(tag.publicCode)}`
+  };
 }
 
 async function getHostTimeCapsule(request, env, url, corsHeaders, eventId) {

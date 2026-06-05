@@ -130,6 +130,25 @@ test('guest can read Host Posts from the scanned event link with the upload toke
   assert.equal(payload.items[0].mediaUrl.includes('share-token'), false);
 });
 
+test('host event payload includes a copyable guest link from the assigned tag', async () => {
+  const db = new HostPostsFakeDb();
+  const env = envWithDb(db, new FakeBucket());
+
+  const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-host/submissions', {
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      Authorization: 'Bearer host-token'
+    }
+  }), env);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.event.guestLink.label, 'Host tag');
+  assert.equal(payload.event.guestLink.publicCode, 'host-tag');
+  assert.equal(payload.event.guestLink.url, 'https://williamsonwallflowers.com/moments/?t=host-tag');
+  assert.equal(payload.event.guestLink.url.includes('host-token'), false);
+});
+
 test('host can enable the guest Party View swipe feed', async () => {
   const db = new HostPostsFakeDb();
   const env = envWithDb(db, new FakeBucket());
@@ -248,11 +267,19 @@ test('host and guest frontends expose Host Posts controls and party view', async
 
   assert.match(hostHtml, /data-view="host-posts"/);
   assert.match(hostHtml, /id="hostPostsPanel"/);
+  assert.match(hostHtml, /id="guestLinkCard"/);
+  assert.match(hostHtml, /id="guestShareUrl"/);
+  assert.match(hostHtml, /id="copyGuestLinkButton"/);
+  assert.match(hostHtml, /id="openGuestLinkButton"/);
   assert.match(hostHtml, />Party View</);
   assert.match(hostHtml, /id="hostPostsTabLabel"/);
   assert.match(hostHtml, /id="partyViewSettingsForm"/);
   assert.match(hostHtml, /id="partyViewSwipeEnabled"/);
   assert.match(hostJs, /createHostPost/);
+  assert.match(hostJs, /buildGuestUrl/);
+  assert.match(hostJs, /renderGuestLink/);
+  assert.match(hostJs, /function copyGuestLink/);
+  assert.match(hostJs, /Guest upload link copied/);
   assert.match(hostJs, /getHostPartyViewLabel/);
   assert.match(hostJs, /Pre-Party View/);
   assert.match(hostJs, /savePartyViewSettings/);
@@ -285,6 +312,7 @@ test('host and guest frontends expose Host Posts controls and party view', async
   assert.match(hostJs, /bindMediaFrameAspect\(thumb, image\)/);
   assert.match(hostJs, /bindMediaFrameAspect\(thumb, video\)/);
   assert.match(styles, /\.host-posts-panel/);
+  assert.match(styles, /\.host-guest-link-card/);
   assert.match(styles, /\.party-view-settings/);
   assert.match(styles, /\.guest-page \.guest-party-swipe-feed/);
   assert.match(styles, /\.guest-page\.is-countdown-locked \.memory-mode-card/);
@@ -530,6 +558,17 @@ class HostPostsFakeStatement {
     }
 
     if (this.sql.includes('FROM tags')) {
+      if (this.sql.includes('active_event_id = ?')) {
+        const tag = this.db.tags.find((item) => (item.active_event_id || item.activeEventId) === this.params[0] && item.status === 'active');
+        return tag
+          ? {
+            id: tag.id,
+            publicCode: tag.publicCode || tag.public_code,
+            label: tag.label
+          }
+          : null;
+      }
+
       const tag = this.db.tags.find((item) => item.publicCode === this.params[0]);
       const event = tag && this.db.events.find((item) => item.id === tag.activeEventId);
       return tag && event

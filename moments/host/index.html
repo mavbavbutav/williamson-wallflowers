@@ -31,7 +31,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260604-party-swipe-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260605-host-guest-link-1" />
 </head>
 <body class="host-page">
   <main class="app-shell">
@@ -112,6 +112,25 @@
       </section>
 
       <div id="hostNotice" class="notice" role="status" aria-live="polite" hidden></div>
+
+      <section class="share-card host-guest-link-card" id="guestLinkCard" hidden>
+        <div class="panel-heading">
+          <div>
+            <span class="status-pill" id="guestLinkStatusPill">Guest link</span>
+            <h2 id="guestLinkTitle">Guest upload link</h2>
+            <p class="muted" id="guestLinkHint">Copy this link for guests before the physical tag is scanned.</p>
+          </div>
+        </div>
+        <label class="field">
+          Guest link
+          <input id="guestShareUrl" readonly />
+        </label>
+        <p class="muted link-helper" id="guestLinkTagLabel">Assigned event tag</p>
+        <div class="row-actions share-actions">
+          <button class="small-button" type="button" id="copyGuestLinkButton">Copy guest link</button>
+          <button class="small-button is-primary" type="button" id="openGuestLinkButton">Open guest view</button>
+        </div>
+      </section>
 
       <div class="toolbar" id="workspaceToolbar" hidden>
         <div class="tabs" aria-label="Host workspace">
@@ -294,6 +313,6 @@
     <div class="media-modal-stage" id="modalStage"></div>
   </div>
 
-  <script type="module" src="host.js?v=20260604-party-swipe-1"></script>
+  <script type="module" src="host.js?v=20260605-host-guest-link-1"></script>
 </body>
 </html>

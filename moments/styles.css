@@ -2059,6 +2059,16 @@ textarea:focus-visible {
   border-color: rgba(63, 109, 88, 0.28);
 }
 
+.host-guest-link-card {
+  margin: 1rem 0;
+}
+
+.host-guest-link-card .link-helper {
+  margin: -0.35rem 0 0;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 .share-card .panel-heading {
   margin-bottom: 0;
 }

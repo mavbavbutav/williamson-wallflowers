@@ -1,4 +1,4 @@
-import { copyText, formatBytes, formatDate, formatDateTime, getHostToken, getParam, isLocalHost, qs, qsa, requestJson, setNotice } from "../shared.js?v=20260604-local-demo-1";
+import { buildGuestUrl, copyText, formatBytes, formatDate, formatDateTime, getHostToken, getParam, isLocalHost, qs, qsa, requestJson, setNotice } from "../shared.js?v=20260604-local-demo-1";
 import { createVideoThumbnailFile } from "../video-thumbnails.js?v=20260601-video-thumbs-1";
 
 const MAX_VIDEO_SECONDS = 30;
@@ -47,6 +47,8 @@ function init() {
   });
 
   qs("#refreshButton").addEventListener("click", loadGallery);
+  qs("#copyGuestLinkButton").addEventListener("click", copyGuestLink);
+  qs("#openGuestLinkButton").addEventListener("click", openGuestLink);
   qs("#saveCapsuleButton").addEventListener("click", () => saveCapsule());
   qs("#publishCapsuleButton").addEventListener("click", () => saveCapsule("published"));
   qs("#unpublishCapsuleButton").addEventListener("click", () => saveCapsule("draft"));
@@ -130,6 +132,7 @@ async function loadCapsule({ silent = false } = {}) {
 
 function render() {
   renderHostPulse();
+  renderGuestLink();
   renderWorkspaceTabs();
   renderSubmissions();
   renderHostPosts();
@@ -168,6 +171,42 @@ function renderHostPulse() {
   setHostStat("approved", approved);
   setHostStat("capsule", hasCapsule ? capsuleCount : "Off");
   setHostStat("voice", voiceCount);
+}
+
+function renderGuestLink() {
+  const card = qs("#guestLinkCard");
+  if (!eventRecord) {
+    card.hidden = true;
+    return;
+  }
+
+  const guestLink = getGuestLink();
+  const hasGuestLink = Boolean(guestLink);
+  card.hidden = false;
+  card.classList.toggle("is-live", hasGuestLink);
+  qs("#guestLinkStatusPill").textContent = hasGuestLink ? "Ready" : "Needs tag";
+  qs("#guestLinkStatusPill").className = `status-pill${hasGuestLink ? " is-approved" : ""}`;
+  qs("#guestLinkTitle").textContent = hasGuestLink ? "Guest upload link" : "Guest link needs an event tag";
+  qs("#guestLinkHint").textContent = hasGuestLink
+    ? "Send this link to guests before the event. It opens the same guest view as the NFC or QR tag."
+    : "Assign an active reusable tag to this event, then the guest upload link will appear here.";
+  qs("#guestShareUrl").value = guestLink?.url || "";
+  qs("#guestShareUrl").placeholder = hasGuestLink ? "" : "No active tag is assigned to this event yet.";
+  qs("#guestLinkTagLabel").textContent = hasGuestLink
+    ? `${guestLink.label || "Guest tag"} · ${guestLink.publicCode}`
+    : "No active event tag assigned.";
+  qs("#copyGuestLinkButton").disabled = !hasGuestLink;
+  qs("#openGuestLinkButton").disabled = !hasGuestLink;
+}
+
+function getGuestLink() {
+  const link = eventRecord?.guestLink;
+  if (!link?.publicCode && !link?.url) return null;
+
+  return {
+    ...link,
+    url: link.url || buildGuestUrl(link.publicCode)
+  };
 }
 
 function setHostStat(name, value) {
@@ -1033,6 +1072,18 @@ function copyCapsuleLink() {
   showHostCelebration("Private Time Capsule link copied.");
 }
 
+function copyGuestLink() {
+  const guestLink = getGuestLink();
+  if (!guestLink?.url) return;
+  copyText(guestLink.url, qs("#copyGuestLinkButton"));
+  showHostCelebration("Guest upload link copied.");
+}
+
+function openGuestLink() {
+  const guestLink = getGuestLink();
+  if (guestLink?.url) window.open(guestLink.url, "_blank", "noopener,noreferrer");
+}
+
 async function removeCapsuleItem(itemId) {
   if (!window.confirm("Remove this moment from the Time Capsule? The original host gallery submission stays available.")) return;
 
@@ -1528,6 +1579,11 @@ function createLocalDemoHostState(id) {
     countdownMessage: "Party starts in",
     guestUploadsBeforeCountdownEnabled: false,
     partyViewSwipeEnabled: started,
+    guestLink: {
+      label: "Demo guest link",
+      publicCode: id,
+      url: buildGuestUrl(id)
+    },
     timeCapsule: {
       enabled: true,
       status: "draft"
