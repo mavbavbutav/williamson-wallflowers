@@ -15,11 +15,18 @@ const BASE_ENV = {
 
 test('media audit migration creates submission insights and event profiles', async () => {
   const migration = await readFile(new URL('../migrations/0016_wallflower_media_audit.sql', import.meta.url), 'utf8');
+  const exifMigration = await readFile(new URL('../migrations/0017_wallflower_media_exif_audit.sql', import.meta.url), 'utf8');
 
   assert.match(migration, /CREATE TABLE IF NOT EXISTS submission_media_insights/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS event_media_profiles/);
   assert.match(migration, /vision_status TEXT NOT NULL DEFAULT 'not_requested'/);
   assert.match(migration, /idx_submission_media_insights_event/);
+  assert.match(exifMigration, /uploader_ip_address TEXT/);
+  assert.match(exifMigration, /exif_capture_time TEXT/);
+  assert.match(exifMigration, /exif_gps_city TEXT/);
+  assert.match(exifMigration, /exif_gps_region TEXT/);
+  assert.match(exifMigration, /exif_gps_precision TEXT/);
+  assert.match(exifMigration, /exif_metadata_version INTEGER NOT NULL DEFAULT 0/);
 });
 
 test('admin frontend exposes the private media audit report controls', async () => {
@@ -30,11 +37,12 @@ test('admin frontend exposes the private media audit report controls', async () 
   assert.match(adminHtml, /id="mediaAuditPanel"/);
   assert.match(adminHtml, /Run AI vision audit/);
   assert.match(adminHtml, /Location cues/);
-  assert.match(adminHtml, /admin\.js\?v=20260606-media-audit-admin-2/);
-  assert.match(adminHtml, /styles\.css\?v=20260606-media-audit-admin-2/);
+  assert.match(adminHtml, /admin\.js\?v=20260606-media-exif-audit-1/);
+  assert.match(adminHtml, /styles\.css\?v=20260606-media-exif-audit-1/);
   assert.match(adminJs, /\/admin\/events\/\$\{encodeURIComponent\(eventId\)\}\/media-audit/);
   assert.match(adminJs, /previewUrl/);
-  assert.match(adminJs, /GPS\/EXIF location is not captured in v1/);
+  assert.match(adminJs, /EXIF and upload/);
+  assert.match(adminJs, /uploader IP/);
   assert.match(adminJs, /includeAi/);
   assert.match(styles, /\.media-audit-panel/);
   assert.match(styles, /\.media-audit-preview/);
@@ -207,6 +215,57 @@ test('admin media audit can return stored profile and insight rows', async () =>
   assert.equal(payload.audit.insights[0].visionStatus, 'not_requested');
 });
 
+test('admin media audit backfill extracts JPEG EXIF capture, camera, and GPS metadata', async () => {
+  const bytes = jpegWithExifBytes(640, 480);
+  const photo = submission({
+    id: 'exif-photo',
+    object_key: 'moments/event-audit/exif-photo.jpg',
+    mime_type: 'image/jpeg',
+    size: bytes.byteLength,
+    uploader_ip_address: '203.0.113.24',
+    uploaderIpAddress: '203.0.113.24'
+  });
+  const db = new MediaAuditFakeDb({ submissions: [photo] });
+  const env = envWithDb(db, new FakeBucket([[photo.object_key, bytes]]));
+  const waitUntil = [];
+
+  const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/admin/events/event-audit/media-audit/backfill', {
+    method: 'POST',
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      'X-Admin-Token': 'admin-token',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ limit: 5 })
+  }), env, { waitUntil: (work) => waitUntil.push(work) });
+
+  assert.equal(response.status, 202);
+  await drainWaitUntil(waitUntil);
+
+  const insightRow = db.insights.find((row) => row.submission_id === 'exif-photo');
+  assert.equal(insightRow.exif_capture_time, '2026-06-06T14:30:00');
+  assert.equal(insightRow.exif_camera_make, 'Apple');
+  assert.equal(insightRow.exif_camera_model, 'iPhone 15');
+  assert.equal(insightRow.exif_lens_model, 'Main Camera');
+  assert.equal(insightRow.exif_gps_precision, '12m');
+  assert.equal(insightRow.exif_metadata_version, 1);
+  assert.ok(Math.abs(insightRow.exif_gps_latitude - 36.123333) < 0.00001);
+  assert.ok(Math.abs(insightRow.exif_gps_longitude + 86.67) < 0.00001);
+
+  const report = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/admin/events/event-audit/media-audit', {
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      'X-Admin-Token': 'admin-token'
+    }
+  }), env);
+  const payload = await report.json();
+  const insight = payload.audit.insights[0];
+  assert.equal(insight.exifCaptureTime, '2026-06-06T14:30:00');
+  assert.equal(insight.exifCameraMake, 'Apple');
+  assert.equal(insight.uploaderIpAddress, '203.0.113.24');
+  assert.equal(insight.exifMetadataVersion, 1);
+});
+
 test('optional media audit vision only sends AI-eligible guest media and host media', async () => {
   const aiGuest = submission({
     id: 'ai-guest',
@@ -290,6 +349,8 @@ function submission(overrides = {}) {
     thumbnailMimeType: null,
     thumbnail_size: 0,
     thumbnailSize: 0,
+    uploader_ip_address: '',
+    uploaderIpAddress: '',
     ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
     aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
     status: 'approved',
@@ -359,6 +420,19 @@ function insight(overrides = {}) {
     summary: '',
     skip_reason: '',
     error_message: '',
+    exif_capture_time: '',
+    exif_gps_city: '',
+    exif_gps_region: '',
+    exif_gps_precision: '',
+    exif_gps_latitude: null,
+    exif_gps_longitude: null,
+    exif_gps_altitude_meters: null,
+    exif_camera_make: '',
+    exif_camera_model: '',
+    exif_lens_model: '',
+    exif_software: '',
+    exif_orientation: '',
+    exif_metadata_version: 1,
     analyzed_at: '2026-09-19T20:30:00.000Z',
     created_at: '2026-09-19T20:30:00.000Z',
     updated_at: '2026-09-19T20:30:00.000Z',
@@ -457,7 +531,7 @@ class MediaAuditFakeStatement {
 
   async all() {
     if (this.sql.includes('FROM submissions s') && this.sql.includes('LEFT JOIN submission_media_insights')) {
-      return { results: this.mediaAuditCandidates().slice(0, Number(this.params[2] || 10)) };
+      return { results: this.mediaAuditCandidates().slice(0, Number(this.params[3] || 10)) };
     }
 
     if (this.sql.includes('FROM submission_media_insights i') && this.sql.includes('INNER JOIN submissions s')) {
@@ -487,6 +561,19 @@ class MediaAuditFakeStatement {
               visibleText: row.visible_text || row.visibleText,
               skipReason: row.skip_reason || row.skipReason,
               errorMessage: row.error_message || row.errorMessage,
+              exifCaptureTime: row.exif_capture_time || row.exifCaptureTime,
+              exifGpsCity: row.exif_gps_city || row.exifGpsCity,
+              exifGpsRegion: row.exif_gps_region || row.exifGpsRegion,
+              exifGpsPrecision: row.exif_gps_precision || row.exifGpsPrecision,
+              exifGpsLatitude: row.exif_gps_latitude ?? row.exifGpsLatitude,
+              exifGpsLongitude: row.exif_gps_longitude ?? row.exifGpsLongitude,
+              exifGpsAltitudeMeters: row.exif_gps_altitude_meters ?? row.exifGpsAltitudeMeters,
+              exifCameraMake: row.exif_camera_make || row.exifCameraMake,
+              exifCameraModel: row.exif_camera_model || row.exifCameraModel,
+              exifLensModel: row.exif_lens_model || row.exifLensModel,
+              exifSoftware: row.exif_software || row.exifSoftware,
+              exifOrientation: row.exif_orientation || row.exifOrientation,
+              exifMetadataVersion: row.exif_metadata_version || row.exifMetadataVersion,
               analyzedAt: row.analyzed_at || row.analyzedAt,
               updatedAt: row.updated_at || row.updatedAt,
               mediaType: submissionRow?.media_type || submissionRow?.mediaType,
@@ -494,6 +581,7 @@ class MediaAuditFakeStatement {
               originalFilename: submissionRow?.original_filename || submissionRow?.originalFilename,
               guestName: submissionRow?.guest_name || submissionRow?.guestName,
               guestNote: submissionRow?.guest_note || submissionRow?.guestNote,
+              uploaderIpAddress: submissionRow?.uploader_ip_address || submissionRow?.uploaderIpAddress,
               thumbnailObjectKey: submissionRow?.thumbnail_object_key || submissionRow?.thumbnailObjectKey,
               thumbnailMimeType: submissionRow?.thumbnail_mime_type || submissionRow?.thumbnailMimeType,
               submissionCreatedAt: submissionRow?.created_at || submissionRow?.createdAt
@@ -533,6 +621,19 @@ class MediaAuditFakeStatement {
         summary,
         skipReason,
         errorMessage,
+        exifCaptureTime,
+        exifGpsCity,
+        exifGpsRegion,
+        exifGpsPrecision,
+        exifGpsLatitude,
+        exifGpsLongitude,
+        exifGpsAltitudeMeters,
+        exifCameraMake,
+        exifCameraModel,
+        exifLensModel,
+        exifSoftware,
+        exifOrientation,
+        exifMetadataVersion,
         analyzedAt,
         createdAt,
         updatedAt
@@ -563,6 +664,19 @@ class MediaAuditFakeStatement {
         summary,
         skip_reason: skipReason,
         error_message: errorMessage,
+        exif_capture_time: exifCaptureTime,
+        exif_gps_city: exifGpsCity,
+        exif_gps_region: exifGpsRegion,
+        exif_gps_precision: exifGpsPrecision,
+        exif_gps_latitude: exifGpsLatitude,
+        exif_gps_longitude: exifGpsLongitude,
+        exif_gps_altitude_meters: exifGpsAltitudeMeters,
+        exif_camera_make: exifCameraMake,
+        exif_camera_model: exifCameraModel,
+        exif_lens_model: exifLensModel,
+        exif_software: exifSoftware,
+        exif_orientation: exifOrientation,
+        exif_metadata_version: exifMetadataVersion,
         analyzed_at: analyzedAt,
         created_at: createdAt,
         updated_at: updatedAt
@@ -642,7 +756,7 @@ class MediaAuditFakeStatement {
       .filter((item) => {
         const existing = this.db.insights.find((row) => row.submission_id === item.id || row.submissionId === item.id);
         if (!existing) return true;
-        return existing.status === 'pending' || (retryFailed && existing.status === 'failed');
+        return existing.status === 'pending' || (retryFailed && existing.status === 'failed') || Number(existing.exif_metadata_version || existing.exifMetadataVersion || 0) < 1;
       })
       .sort((left, right) => new Date(left.created_at || left.createdAt || 0) - new Date(right.created_at || right.createdAt || 0))
       .map((item) => ({
@@ -657,6 +771,7 @@ class MediaAuditFakeStatement {
         thumbnailObjectKey: item.thumbnail_object_key || item.thumbnailObjectKey,
         thumbnailMimeType: item.thumbnail_mime_type || item.thumbnailMimeType,
         thumbnailSize: item.thumbnail_size || item.thumbnailSize,
+        uploaderIpAddress: item.uploader_ip_address || item.uploaderIpAddress,
         aiArtworkConsentAt: item.ai_artwork_consent_at || item.aiArtworkConsentAt,
         status: item.status,
         createdAt: item.created_at || item.createdAt,
@@ -688,11 +803,110 @@ function jpegBytes(width, height) {
   return bytes;
 }
 
+function jpegWithExifBytes(width, height) {
+  const tiff = new Uint8Array(325);
+  writeAscii(tiff, 0, 'MM');
+  writeUint16BE(tiff, 2, 42);
+  writeUint32BE(tiff, 4, 8);
+
+  writeUint16BE(tiff, 8, 6);
+  writeTiffEntry(tiff, 10, 0x010f, 2, 6, 86);
+  writeTiffEntry(tiff, 22, 0x0110, 2, 10, 92);
+  writeTiffEntry(tiff, 34, 0x0112, 3, 1, 6);
+  writeTiffEntry(tiff, 46, 0x0131, 2, 7, 102);
+  writeTiffEntry(tiff, 58, 0x8769, 4, 1, 109);
+  writeTiffEntry(tiff, 70, 0x8825, 4, 1, 171);
+  writeUint32BE(tiff, 82, 0);
+  writeAscii(tiff, 86, 'Apple\0');
+  writeAscii(tiff, 92, 'iPhone 15\0');
+  writeAscii(tiff, 102, 'iOS 18\0');
+
+  writeUint16BE(tiff, 109, 2);
+  writeTiffEntry(tiff, 111, 0x9003, 2, 20, 139);
+  writeTiffEntry(tiff, 123, 0xa434, 2, 12, 159);
+  writeUint32BE(tiff, 135, 0);
+  writeAscii(tiff, 139, '2026:06:06 14:30:00\0');
+  writeAscii(tiff, 159, 'Main Camera\0');
+
+  writeUint16BE(tiff, 171, 7);
+  writeTiffAsciiInline(tiff, 173, 0x0001, 'N');
+  writeTiffEntry(tiff, 185, 0x0002, 5, 3, 261);
+  writeTiffAsciiInline(tiff, 197, 0x0003, 'W');
+  writeTiffEntry(tiff, 209, 0x0004, 5, 3, 285);
+  writeTiffEntry(tiff, 221, 0x0005, 1, 1, 0);
+  writeTiffEntry(tiff, 233, 0x0006, 5, 1, 309);
+  writeTiffEntry(tiff, 245, 0x001f, 5, 1, 317);
+  writeUint32BE(tiff, 257, 0);
+  writeRational(tiff, 261, 36, 1);
+  writeRational(tiff, 269, 7, 1);
+  writeRational(tiff, 277, 24, 1);
+  writeRational(tiff, 285, 86, 1);
+  writeRational(tiff, 293, 40, 1);
+  writeRational(tiff, 301, 12, 1);
+  writeRational(tiff, 309, 300, 1);
+  writeRational(tiff, 317, 12, 1);
+
+  const exifHeader = new Uint8Array([0x45, 0x78, 0x69, 0x66, 0x00, 0x00]);
+  const app1Length = exifHeader.byteLength + tiff.byteLength + 2;
+  const app1 = new Uint8Array(4 + exifHeader.byteLength + tiff.byteLength);
+  app1.set([0xff, 0xe1], 0);
+  writeUint16BE(app1, 2, app1Length);
+  app1.set(exifHeader, 4);
+  app1.set(tiff, 4 + exifHeader.byteLength);
+
+  const base = jpegBytes(width, height);
+  const output = new Uint8Array(2 + app1.byteLength + base.byteLength - 2);
+  output.set(base.slice(0, 2), 0);
+  output.set(app1, 2);
+  output.set(base.slice(2), 2 + app1.byteLength);
+  return output;
+}
+
 function writeUint32BE(bytes, offset, value) {
   bytes[offset] = (value >>> 24) & 0xff;
   bytes[offset + 1] = (value >>> 16) & 0xff;
   bytes[offset + 2] = (value >>> 8) & 0xff;
   bytes[offset + 3] = value & 0xff;
+}
+
+function writeUint16BE(bytes, offset, value) {
+  bytes[offset] = (value >>> 8) & 0xff;
+  bytes[offset + 1] = value & 0xff;
+}
+
+function writeAscii(bytes, offset, value) {
+  for (let index = 0; index < value.length; index += 1) {
+    bytes[offset + index] = value.charCodeAt(index);
+  }
+}
+
+function writeTiffEntry(bytes, offset, tag, type, count, value) {
+  writeUint16BE(bytes, offset, tag);
+  writeUint16BE(bytes, offset + 2, type);
+  writeUint32BE(bytes, offset + 4, count);
+  if ((type === 3 || type === 1) && count === 1) {
+    if (type === 3) writeUint16BE(bytes, offset + 8, value);
+    else bytes[offset + 8] = value & 0xff;
+    bytes[offset + 10] = 0;
+    bytes[offset + 11] = 0;
+    return;
+  }
+  writeUint32BE(bytes, offset + 8, value);
+}
+
+function writeTiffAsciiInline(bytes, offset, tag, value) {
+  writeUint16BE(bytes, offset, tag);
+  writeUint16BE(bytes, offset + 2, 2);
+  writeUint32BE(bytes, offset + 4, 2);
+  bytes[offset + 8] = value.charCodeAt(0);
+  bytes[offset + 9] = 0;
+  bytes[offset + 10] = 0;
+  bytes[offset + 11] = 0;
+}
+
+function writeRational(bytes, offset, numerator, denominator) {
+  writeUint32BE(bytes, offset, numerator);
+  writeUint32BE(bytes, offset + 4, denominator);
 }
 
 function toBytes(value) {

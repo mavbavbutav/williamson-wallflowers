@@ -68,6 +68,7 @@ const GROUP_HERO_INPUT_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']
 const GROUP_HERO_PHOTO_TYPES = new Set([...GROUP_HERO_INPUT_TYPES, 'image/heic', 'image/heif']);
 const GROUP_HERO_GENERIC_IMAGE_TYPES = new Set(['application/octet-stream', 'binary/octet-stream']);
 const MEDIA_AUDIT_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const EXIF_METADATA_VERSION = 1;
 const THUMBNAIL_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const VIDEO_TYPES = new Set([
   'video/mp4',
@@ -447,6 +448,7 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
   const originalFilename = sanitizeFilename(media.name || `${mediaType}-${id}`);
   const storedMimeType = getStoredMimeType(media.type, originalFilename, mediaType);
   const objectKey = `moments/${eventId}/${id}.${extensionFor(storedMimeType, originalFilename)}`;
+  const uploaderIpAddress = getClientIpAddress(request);
   const guestName = cleanText(formData.get('guestName'), 90);
   const guestNote = cleanText(formData.get('guestNote'), 220);
   const aiArtworkConsentAt = aiArtworkConsent ? now : null;
@@ -478,9 +480,10 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
     INSERT INTO submissions (
       id, event_id, media_type, object_key, original_filename, mime_type, size,
       thumbnail_object_key, thumbnail_mime_type, thumbnail_size, thumbnail_created_at,
-      duration_seconds, guest_name, guest_note, consent_at, status, guest_visible_at, created_at, updated_at
+      duration_seconds, guest_name, guest_note, consent_at, status, guest_visible_at,
+      uploader_ip_address, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     id,
     eventId,
@@ -499,6 +502,7 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
     now,
     submissionStatus,
     guestVisibleAt,
+    uploaderIpAddress,
     now,
     now
   ).run();
@@ -764,6 +768,7 @@ async function createHostPost(request, env, url, corsHeaders, eventId, ctx) {
   const originalFilename = sanitizeFilename(media.name || `host-${mediaType}-${submissionId}`);
   const storedMimeType = getStoredMimeType(media.type, originalFilename, mediaType);
   const objectKey = `moments/${eventId}/${submissionId}.${extensionFor(storedMimeType, originalFilename)}`;
+  const uploaderIpAddress = getClientIpAddress(request);
   const title = cleanText(formData.get('title'), 120) || 'Host Post';
   const caption = cleanText(formData.get('caption'), 600);
   const sortOrder = await getNextTimeCapsuleSortOrder(env, eventId);
@@ -789,9 +794,9 @@ async function createHostPost(request, env, url, corsHeaders, eventId, ctx) {
     INSERT INTO submissions (
       id, event_id, media_type, source, object_key, original_filename, mime_type, size,
       thumbnail_object_key, thumbnail_mime_type, thumbnail_size, thumbnail_created_at,
-      duration_seconds, guest_name, guest_note, consent_at, status, created_at, updated_at
+      duration_seconds, guest_name, guest_note, consent_at, status, uploader_ip_address, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     submissionId,
     eventId,
@@ -810,6 +815,7 @@ async function createHostPost(request, env, url, corsHeaders, eventId, ctx) {
     cleanText(caption, 220),
     now,
     'approved',
+    uploaderIpAddress,
     now,
     now
   ).run();
@@ -3192,10 +3198,11 @@ async function getMediaAuditCandidates(env, eventId, limit, retryFailed = false)
         i.submission_id IS NULL
         OR i.status = 'pending'
         OR (? = 1 AND i.status = 'failed')
+        OR COALESCE(i.exif_metadata_version, 0) < ?
       )
     ORDER BY s.created_at ASC
     LIMIT ?
-  `).bind(eventId, retryFailed ? 1 : 0, limit).all();
+  `).bind(eventId, retryFailed ? 1 : 0, EXIF_METADATA_VERSION, limit).all();
 
   return result.results || [];
 }
@@ -3216,8 +3223,9 @@ async function countMediaAuditCandidates(env, eventId, retryFailed = false) {
         i.submission_id IS NULL
         OR i.status = 'pending'
         OR (? = 1 AND i.status = 'failed')
+        OR COALESCE(i.exif_metadata_version, 0) < ?
       )
-  `).bind(eventId, retryFailed ? 1 : 0).first();
+  `).bind(eventId, retryFailed ? 1 : 0, EXIF_METADATA_VERSION).first();
 
   return Number(row?.count || 0);
 }
@@ -3263,6 +3271,19 @@ async function backfillMediaAuditCandidates(env, candidates, options = {}) {
         summary: '',
         skipReason: '',
         errorMessage: cleanText(error.message || error, 500),
+        exifCaptureTime: '',
+        exifGpsCity: '',
+        exifGpsRegion: '',
+        exifGpsPrecision: '',
+        exifGpsLatitude: null,
+        exifGpsLongitude: null,
+        exifGpsAltitudeMeters: null,
+        exifCameraMake: '',
+        exifCameraModel: '',
+        exifLensModel: '',
+        exifSoftware: '',
+        exifOrientation: '',
+        exifMetadataVersion: EXIF_METADATA_VERSION,
         analyzedAt: now,
         createdAt: now,
         updatedAt: now
@@ -3290,6 +3311,7 @@ async function analyzeSubmissionMedia(env, submission, options = {}) {
 
   const bytes = new Uint8Array(await object.arrayBuffer());
   const detected = inspectImageBytes(bytes, source.mimeType, source.objectKey || source.originalFilename);
+  const exif = parseExifMetadata(bytes, detected.format);
   const qualityScore = scoreMediaAuditImage(detected, bytes.byteLength);
   let vision = {
     status: options.includeAi ? 'not_allowed' : 'not_requested',
@@ -3335,6 +3357,19 @@ async function analyzeSubmissionMedia(env, submission, options = {}) {
     summary: vision.summary,
     skipReason: detected.format ? '' : 'unsupported-or-unknown-image-format',
     errorMessage: vision.errorMessage || '',
+    exifCaptureTime: exif.captureTime,
+    exifGpsCity: exif.gpsCity,
+    exifGpsRegion: exif.gpsRegion,
+    exifGpsPrecision: exif.gpsPrecision,
+    exifGpsLatitude: exif.gpsLatitude,
+    exifGpsLongitude: exif.gpsLongitude,
+    exifGpsAltitudeMeters: exif.gpsAltitudeMeters,
+    exifCameraMake: exif.cameraMake,
+    exifCameraModel: exif.cameraModel,
+    exifLensModel: exif.lensModel,
+    exifSoftware: exif.software,
+    exifOrientation: exif.orientation,
+    exifMetadataVersion: EXIF_METADATA_VERSION,
     analyzedAt: new Date().toISOString()
   };
 }
@@ -3385,6 +3420,19 @@ function skippedMediaInsight(submission, source, reason) {
     summary: '',
     skipReason: reason,
     errorMessage: '',
+    exifCaptureTime: '',
+    exifGpsCity: '',
+    exifGpsRegion: '',
+    exifGpsPrecision: '',
+    exifGpsLatitude: null,
+    exifGpsLongitude: null,
+    exifGpsAltitudeMeters: null,
+    exifCameraMake: '',
+    exifCameraModel: '',
+    exifLensModel: '',
+    exifSoftware: '',
+    exifOrientation: '',
+    exifMetadataVersion: EXIF_METADATA_VERSION,
     analyzedAt: new Date().toISOString()
   };
 }
@@ -3540,6 +3588,235 @@ function inspectImageBytes(bytes, mimeType = '', filename = '') {
   };
 }
 
+function emptyExifMetadata() {
+  return {
+    captureTime: '',
+    gpsCity: '',
+    gpsRegion: '',
+    gpsPrecision: '',
+    gpsLatitude: null,
+    gpsLongitude: null,
+    gpsAltitudeMeters: null,
+    cameraMake: '',
+    cameraModel: '',
+    lensModel: '',
+    software: '',
+    orientation: ''
+  };
+}
+
+function parseExifMetadata(bytes, format) {
+  if (format !== 'jpeg') return emptyExifMetadata();
+  try {
+    return parseJpegExifMetadata(bytes);
+  } catch {
+    return emptyExifMetadata();
+  }
+}
+
+function parseJpegExifMetadata(bytes) {
+  let offset = 2;
+  while (offset + 8 < bytes.length) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    const marker = bytes[offset + 1];
+    if (marker === 0xda || marker === 0xd9) break;
+    if (offset + 4 > bytes.length) break;
+
+    const length = readUint16BE(bytes, offset + 2);
+    if (length < 2 || offset + 2 + length > bytes.length) break;
+
+    const dataOffset = offset + 4;
+    const dataLength = length - 2;
+    if (
+      marker === 0xe1
+      && dataLength >= 8
+      && asciiBytes(bytes, dataOffset, 4) === 'Exif'
+      && bytes[dataOffset + 4] === 0x00
+      && bytes[dataOffset + 5] === 0x00
+    ) {
+      return parseTiffExifMetadata(bytes, dataOffset + 6, dataOffset + dataLength);
+    }
+
+    offset += 2 + length;
+  }
+
+  return emptyExifMetadata();
+}
+
+function parseTiffExifMetadata(bytes, tiffStart, tiffEnd) {
+  if (tiffStart + 8 > tiffEnd) return emptyExifMetadata();
+  const byteOrder = asciiBytes(bytes, tiffStart, 2);
+  const littleEndian = byteOrder === 'II';
+  if (!littleEndian && byteOrder !== 'MM') return emptyExifMetadata();
+  if (readTiffUint16(bytes, tiffStart + 2, littleEndian) !== 42) return emptyExifMetadata();
+
+  const ifd0Offset = readTiffUint32(bytes, tiffStart + 4, littleEndian);
+  const ifd0 = readTiffIfd(bytes, tiffStart, tiffEnd, ifd0Offset, littleEndian);
+  const exifOffset = numberFromExifValue(ifd0.get(0x8769));
+  const gpsOffset = numberFromExifValue(ifd0.get(0x8825));
+  const exif = exifOffset ? readTiffIfd(bytes, tiffStart, tiffEnd, exifOffset, littleEndian) : new Map();
+  const gps = gpsOffset ? readTiffIfd(bytes, tiffStart, tiffEnd, gpsOffset, littleEndian) : new Map();
+  const gpsCoordinates = parseExifGpsCoordinates(gps);
+
+  return {
+    captureTime: normalizeExifDateTime(
+      stringFromExifValue(exif.get(0x9003))
+      || stringFromExifValue(exif.get(0x9004))
+      || stringFromExifValue(ifd0.get(0x0132))
+      || getExifGpsTimestamp(gps)
+    ),
+    gpsCity: '',
+    gpsRegion: '',
+    gpsPrecision: getExifGpsPrecision(gps, gpsCoordinates),
+    gpsLatitude: gpsCoordinates.latitude,
+    gpsLongitude: gpsCoordinates.longitude,
+    gpsAltitudeMeters: parseExifGpsAltitude(gps),
+    cameraMake: cleanText(stringFromExifValue(ifd0.get(0x010f)), 120),
+    cameraModel: cleanText(stringFromExifValue(ifd0.get(0x0110)), 120),
+    lensModel: cleanText(stringFromExifValue(exif.get(0xa434)), 160),
+    software: cleanText(stringFromExifValue(ifd0.get(0x0131)), 120),
+    orientation: cleanText(String(numberFromExifValue(ifd0.get(0x0112)) || ''), 24)
+  };
+}
+
+function readTiffIfd(bytes, tiffStart, tiffEnd, ifdOffset, littleEndian) {
+  const entries = new Map();
+  const absoluteOffset = tiffStart + Number(ifdOffset || 0);
+  if (absoluteOffset < tiffStart || absoluteOffset + 2 > tiffEnd) return entries;
+
+  const count = Math.min(readTiffUint16(bytes, absoluteOffset, littleEndian), 512);
+  for (let index = 0; index < count; index += 1) {
+    const entryOffset = absoluteOffset + 2 + (index * 12);
+    if (entryOffset + 12 > tiffEnd) break;
+
+    const tag = readTiffUint16(bytes, entryOffset, littleEndian);
+    const type = readTiffUint16(bytes, entryOffset + 2, littleEndian);
+    const valueCount = readTiffUint32(bytes, entryOffset + 4, littleEndian);
+    const value = readTiffValue(bytes, tiffStart, tiffEnd, entryOffset + 8, type, valueCount, littleEndian);
+    entries.set(tag, value);
+  }
+
+  return entries;
+}
+
+function readTiffValue(bytes, tiffStart, tiffEnd, valueOffset, type, count, littleEndian) {
+  const typeSize = getTiffTypeSize(type);
+  const totalBytes = Number(count || 0) * typeSize;
+  if (!typeSize || totalBytes < 0 || totalBytes > 4096) return null;
+
+  const dataOffset = totalBytes <= 4
+    ? valueOffset
+    : tiffStart + readTiffUint32(bytes, valueOffset, littleEndian);
+  if (dataOffset < tiffStart || dataOffset + totalBytes > tiffEnd) return null;
+
+  if (type === 2) {
+    return cleanText(asciiBytes(bytes, dataOffset, totalBytes).replace(/\0+$/g, ''), 512);
+  }
+
+  const values = [];
+  for (let index = 0; index < Number(count || 0); index += 1) {
+    const offset = dataOffset + (index * typeSize);
+    if (type === 1 || type === 7) values.push(bytes[offset]);
+    else if (type === 3) values.push(readTiffUint16(bytes, offset, littleEndian));
+    else if (type === 4) values.push(readTiffUint32(bytes, offset, littleEndian));
+    else if (type === 5) {
+      const numerator = readTiffUint32(bytes, offset, littleEndian);
+      const denominator = readTiffUint32(bytes, offset + 4, littleEndian);
+      values.push(denominator ? numerator / denominator : 0);
+    } else if (type === 9) values.push(readTiffInt32(bytes, offset, littleEndian));
+    else if (type === 10) {
+      const numerator = readTiffInt32(bytes, offset, littleEndian);
+      const denominator = readTiffInt32(bytes, offset + 4, littleEndian);
+      values.push(denominator ? numerator / denominator : 0);
+    }
+  }
+
+  return values.length === 1 ? values[0] : values;
+}
+
+function getTiffTypeSize(type) {
+  if (type === 1 || type === 2 || type === 7) return 1;
+  if (type === 3) return 2;
+  if (type === 4 || type === 9) return 4;
+  if (type === 5 || type === 10) return 8;
+  return 0;
+}
+
+function readTiffUint16(bytes, offset, littleEndian) {
+  if (littleEndian) return bytes[offset] | (bytes[offset + 1] << 8);
+  return (bytes[offset] << 8) | bytes[offset + 1];
+}
+
+function readTiffUint32(bytes, offset, littleEndian) {
+  if (littleEndian) {
+    return ((bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0);
+  }
+  return (((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0);
+}
+
+function readTiffInt32(bytes, offset, littleEndian) {
+  const value = readTiffUint32(bytes, offset, littleEndian);
+  return value > 0x7fffffff ? value - 0x100000000 : value;
+}
+
+function stringFromExifValue(value) {
+  return typeof value === 'string' ? cleanText(value, 512) : '';
+}
+
+function numberFromExifValue(value) {
+  if (Array.isArray(value)) return Number(value[0] || 0);
+  return Number(value || 0);
+}
+
+function parseExifGpsCoordinates(gps) {
+  const latitude = parseExifGpsCoordinate(gps.get(0x0002), stringFromExifValue(gps.get(0x0001)));
+  const longitude = parseExifGpsCoordinate(gps.get(0x0004), stringFromExifValue(gps.get(0x0003)));
+  return { latitude, longitude };
+}
+
+function parseExifGpsCoordinate(value, ref) {
+  const parts = Array.isArray(value) ? value : [];
+  if (parts.length < 3) return null;
+  const decimal = Number(parts[0] || 0) + (Number(parts[1] || 0) / 60) + (Number(parts[2] || 0) / 3600);
+  if (!Number.isFinite(decimal)) return null;
+  return ['S', 'W'].includes(String(ref || '').trim().toUpperCase()) ? -decimal : decimal;
+}
+
+function parseExifGpsAltitude(gps) {
+  const altitude = numberFromExifValue(gps.get(0x0006));
+  if (!Number.isFinite(altitude) || altitude === 0) return null;
+  const ref = numberFromExifValue(gps.get(0x0005));
+  return ref === 1 ? -altitude : altitude;
+}
+
+function getExifGpsPrecision(gps, coordinates) {
+  const horizontalError = numberFromExifValue(gps.get(0x001f));
+  if (Number.isFinite(horizontalError) && horizontalError > 0) return `${Number(horizontalError.toFixed(1))}m`;
+  if (coordinates.latitude !== null && coordinates.longitude !== null) return 'embedded-gps';
+  return '';
+}
+
+function getExifGpsTimestamp(gps) {
+  const date = stringFromExifValue(gps.get(0x001d)).replace(/:/g, '-');
+  const time = gps.get(0x0007);
+  if (!date || !Array.isArray(time) || time.length < 3) return '';
+  const hours = String(Math.floor(Number(time[0] || 0))).padStart(2, '0');
+  const minutes = String(Math.floor(Number(time[1] || 0))).padStart(2, '0');
+  const seconds = String(Math.floor(Number(time[2] || 0))).padStart(2, '0');
+  return `${date}T${hours}:${minutes}:${seconds}Z`;
+}
+
+function normalizeExifDateTime(value) {
+  const raw = cleanText(value, 64);
+  const match = raw.match(/^(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/);
+  if (match) return `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}`;
+  return raw;
+}
+
 function detectImageFormat(bytes, mimeType = '', filename = '') {
   if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'png';
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpeg';
@@ -3669,9 +3946,12 @@ async function storeSubmissionMediaInsight(env, insight) {
       format, size, width, height, orientation, quality_score, vision_status,
       vision_model, people_count, face_count, dominant_colors, scene_tags,
       lighting_tags, composition_tags, background_cues, visible_text, summary,
-      skip_reason, error_message, analyzed_at, created_at, updated_at
+      skip_reason, error_message, exif_capture_time, exif_gps_city, exif_gps_region,
+      exif_gps_precision, exif_gps_latitude, exif_gps_longitude, exif_gps_altitude_meters,
+      exif_camera_make, exif_camera_model, exif_lens_model, exif_software, exif_orientation,
+      exif_metadata_version, analyzed_at, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(submission_id) DO UPDATE SET
       event_id = excluded.event_id,
       status = excluded.status,
@@ -3697,6 +3977,19 @@ async function storeSubmissionMediaInsight(env, insight) {
       summary = excluded.summary,
       skip_reason = excluded.skip_reason,
       error_message = excluded.error_message,
+      exif_capture_time = excluded.exif_capture_time,
+      exif_gps_city = excluded.exif_gps_city,
+      exif_gps_region = excluded.exif_gps_region,
+      exif_gps_precision = excluded.exif_gps_precision,
+      exif_gps_latitude = excluded.exif_gps_latitude,
+      exif_gps_longitude = excluded.exif_gps_longitude,
+      exif_gps_altitude_meters = excluded.exif_gps_altitude_meters,
+      exif_camera_make = excluded.exif_camera_make,
+      exif_camera_model = excluded.exif_camera_model,
+      exif_lens_model = excluded.exif_lens_model,
+      exif_software = excluded.exif_software,
+      exif_orientation = excluded.exif_orientation,
+      exif_metadata_version = excluded.exif_metadata_version,
       analyzed_at = excluded.analyzed_at,
       updated_at = excluded.updated_at
   `).bind(
@@ -3725,6 +4018,19 @@ async function storeSubmissionMediaInsight(env, insight) {
     cleanText(insight.summary, 260),
     cleanText(insight.skipReason, 120),
     cleanText(insight.errorMessage, 500),
+    cleanText(insight.exifCaptureTime, 64),
+    cleanText(insight.exifGpsCity, 120),
+    cleanText(insight.exifGpsRegion, 120),
+    cleanText(insight.exifGpsPrecision, 80),
+    insight.exifGpsLatitude === null || insight.exifGpsLatitude === undefined ? null : Number(insight.exifGpsLatitude),
+    insight.exifGpsLongitude === null || insight.exifGpsLongitude === undefined ? null : Number(insight.exifGpsLongitude),
+    insight.exifGpsAltitudeMeters === null || insight.exifGpsAltitudeMeters === undefined ? null : Number(insight.exifGpsAltitudeMeters),
+    cleanText(insight.exifCameraMake, 120),
+    cleanText(insight.exifCameraModel, 120),
+    cleanText(insight.exifLensModel, 160),
+    cleanText(insight.exifSoftware, 120),
+    cleanText(insight.exifOrientation, 24),
+    Number(insight.exifMetadataVersion || EXIF_METADATA_VERSION),
     insight.analyzedAt || now,
     insight.createdAt || now,
     insight.updatedAt || now
@@ -3857,6 +4163,19 @@ async function getEventMediaInsightRows(env, eventId) {
       i.summary,
       i.skip_reason AS skipReason,
       i.error_message AS errorMessage,
+      i.exif_capture_time AS exifCaptureTime,
+      i.exif_gps_city AS exifGpsCity,
+      i.exif_gps_region AS exifGpsRegion,
+      i.exif_gps_precision AS exifGpsPrecision,
+      i.exif_gps_latitude AS exifGpsLatitude,
+      i.exif_gps_longitude AS exifGpsLongitude,
+      i.exif_gps_altitude_meters AS exifGpsAltitudeMeters,
+      i.exif_camera_make AS exifCameraMake,
+      i.exif_camera_model AS exifCameraModel,
+      i.exif_lens_model AS exifLensModel,
+      i.exif_software AS exifSoftware,
+      i.exif_orientation AS exifOrientation,
+      i.exif_metadata_version AS exifMetadataVersion,
       i.analyzed_at AS analyzedAt,
       i.created_at AS createdAt,
       i.updated_at AS updatedAt,
@@ -3865,6 +4184,7 @@ async function getEventMediaInsightRows(env, eventId) {
       s.original_filename AS originalFilename,
       s.guest_name AS guestName,
       s.guest_note AS guestNote,
+      s.uploader_ip_address AS uploaderIpAddress,
       s.thumbnail_object_key AS thumbnailObjectKey,
       s.thumbnail_mime_type AS thumbnailMimeType,
       s.created_at AS submissionCreatedAt
@@ -3988,6 +4308,20 @@ async function toMediaInsightClient(row, request, env) {
     summary: row.summary || '',
     skipReason: row.skipReason || row.skip_reason || '',
     errorMessage: row.errorMessage || row.error_message || '',
+    exifCaptureTime: row.exifCaptureTime || row.exif_capture_time || '',
+    exifGpsCity: row.exifGpsCity || row.exif_gps_city || '',
+    exifGpsRegion: row.exifGpsRegion || row.exif_gps_region || '',
+    exifGpsPrecision: row.exifGpsPrecision || row.exif_gps_precision || '',
+    exifGpsLatitude: normalizeOptionalNumber(row.exifGpsLatitude ?? row.exif_gps_latitude),
+    exifGpsLongitude: normalizeOptionalNumber(row.exifGpsLongitude ?? row.exif_gps_longitude),
+    exifGpsAltitudeMeters: normalizeOptionalNumber(row.exifGpsAltitudeMeters ?? row.exif_gps_altitude_meters),
+    exifCameraMake: row.exifCameraMake || row.exif_camera_make || '',
+    exifCameraModel: row.exifCameraModel || row.exif_camera_model || '',
+    exifLensModel: row.exifLensModel || row.exif_lens_model || '',
+    exifSoftware: row.exifSoftware || row.exif_software || '',
+    exifOrientation: row.exifOrientation || row.exif_orientation || '',
+    exifMetadataVersion: Number(row.exifMetadataVersion || row.exif_metadata_version || 0),
+    uploaderIpAddress: row.uploaderIpAddress || row.uploader_ip_address || '',
     analyzedAt: row.analyzedAt || row.analyzed_at || '',
     submissionCreatedAt: row.submissionCreatedAt || row.submission_created_at || '',
     updatedAt: row.updatedAt || row.updated_at || '',
@@ -4075,6 +4409,11 @@ function normalizeTagList(value, limit = 10) {
 function normalizeOptionalInteger(value) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, Math.round(number)) : null;
+}
+
+function normalizeOptionalNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function asciiBytes(bytes, offset, length) {
@@ -4742,6 +5081,16 @@ async function getClientRateLimitKey(request, scope) {
   const userAgent = request.headers.get('User-Agent') || 'unknown';
   const digest = await sha256Hex(`${ip}|${userAgent}`);
   return `${scope}:${digest.slice(0, 32)}`;
+}
+
+function getClientIpAddress(request) {
+  const forwardedFor = request.headers.get('X-Forwarded-For') || '';
+  const value = request.headers.get('CF-Connecting-IP')
+    || request.headers.get('True-Client-IP')
+    || forwardedFor.split(',')[0]
+    || request.headers.get('X-Real-IP')
+    || '';
+  return cleanText(value, 64);
 }
 
 async function getReactionActorLimitScope(request, eventId, submissionId, sessionId = "") {

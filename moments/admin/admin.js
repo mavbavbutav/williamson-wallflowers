@@ -618,6 +618,7 @@ function renderMediaAuditInsightRow(insight) {
       <td>
         <div class="media-audit-detail-grid">
           ${renderMediaAuditDetailBlock("Display", renderAuditPills(buildMediaAuditDisplayFacts(insight), "No dimensions yet", 6))}
+          ${renderMediaAuditDetailBlock("EXIF and upload", renderAuditPills(buildMediaAuditExifFacts(insight), "No EXIF or upload metadata", 8))}
           ${renderMediaAuditDetailBlock("AI and people", renderAuditPills(buildMediaAuditVisionFacts(insight), "AI not run", 6))}
           ${renderMediaAuditDetailBlock("Style tags", renderAuditPills(buildMediaAuditStyleTags(insight), "No style tags yet", 10))}
         </div>
@@ -636,6 +637,7 @@ function renderMediaAuditCard(insight) {
         <span class="status-pill">${escapeHtml(insight.visionStatus || "not_requested")}</span>
       </div>
       ${renderMediaAuditDetailBlock("Display", renderAuditPills(buildMediaAuditDisplayFacts(insight), "No dimensions yet", 6))}
+      ${renderMediaAuditDetailBlock("EXIF and upload", renderAuditPills(buildMediaAuditExifFacts(insight), "No EXIF or upload metadata", 8))}
       ${renderMediaAuditDetailBlock("AI and people", renderAuditPills(buildMediaAuditVisionFacts(insight), "AI not run", 6))}
       ${renderMediaAuditDetailBlock("Style tags", renderAuditPills(buildMediaAuditStyleTags(insight), "No style tags yet", 10))}
       ${renderMediaAuditDetailBlock("Location cues", renderMediaAuditLocation(insight))}
@@ -692,7 +694,7 @@ function renderMediaAuditLocation(insight) {
   return `
     <div class="media-audit-location">
       ${renderAuditPills(cues, "No AI location/background cues", 8)}
-      <p class="muted">GPS/EXIF location is not captured in v1. These are AI scene/background cues only.</p>
+      <p class="muted">GPS city/region require embedded GPS plus reverse geocoding; v1 stores raw EXIF GPS and uploader IP for admin use.</p>
     </div>
   `;
 }
@@ -707,6 +709,18 @@ function buildMediaAuditDisplayFacts(insight) {
   if (insight.displayAspectRatio) facts.push(`aspect ${Number(insight.displayAspectRatio).toFixed(2)}:1`);
   if (Number(insight.qualityScore || 0)) facts.push(`quality ${Math.round(Number(insight.qualityScore) * 100)}%`);
   if (Number(insight.size || 0)) facts.push(formatBytes(insight.size));
+  return facts;
+}
+
+function buildMediaAuditExifFacts(insight) {
+  const facts = [];
+  if (insight.exifCaptureTime) facts.push(`captured ${insight.exifCaptureTime}`);
+  if (insight.exifCameraMake || insight.exifCameraModel) facts.push([insight.exifCameraMake, insight.exifCameraModel].filter(Boolean).join(" "));
+  if (insight.exifLensModel) facts.push(`lens ${insight.exifLensModel}`);
+  if (insight.exifSoftware) facts.push(`software ${insight.exifSoftware}`);
+  if (insight.exifOrientation) facts.push(`exif orientation ${insight.exifOrientation}`);
+  if (insight.exifMetadataVersion) facts.push(`exif v${insight.exifMetadataVersion}`);
+  if (insight.uploaderIpAddress) facts.push(`uploader IP ${insight.uploaderIpAddress}`);
   return facts;
 }
 
@@ -733,6 +747,12 @@ function buildMediaAuditLocationCues(insight) {
     ...(insight.backgroundCues || []),
     ...(insight.sceneTags || []).filter((tag) => /lake|outdoor|indoor|room|wall|house|yard|park|venue|floral|birthday|party/i.test(tag))
   ];
+  if (insight.exifGpsCity) cues.unshift(`gps city: ${insight.exifGpsCity}`);
+  if (insight.exifGpsRegion) cues.unshift(`gps region: ${insight.exifGpsRegion}`);
+  if (insight.exifGpsLatitude !== null && insight.exifGpsLongitude !== null) cues.unshift(`gps ${Number(insight.exifGpsLatitude).toFixed(5)}, ${Number(insight.exifGpsLongitude).toFixed(5)}`);
+  if (insight.exifGpsAltitudeMeters !== null) cues.push(`altitude ${Math.round(Number(insight.exifGpsAltitudeMeters))}m`);
+  if (insight.exifGpsPrecision) cues.push(`precision ${insight.exifGpsPrecision}`);
+  if (insight.uploaderIpAddress) cues.push(`uploader IP ${insight.uploaderIpAddress}`);
   if (insight.visibleText) cues.push(`visible text: ${insight.visibleText}`);
   return Array.from(new Set(cues.filter(Boolean)));
 }
