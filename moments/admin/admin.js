@@ -596,11 +596,11 @@ function renderMediaAuditStats(profile, pending) {
 
 function renderMediaAuditTagGroups(profile) {
   const groups = [
+    ["Location cues", profile.backgroundCues],
     ["Scene", profile.sceneTags],
     ["Lighting", profile.lightingTags],
     ["Colors", profile.dominantColors],
-    ["Composition", profile.compositionTags],
-    ["Background", profile.backgroundCues]
+    ["Composition", profile.compositionTags]
   ];
   return groups.map(([label, tags]) => `
     <div class="media-audit-tag-group">
@@ -612,50 +612,158 @@ function renderMediaAuditTagGroups(profile) {
 
 function renderMediaAuditInsightRow(insight) {
   return `
-    <tr>
+    <tr class="media-audit-row">
+      <td>${renderMediaAuditPreview(insight)}</td>
+      <td>${renderMediaAuditIdentity(insight)}</td>
       <td>
-        <strong>${escapeHtml(insight.submissionId)}</strong><br />
-        <span class="muted">${escapeHtml(`${insight.source || "guest"} ${insight.mediaType || insight.sourceKind || "media"}`)}</span>
+        <div class="media-audit-detail-grid">
+          ${renderMediaAuditDetailBlock("Display", renderAuditPills(buildMediaAuditDisplayFacts(insight), "No dimensions yet", 6))}
+          ${renderMediaAuditDetailBlock("AI and people", renderAuditPills(buildMediaAuditVisionFacts(insight), "AI not run", 6))}
+          ${renderMediaAuditDetailBlock("Style tags", renderAuditPills(buildMediaAuditStyleTags(insight), "No style tags yet", 10))}
+        </div>
       </td>
-      <td>
-        <span class="status-pill">${escapeHtml(insight.format || "unknown")}</span>
-        <span class="status-pill">${escapeHtml(`${insight.width || 0}x${insight.height || 0}`)}</span>
-        <span class="status-pill">${escapeHtml(insight.orientation || "unknown")}</span>
-      </td>
-      <td>
-        <span class="status-pill">${escapeHtml(insight.visionStatus || "not_requested")}</span>
-        ${insight.faceCount !== null ? `<span class="status-pill">${escapeHtml(`${insight.faceCount} faces`)}</span>` : ""}
-      </td>
-      <td>${renderAuditPills([...(insight.sceneTags || []), ...(insight.lightingTags || [])])}</td>
+      <td>${renderMediaAuditLocation(insight)}</td>
     </tr>
   `;
 }
 
 function renderMediaAuditCard(insight) {
   return `
-    <article class="admin-mobile-card">
+    <article class="admin-mobile-card media-audit-card">
+      ${renderMediaAuditPreview(insight)}
       <div class="mobile-card-heading">
-        <div>
-          <strong>${escapeHtml(insight.submissionId)}</strong>
-          <span>${escapeHtml(`${insight.source || "guest"} ${insight.mediaType || insight.sourceKind || "media"}`)}</span>
-        </div>
+        <div>${renderMediaAuditIdentity(insight)}</div>
         <span class="status-pill">${escapeHtml(insight.visionStatus || "not_requested")}</span>
       </div>
-      <div class="button-row">
-        <span class="status-pill">${escapeHtml(insight.format || "unknown")}</span>
-        <span class="status-pill">${escapeHtml(`${insight.width || 0}x${insight.height || 0}`)}</span>
-        <span class="status-pill">${escapeHtml(insight.orientation || "unknown")}</span>
-      </div>
-      <div class="media-audit-card-tags">${renderAuditPills([...(insight.sceneTags || []), ...(insight.lightingTags || [])])}</div>
+      ${renderMediaAuditDetailBlock("Display", renderAuditPills(buildMediaAuditDisplayFacts(insight), "No dimensions yet", 6))}
+      ${renderMediaAuditDetailBlock("AI and people", renderAuditPills(buildMediaAuditVisionFacts(insight), "AI not run", 6))}
+      ${renderMediaAuditDetailBlock("Style tags", renderAuditPills(buildMediaAuditStyleTags(insight), "No style tags yet", 10))}
+      ${renderMediaAuditDetailBlock("Location cues", renderMediaAuditLocation(insight))}
     </article>
   `;
 }
 
-function renderAuditPills(tags = []) {
-  const values = Array.isArray(tags) ? tags.filter(Boolean).slice(0, 8) : [];
+function renderMediaAuditPreview(insight) {
+  const title = getMediaAuditTitle(insight);
+  const aspect = getMediaAuditAspectRatio(insight);
+  const kind = insight.previewKind === "video_thumbnail" ? "Video still" : "Photo";
+  const content = insight.previewUrl
+    ? `<img src="${escapeAttribute(insight.previewUrl)}" alt="${escapeAttribute(`Preview for ${title}`)}" loading="lazy" decoding="async" />`
+    : `<span>No preview</span>`;
+  const tag = insight.previewUrl ? "a" : "div";
+  const href = insight.previewUrl ? ` href="${escapeAttribute(insight.previewUrl)}" target="_blank" rel="noopener noreferrer"` : "";
+
+  return `
+    <${tag} class="media-audit-preview is-${escapeAttribute(insight.orientation || "unknown")}" style="--audit-aspect: ${escapeAttribute(aspect)};"${href}>
+      ${content}
+      <small>${escapeHtml(kind)}</small>
+    </${tag}>
+  `;
+}
+
+function renderMediaAuditIdentity(insight) {
+  const title = getMediaAuditTitle(insight);
+  const source = `${insight.source || "guest"} ${insight.mediaType || insight.sourceKind || "media"}`;
+  const created = insight.submissionCreatedAt ? `Uploaded ${formatDateTime(insight.submissionCreatedAt)}` : "";
+  const byline = insight.guestName ? `By ${insight.guestName}` : source;
+
+  return `
+    <div class="media-audit-identity">
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(byline)}</span>
+      <span class="muted">${escapeHtml(source)}</span>
+      ${created ? `<span class="muted">${escapeHtml(created)}</span>` : ""}
+      <code>${escapeHtml(insight.submissionId)}</code>
+    </div>
+  `;
+}
+
+function renderMediaAuditDetailBlock(label, body) {
+  return `
+    <div class="media-audit-detail-block">
+      <strong>${escapeHtml(label)}</strong>
+      <div>${body}</div>
+    </div>
+  `;
+}
+
+function renderMediaAuditLocation(insight) {
+  const cues = buildMediaAuditLocationCues(insight);
+  return `
+    <div class="media-audit-location">
+      ${renderAuditPills(cues, "No AI location/background cues", 8)}
+      <p class="muted">GPS/EXIF location is not captured in v1. These are AI scene/background cues only.</p>
+    </div>
+  `;
+}
+
+function buildMediaAuditDisplayFacts(insight) {
+  const dimensions = `${Number(insight.width || 0)}x${Number(insight.height || 0)}`;
+  const facts = [
+    insight.format || "unknown format",
+    dimensions,
+    insight.orientation || "unknown orientation"
+  ];
+  if (insight.displayAspectRatio) facts.push(`aspect ${Number(insight.displayAspectRatio).toFixed(2)}:1`);
+  if (Number(insight.qualityScore || 0)) facts.push(`quality ${Math.round(Number(insight.qualityScore) * 100)}%`);
+  if (Number(insight.size || 0)) facts.push(formatBytes(insight.size));
+  return facts;
+}
+
+function buildMediaAuditVisionFacts(insight) {
+  const facts = [insight.visionStatus || "not_requested"];
+  if (insight.peopleCount !== null && insight.peopleCount !== undefined) facts.push(`${insight.peopleCount} people`);
+  if (insight.faceCount !== null && insight.faceCount !== undefined) facts.push(`${insight.faceCount} faces`);
+  if (insight.summary) facts.push(insight.summary);
+  if (insight.skipReason) facts.push(insight.skipReason);
+  return facts;
+}
+
+function buildMediaAuditStyleTags(insight) {
+  return [
+    ...(insight.sceneTags || []),
+    ...(insight.lightingTags || []),
+    ...(insight.compositionTags || []),
+    ...(insight.dominantColors || [])
+  ];
+}
+
+function buildMediaAuditLocationCues(insight) {
+  const cues = [
+    ...(insight.backgroundCues || []),
+    ...(insight.sceneTags || []).filter((tag) => /lake|outdoor|indoor|room|wall|house|yard|park|venue|floral|birthday|party/i.test(tag))
+  ];
+  if (insight.visibleText) cues.push(`visible text: ${insight.visibleText}`);
+  return Array.from(new Set(cues.filter(Boolean)));
+}
+
+function getMediaAuditTitle(insight) {
+  return insight.originalFilename || insight.guestName || insight.submissionId || "Audited moment";
+}
+
+function getMediaAuditAspectRatio(insight) {
+  const width = Number(insight.width || 0);
+  const height = Number(insight.height || 0);
+  const ratio = Number(insight.displayAspectRatio || 0) || (width && height ? width / height : 0);
+  if (Number.isFinite(ratio) && ratio > 0) return String(Math.max(0.45, Math.min(2.4, ratio)).toFixed(4));
+  if (insight.orientation === "portrait") return "0.8000";
+  if (insight.orientation === "landscape") return "1.3333";
+  return "1.0000";
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (!value) return "0 B";
+  if (value < 1024) return `${Math.round(value)} B`;
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderAuditPills(tags = [], emptyLabel = "No tags yet", limit = 8) {
+  const values = Array.isArray(tags) ? tags.filter(Boolean).slice(0, limit) : [];
   return values.length
     ? values.map((tag) => `<span class="status-pill">${escapeHtml(tag)}</span>`).join("")
-    : `<span class="muted">No tags yet</span>`;
+    : `<span class="muted">${escapeHtml(emptyLabel)}</span>`;
 }
 
 function renderEventEditForm(selectedEventId = qs("#editEventSelect")?.value || "") {

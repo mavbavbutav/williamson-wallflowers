@@ -29,11 +29,15 @@ test('admin frontend exposes the private media audit report controls', async () 
 
   assert.match(adminHtml, /id="mediaAuditPanel"/);
   assert.match(adminHtml, /Run AI vision audit/);
-  assert.match(adminHtml, /admin\.js\?v=20260606-media-audit-admin-1/);
-  assert.match(adminHtml, /styles\.css\?v=20260606-media-audit-admin-1/);
+  assert.match(adminHtml, /Location cues/);
+  assert.match(adminHtml, /admin\.js\?v=20260606-media-audit-admin-2/);
+  assert.match(adminHtml, /styles\.css\?v=20260606-media-audit-admin-2/);
   assert.match(adminJs, /\/admin\/events\/\$\{encodeURIComponent\(eventId\)\}\/media-audit/);
+  assert.match(adminJs, /previewUrl/);
+  assert.match(adminJs, /GPS\/EXIF location is not captured in v1/);
   assert.match(adminJs, /includeAi/);
   assert.match(styles, /\.media-audit-panel/);
+  assert.match(styles, /\.media-audit-preview/);
 });
 
 test('media audit backfill is admin-only and rejects host tokens', async () => {
@@ -197,6 +201,9 @@ test('admin media audit can return stored profile and insight rows', async () =>
   assert.equal(payload.audit.profile.analyzedCount, 1);
   assert.equal(payload.audit.insights.length, 1);
   assert.equal(payload.audit.insights[0].width, 1024);
+  assert.equal(payload.audit.insights[0].displayAspectRatio, 1.3333);
+  assert.equal(payload.audit.insights[0].previewKind, 'photo');
+  assert.match(payload.audit.insights[0].previewUrl, /^https:\/\/api\.example\.com\/moments-api\/media\/photo-1\?mediaToken=/);
   assert.equal(payload.audit.insights[0].visionStatus, 'not_requested');
 });
 
@@ -483,7 +490,13 @@ class MediaAuditFakeStatement {
               analyzedAt: row.analyzed_at || row.analyzedAt,
               updatedAt: row.updated_at || row.updatedAt,
               mediaType: submissionRow?.media_type || submissionRow?.mediaType,
-              source: submissionRow?.source || 'guest'
+              source: submissionRow?.source || 'guest',
+              originalFilename: submissionRow?.original_filename || submissionRow?.originalFilename,
+              guestName: submissionRow?.guest_name || submissionRow?.guestName,
+              guestNote: submissionRow?.guest_note || submissionRow?.guestNote,
+              thumbnailObjectKey: submissionRow?.thumbnail_object_key || submissionRow?.thumbnailObjectKey,
+              thumbnailMimeType: submissionRow?.thumbnail_mime_type || submissionRow?.thumbnailMimeType,
+              submissionCreatedAt: submissionRow?.created_at || submissionRow?.createdAt
             };
           })
       };

@@ -3098,6 +3098,7 @@ async function getAdminMediaAudit(request, env, corsHeaders, eventId) {
     getEventMediaInsights(env, event.id, 50),
     countMediaAuditCandidates(env, event.id, false)
   ]);
+  const insightClients = await Promise.all(insights.map((row) => toMediaInsightClient(row, request, env)));
 
   return json({
     ok: true,
@@ -3105,7 +3106,7 @@ async function getAdminMediaAudit(request, env, corsHeaders, eventId) {
     audit: {
       profile,
       pending,
-      insights: insights.map(toMediaInsightClient)
+      insights: insightClients
     }
   }, 200, corsHeaders);
 }
@@ -3861,6 +3862,11 @@ async function getEventMediaInsightRows(env, eventId) {
       i.updated_at AS updatedAt,
       s.media_type AS mediaType,
       s.source,
+      s.original_filename AS originalFilename,
+      s.guest_name AS guestName,
+      s.guest_note AS guestNote,
+      s.thumbnail_object_key AS thumbnailObjectKey,
+      s.thumbnail_mime_type AS thumbnailMimeType,
       s.created_at AS submissionCreatedAt
     FROM submission_media_insights i
     INNER JOIN submissions s ON s.id = i.submission_id
@@ -3949,7 +3955,10 @@ function toMediaProfileClient(row) {
   };
 }
 
-function toMediaInsightClient(row) {
+async function toMediaInsightClient(row, request, env) {
+  const preview = await buildMediaAuditPreviewClient(row, request, env);
+  const width = Number(row.width || 0);
+  const height = Number(row.height || 0);
   return {
     submissionId: row.submissionId || row.submission_id,
     eventId: row.eventId || row.event_id,
@@ -3957,11 +3966,14 @@ function toMediaInsightClient(row) {
     source: row.source || 'guest',
     sourceKind: row.sourceKind || row.source_kind || '',
     mediaType: row.mediaType || row.media_type || '',
+    originalFilename: row.originalFilename || row.original_filename || '',
+    guestName: row.guestName || row.guest_name || '',
     mimeType: row.mimeType || row.mime_type || '',
     format: row.format || '',
     size: Number(row.size || 0),
-    width: Number(row.width || 0),
-    height: Number(row.height || 0),
+    width,
+    height,
+    displayAspectRatio: width && height ? Number((width / height).toFixed(4)) : 0,
     orientation: row.orientation || '',
     qualityScore: Number(row.qualityScore || row.quality_score || 0),
     visionStatus: row.visionStatus || row.vision_status || 'not_requested',
@@ -3977,8 +3989,37 @@ function toMediaInsightClient(row) {
     skipReason: row.skipReason || row.skip_reason || '',
     errorMessage: row.errorMessage || row.error_message || '',
     analyzedAt: row.analyzedAt || row.analyzed_at || '',
-    updatedAt: row.updatedAt || row.updated_at || ''
+    submissionCreatedAt: row.submissionCreatedAt || row.submission_created_at || '',
+    updatedAt: row.updatedAt || row.updated_at || '',
+    previewUrl: preview.url,
+    previewKind: preview.kind
   };
+}
+
+async function buildMediaAuditPreviewClient(row, request, env) {
+  const submissionId = row.submissionId || row.submission_id;
+  const sourceKind = row.sourceKind || row.source_kind || '';
+  const mediaType = row.mediaType || row.media_type || '';
+  const hasThumbnail = Boolean(row.thumbnailObjectKey || row.thumbnail_object_key || row.sourceObjectKey || row.source_object_key);
+
+  if (!submissionId) return { url: '', kind: sourceKind || mediaType || 'media' };
+
+  if (sourceKind === 'video_thumbnail' && hasThumbnail) {
+    return {
+      url: await buildThumbnailAccessUrl(request, env, submissionId),
+      kind: 'video_thumbnail'
+    };
+  }
+
+  if (mediaType === 'photo' || sourceKind === 'photo') {
+    const mediaToken = await createSignedToken(env, 'media', submissionId, MEDIA_TOKEN_TTL_SECONDS);
+    return {
+      url: `${getApiOrigin(request, env)}/moments-api/media/${encodeURIComponent(submissionId)}?mediaToken=${encodeURIComponent(mediaToken)}`,
+      kind: 'photo'
+    };
+  }
+
+  return { url: '', kind: sourceKind || mediaType || 'media' };
 }
 
 function toMediaAuditCandidateClient(row) {

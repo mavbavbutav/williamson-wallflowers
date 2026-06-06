@@ -3055,6 +3055,115 @@ textarea:focus-visible {
   gap: 0.35rem;
 }
 
+.media-audit-row td {
+  vertical-align: top;
+}
+
+.media-audit-row td:first-child {
+  width: 164px;
+}
+
+.media-audit-preview {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  width: min(148px, 100%);
+  aspect-ratio: var(--audit-aspect, 1);
+  border: 1px solid rgba(222, 211, 200, 0.82);
+  border-radius: 10px;
+  color: var(--muted);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(255, 250, 245, 0.54)),
+    rgba(255, 250, 245, 0.72);
+  text-decoration: none;
+  box-shadow: 0 8px 18px rgba(47, 43, 40, 0.08);
+}
+
+.media-audit-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: rgba(255, 250, 245, 0.86);
+}
+
+.media-audit-preview small {
+  position: absolute;
+  left: 0.42rem;
+  bottom: 0.42rem;
+  border-radius: 6px;
+  padding: 0.18rem 0.36rem;
+  color: #fffaf5;
+  background: rgba(47, 43, 40, 0.72);
+  font-size: 0.64rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.media-audit-identity {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.media-audit-identity strong {
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+}
+
+.media-audit-identity span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.media-audit-identity code {
+  overflow-wrap: anywhere;
+  color: var(--soft);
+  font-size: 0.68rem;
+}
+
+.media-audit-detail-grid,
+.media-audit-detail-block,
+.media-audit-location {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.media-audit-detail-grid {
+  min-width: min(460px, 44vw);
+}
+
+.media-audit-detail-block {
+  min-width: 0;
+}
+
+.media-audit-detail-block > strong {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.media-audit-detail-block > div,
+.media-audit-location {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.media-audit-location p {
+  flex-basis: 100%;
+  margin: 0.1rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.media-audit-card .media-audit-preview {
+  width: 100%;
+}
+
 .guide-step {
   display: grid;
   gap: 0.35rem;
