@@ -21,6 +21,7 @@ const AI_REFERENCE_WIDTH = 1536;
 const AI_REFERENCE_QUALITY = 92;
 const GROUP_HERO_PERSON_REFERENCE_WIDTH = 768;
 const GROUP_HERO_PERSON_REFERENCE_HEIGHT = 1152;
+const GROUP_HERO_ISOLATED_PERSON_REFERENCE_WIDTH = 384;
 const OPENAI_IMAGE_DEFAULT_TIMEOUT_MS = 75 * 1000;
 const VIDEO_MAX_SECONDS = 30;
 const AUDIO_MAX_SECONDS = 60;
@@ -54,7 +55,7 @@ const GROUP_HERO_FORCE_RATE_WINDOW_SECONDS = 60 * 60;
 const GROUP_HERO_GENERATION_STALE_SECONDS = 5 * 60;
 const GROUP_HERO_FAILED_RETRY_LIMIT = 3;
 const GROUP_HERO_DEFAULT_MODEL = 'gpt-image-1.5';
-const GROUP_HERO_FACE_DEDUP_VERSION = 2;
+const GROUP_HERO_FACE_DEDUP_VERSION = 3;
 const GROUP_HERO_FACE_PROVIDER_DEFAULT = 'aws-rekognition';
 const GROUP_HERO_FACE_MATCH_THRESHOLD = 97;
 const GROUP_HERO_FACE_SOFT_MATCH_THRESHOLD = 90;
@@ -1978,7 +1979,7 @@ async function prepareGroupHeroPersonReferences(env, request, eventId, sources) 
 
 async function createGroupHeroPersonReference(env, request, eventId, source) {
   const face = source.personReferenceFace || source.person_reference_face || null;
-  const crop = buildGroupHeroPersonReferenceCrop(face);
+  const crop = buildGroupHeroPersonReferenceCrop(face, source);
   if (!crop) return null;
 
   const objectKey = getGroupHeroPersonReferenceObjectKey(eventId, source.id, face.clusterId || face.cluster_id || '');
@@ -1992,8 +1993,8 @@ async function createGroupHeroPersonReference(env, request, eventId, source) {
     cf: {
       image: {
         fit: 'cover',
-        width: GROUP_HERO_PERSON_REFERENCE_WIDTH,
-        height: GROUP_HERO_PERSON_REFERENCE_HEIGHT,
+        width: crop.outputWidth || GROUP_HERO_PERSON_REFERENCE_WIDTH,
+        height: crop.outputHeight || GROUP_HERO_PERSON_REFERENCE_HEIGHT,
         gravity: crop.gravity,
         format: 'jpeg',
         quality: AI_REFERENCE_QUALITY
@@ -2021,6 +2022,8 @@ async function createGroupHeroPersonReference(env, request, eventId, source) {
       faceClusterId: face.clusterId || face.cluster_id || '',
       cropMode: crop.cropMode,
       visibleBody: crop.visibleBody,
+      outputWidth: String(crop.outputWidth || GROUP_HERO_PERSON_REFERENCE_WIDTH),
+      outputHeight: String(crop.outputHeight || GROUP_HERO_PERSON_REFERENCE_HEIGHT),
       gravity: JSON.stringify(crop.gravity),
       boundingBox: JSON.stringify(crop.boundingBox)
     }
@@ -2031,6 +2034,7 @@ async function createGroupHeroPersonReference(env, request, eventId, source) {
 
 function withGroupHeroPersonReference(source, objectKey, face, crop) {
   const faceClusterId = face.clusterId || face.cluster_id || '';
+  const duplicateFaceClusterIds = uniqueCleanList(source.duplicateFaceClusterIds || source.duplicate_face_cluster_ids || []);
   return {
     ...source,
     personReferenceObjectKey: objectKey,
@@ -2039,7 +2043,8 @@ function withGroupHeroPersonReference(source, objectKey, face, crop) {
     personReferenceFaceClusterId: faceClusterId,
     personReferenceFaceId: buildGroupHeroFacePublicId(faceClusterId),
     personReferenceCropMode: crop.cropMode,
-    personReferenceVisibleBody: crop.visibleBody
+    personReferenceVisibleBody: crop.visibleBody,
+    personReferenceDuplicateFaceIds: duplicateFaceClusterIds.map(buildGroupHeroFacePublicId).filter(Boolean)
   };
 }
 
@@ -2084,10 +2089,14 @@ function buildGroupHeroRosterPromptLine(source, index) {
   const faceClusterId = source.personReferenceFaceClusterId || source.person_reference_face_cluster_id || source.rosterFaceClusterId || source.roster_face_cluster_id || '';
   const faceId = source.personReferenceFaceId || source.person_reference_face_id || buildGroupHeroFacePublicId(faceClusterId);
   const visibleBody = source.personReferenceVisibleBody || source.person_reference_visible_body || '';
+  const cropMode = source.personReferenceCropMode || source.person_reference_crop_mode || '';
+  const duplicateFaceIds = uniqueCleanList(source.personReferenceDuplicateFaceIds || source.person_reference_duplicate_face_ids || (source.duplicateFaceClusterIds || []).map(buildGroupHeroFacePublicId));
   const sourceKind = (source.mediaType || source.media_type || 'photo') === 'video' ? 'video thumbnail' : 'photo';
   const referenceHint = faceId ? ` Face ID ${faceId}.` : '';
   const bodyHint = visibleBody ? ` Visible crop: ${visibleBody.replace(/_/g, ' ')}.` : '';
-  return `- Participant ${index + 1}.${referenceHint} Source: ${sourceKind}.${bodyHint}`;
+  const cropHint = cropMode === 'isolated-face-body' ? ' Use only the centered roster participant from this tighter crop.' : '';
+  const duplicateHint = duplicateFaceIds.length ? ` Ignore duplicate faces already represented elsewhere: ${duplicateFaceIds.join(', ')}.` : '';
+  return `- Participant ${index + 1}.${referenceHint} Source: ${sourceKind}.${bodyHint}${cropHint}${duplicateHint}`;
 }
 
 function buildGroupHeroFacePublicId(clusterId) {
@@ -2099,15 +2108,20 @@ function buildGroupHeroFacePublicId(clusterId) {
   return short ? `F-${short}` : '';
 }
 
-function buildGroupHeroPersonReferenceCrop(face) {
+function buildGroupHeroPersonReferenceCrop(face, source = {}) {
   if (!face) return null;
   const boundingBox = normalizeGroupHeroFaceBoundingBox(face.boundingBox || face.bounding_box || face.boundingBoxJson || face.bounding_box_json);
   if (!boundingBox) return null;
   const faceCenterX = boundingBox.left + (boundingBox.width / 2);
-  const bodyAnchorY = boundingBox.top + (boundingBox.height * 3.6);
+  const duplicateFaceClusterIds = uniqueCleanList(source.duplicateFaceClusterIds || source.duplicate_face_cluster_ids || []);
+  const faceClusterIds = uniqueCleanList(source.faceClusterIds || source.face_cluster_ids || []);
+  const shouldIsolate = duplicateFaceClusterIds.length > 0 || (faceClusterIds.length > 1 && boundingBox.height < 0.16);
+  const bodyAnchorY = boundingBox.top + (boundingBox.height * (shouldIsolate ? 3.1 : 3.6));
   return {
-    cropMode: 'expanded-face-body',
+    cropMode: shouldIsolate ? 'isolated-face-body' : 'expanded-face-body',
     visibleBody: estimateVisibleBodyFromFaceBox(boundingBox),
+    outputWidth: shouldIsolate ? GROUP_HERO_ISOLATED_PERSON_REFERENCE_WIDTH : GROUP_HERO_PERSON_REFERENCE_WIDTH,
+    outputHeight: GROUP_HERO_PERSON_REFERENCE_HEIGHT,
     boundingBox,
     gravity: {
       x: clampUnit(faceCenterX),
@@ -2320,6 +2334,15 @@ function selectDistinctGroupHeroSources(sources) {
 
       const participantFaces = selectGroupHeroParticipantFaces(source.faceDetails || [], newClusterIds, remainingSlots);
       if (!participantFaces.length) {
+        if (duplicateClusterIds.length > 0) {
+          decisions.push(buildGroupHeroSourceDecision(source, 'skipped', 'missing-face-reference-with-duplicate-cluster', {
+            faceClusterIds,
+            newClusterIds,
+            duplicateClusterIds,
+            guestKey
+          }));
+          continue;
+        }
         if (guestKey) seenGuestKeys.add(guestKey);
         for (const clusterId of newClusterIds) {
           seenFaceClusters.add(clusterId);
@@ -2329,6 +2352,7 @@ function selectDistinctGroupHeroSources(sources) {
           rosterParticipantId: `${source.id}:${newClusterIds[0] || 'face'}`,
           rosterFaceClusterId: newClusterIds[0] || '',
           rosterFaceId: buildGroupHeroFacePublicId(newClusterIds[0] || ''),
+          duplicateFaceClusterIds: duplicateClusterIds,
           personReferenceFace: null
         });
         decisions.push(buildGroupHeroSourceDecision(source, 'selected', 'adds-face-cluster', {
@@ -2351,6 +2375,7 @@ function selectDistinctGroupHeroSources(sources) {
           rosterParticipantId: `${source.id}:${clusterId}`,
           rosterFaceClusterId: clusterId,
           rosterFaceId: buildGroupHeroFacePublicId(clusterId),
+          duplicateFaceClusterIds: duplicateClusterIds,
           personReferenceFace: face
         });
       }

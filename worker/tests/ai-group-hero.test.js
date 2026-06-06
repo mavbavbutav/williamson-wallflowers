@@ -598,8 +598,8 @@ test('group hero expands one multi-face upload into separate roster participants
   });
   const bucket = new FakeBucket([
     [familyPhoto.object_key, 'source-family'],
-    ['moments/event-hero/generated/person-roster/guest-family-face-manabc123-v2.jpg', 'person-man-reference'],
-    ['moments/event-hero/generated/person-roster/guest-family-face-baby987-v2.jpg', 'person-baby-reference']
+    ['moments/event-hero/generated/person-roster/guest-family-face-manabc123-v3.jpg', 'person-man-reference'],
+    ['moments/event-hero/generated/person-roster/guest-family-face-baby987-v3.jpg', 'person-baby-reference']
   ]);
   const env = envWithDb(db, bucket);
   const waitUntil = [];
@@ -628,6 +628,105 @@ test('group hero expands one multi-face upload into separate roster participants
     assert.match(calls[0].prompt, /Face ID F-baby98/);
     assert.equal(db.groupHeroes[0].participant_count, 2);
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-family', 'guest-family']);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('group hero isolates new participants from source images that also contain duplicate faces', async () => {
+  const soloDuplicate = guestSubmission({
+    id: 'guest-solo-duplicate',
+    object_key: 'moments/event-hero/guest-solo-duplicate.jpg',
+    objectKey: 'moments/event-hero/guest-solo-duplicate.jpg',
+    guest_name: 'Duplicate Solo',
+    guestName: 'Duplicate Solo',
+    status: 'approved',
+    created_at: '2026-09-19T20:06:00.000Z',
+    createdAt: '2026-09-19T20:06:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:06:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:06:00.000Z'
+  });
+  const groupWithDuplicate = guestSubmission({
+    id: 'guest-group-with-duplicate',
+    object_key: 'moments/event-hero/guest-group-with-duplicate.jpg',
+    objectKey: 'moments/event-hero/guest-group-with-duplicate.jpg',
+    guest_name: 'Group With Duplicate',
+    guestName: 'Group With Duplicate',
+    status: 'approved',
+    created_at: '2026-09-19T20:05:00.000Z',
+    createdAt: '2026-09-19T20:05:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:05:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:05:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [soloDuplicate, groupWithDuplicate],
+    faces: [
+      faceRow({
+        submission_id: 'guest-solo-duplicate',
+        submissionId: 'guest-solo-duplicate',
+        cluster_id: 'face-dup60b4b',
+        clusterId: 'face-dup60b4b',
+        bounding_box_json: JSON.stringify({ Left: 0.32, Top: 0.16, Width: 0.34, Height: 0.34 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.32, Top: 0.16, Width: 0.34, Height: 0.34 })
+      }),
+      faceRow({
+        id: 'group-duplicate-face',
+        submission_id: 'guest-group-with-duplicate',
+        submissionId: 'guest-group-with-duplicate',
+        cluster_id: 'face-dup60b4b',
+        clusterId: 'face-dup60b4b',
+        face_index: 0,
+        faceIndex: 0,
+        match_confidence: 98,
+        matchConfidence: 98,
+        bounding_box_json: JSON.stringify({ Left: 0.18, Top: 0.12, Width: 0.12, Height: 0.12 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.18, Top: 0.12, Width: 0.12, Height: 0.12 })
+      }),
+      faceRow({
+        id: 'group-new-face',
+        submission_id: 'guest-group-with-duplicate',
+        submissionId: 'guest-group-with-duplicate',
+        cluster_id: 'face-new6096',
+        clusterId: 'face-new6096',
+        face_index: 1,
+        faceIndex: 1,
+        match_confidence: 0,
+        matchConfidence: 0,
+        bounding_box_json: JSON.stringify({ Left: 0.54, Top: 0.22, Width: 0.1, Height: 0.09 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.54, Top: 0.22, Width: 0.1, Height: 0.09 })
+      })
+    ]
+  });
+  const bucket = new FakeBucket([
+    [soloDuplicate.object_key, 'source-solo-duplicate'],
+    [groupWithDuplicate.object_key, 'source-group-with-duplicate']
+  ]);
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
+  const calls = mockOpenAi({ normalizationBody: 'isolated-person-reference' });
+
+  try {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://williamsonwallflowers.com',
+        Authorization: 'Bearer host-token'
+      }
+    }), env);
+
+    assert.equal(response.status, 202);
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].imageCount, 2);
+    assert.match(calls[0].prompt, /Face ID F-new609/);
+    assert.match(calls[0].prompt, /Ignore duplicate faces already represented elsewhere: F-dup60b/);
+
+    const groupReference = bucket.puts.find((put) => put.metadata.customMetadata.faceClusterId === 'face-new6096');
+    assert.ok(groupReference);
+    assert.equal(groupReference.metadata.customMetadata.cropMode, 'isolated-face-body');
+    assert.equal(groupReference.metadata.customMetadata.outputWidth, '384');
   } finally {
     restoreFetch();
   }
