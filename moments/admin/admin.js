@@ -714,7 +714,8 @@ function renderMediaAuditFaceBoxes(insight) {
 
 function renderMediaAuditFaceBox(face) {
   const box = face.boundingBox || {};
-  const label = face.clusterLabel || `face ${Number(face.index || 0) + 1}`;
+  const label = face.clusterLabel || face.clusterId || `face ${Number(face.index || 0) + 1}`;
+  const faceId = getFaceDisplayId(face);
   const state = face.matched ? "match" : "unique";
   const confidence = Number(face.matchConfidence || face.confidence || 0);
   const confidenceLabel = confidence ? ` ${confidence.toFixed(1)}%` : "";
@@ -726,8 +727,8 @@ function renderMediaAuditFaceBox(face) {
   ].join(";");
 
   return `
-    <span class="media-audit-face-box is-${escapeAttribute(state)}" style="${escapeAttribute(style)}" title="${escapeAttribute(`${state} ${label}${confidenceLabel}`)}">
-      <span>${escapeHtml(state === "match" ? `match ${shortFaceClusterLabel(label)}` : "unique")}</span>
+    <span class="media-audit-face-box is-${escapeAttribute(state)}" style="${escapeAttribute(style)}" title="${escapeAttribute(`${state} ${faceId || label}${confidenceLabel}`)}">
+      <span>${escapeHtml(`${state === "match" ? "match" : "unique"} ${faceId || shortFaceClusterLabel(label)}`)}</span>
     </span>
   `;
 }
@@ -818,11 +819,11 @@ function buildMediaAuditFaceDedupeFacts(insight) {
   if (matchedFaces) facts.push(`${matchedFaces} matched`);
   if (dedupe.decision) facts.push(formatMediaAuditDedupeDecision(dedupe.decision));
   if (dedupe.reason) facts.push(formatMediaAuditDedupeReason(dedupe.reason));
-  if (dedupe.duplicateClusterIds?.length) facts.push(`duplicate clusters ${dedupe.duplicateClusterIds.map(shortFaceClusterLabel).join(", ")}`);
-  if (dedupe.newClusterIds?.length) facts.push(`new clusters ${dedupe.newClusterIds.map(shortFaceClusterLabel).join(", ")}`);
+  if (dedupe.duplicateClusterIds?.length) facts.push(`duplicate clusters ${dedupe.duplicateClusterIds.map(getFaceClusterDisplayId).join(", ")}`);
+  if (dedupe.newClusterIds?.length) facts.push(`new clusters ${dedupe.newClusterIds.map(getFaceClusterDisplayId).join(", ")}`);
   faces.slice(0, 4).forEach((face) => {
     const confidence = Number(face.matchConfidence || face.confidence || 0);
-    facts.push(`${face.matched ? "match" : "unique"} ${face.clusterLabel || `face ${Number(face.index || 0) + 1}`}${confidence ? ` ${Math.round(confidence)}%` : ""}`);
+    facts.push(`${face.matched ? "match" : "unique"} ${getFaceDisplayId(face) || face.clusterLabel || `face ${Number(face.index || 0) + 1}`}${confidence ? ` ${Math.round(confidence)}%` : ""}`);
   });
   if (analysis.errorMessage) facts.push(`face error ${analysis.errorMessage}`);
   return facts;
@@ -842,6 +843,16 @@ function formatMediaAuditDedupeReason(value) {
 
 function shortFaceClusterLabel(value) {
   return String(value || "").replace(/^face\s*/i, "").replace(/^face-/, "").slice(0, 6) || "face";
+}
+
+function getFaceDisplayId(face) {
+  if (face?.faceId) return face.faceId;
+  return getFaceClusterDisplayId(face?.clusterId || face?.clusterLabel || "");
+}
+
+function getFaceClusterDisplayId(cluster) {
+  const short = shortFaceClusterLabel(cluster).replace(/[^A-Za-z0-9]/g, "");
+  return short && short !== "face" ? `F-${short}` : "";
 }
 
 function toPercent(value) {

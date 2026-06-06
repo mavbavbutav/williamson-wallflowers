@@ -54,7 +54,7 @@ const GROUP_HERO_FORCE_RATE_WINDOW_SECONDS = 60 * 60;
 const GROUP_HERO_GENERATION_STALE_SECONDS = 5 * 60;
 const GROUP_HERO_FAILED_RETRY_LIMIT = 3;
 const GROUP_HERO_DEFAULT_MODEL = 'gpt-image-1.5';
-const GROUP_HERO_FACE_DEDUP_VERSION = 1;
+const GROUP_HERO_FACE_DEDUP_VERSION = 2;
 const GROUP_HERO_FACE_PROVIDER_DEFAULT = 'aws-rekognition';
 const GROUP_HERO_FACE_MATCH_THRESHOLD = 97;
 const GROUP_HERO_FACE_SOFT_MATCH_THRESHOLD = 90;
@@ -1802,7 +1802,7 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
 async function requestOpenAiGroupHeroImage(env, apiKey, sources, prompt) {
   const formData = new FormData();
   formData.append('model', getOpenAiImageModel(env));
-  formData.append('prompt', prompt);
+  formData.append('prompt', buildGroupHeroRosterPrompt(prompt, sources));
   formData.append('size', '1536x1024');
   formData.append('quality', 'medium');
   formData.append('output_format', 'png');
@@ -2030,12 +2030,14 @@ async function createGroupHeroPersonReference(env, request, eventId, source) {
 }
 
 function withGroupHeroPersonReference(source, objectKey, face, crop) {
+  const faceClusterId = face.clusterId || face.cluster_id || '';
   return {
     ...source,
     personReferenceObjectKey: objectKey,
     personReferenceMimeType: AI_REFERENCE_MIME_TYPE,
-    personReferenceFilename: `${source.id}-person-reference.${AI_REFERENCE_EXTENSION}`,
-    personReferenceFaceClusterId: face.clusterId || face.cluster_id || '',
+    personReferenceFilename: `${source.id}-${safeGroupHeroObjectSegment(faceClusterId || 'face')}-person-reference.${AI_REFERENCE_EXTENSION}`,
+    personReferenceFaceClusterId: faceClusterId,
+    personReferenceFaceId: buildGroupHeroFacePublicId(faceClusterId),
     personReferenceCropMode: crop.cropMode,
     personReferenceVisibleBody: crop.visibleBody
   };
@@ -2050,9 +2052,51 @@ async function buildGroupHeroSourceAccessUrl(request, env, source) {
 }
 
 function getGroupHeroPersonReferenceObjectKey(eventId, submissionId, clusterId) {
-  const safeClusterId = cleanText(clusterId, 80).replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '') || 'face';
-  const safeSubmissionId = cleanText(submissionId, 80).replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '') || 'submission';
+  const safeClusterId = safeGroupHeroObjectSegment(clusterId) || 'face';
+  const safeSubmissionId = safeGroupHeroObjectSegment(submissionId) || 'submission';
   return `moments/${eventId}/generated/person-roster/${safeSubmissionId}-${safeClusterId}-v${GROUP_HERO_FACE_DEDUP_VERSION}.${AI_REFERENCE_EXTENSION}`;
+}
+
+function safeGroupHeroObjectSegment(value) {
+  return cleanText(value, 80).replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function buildGroupHeroRosterPrompt(prompt, sources) {
+  const rosterLines = (Array.isArray(sources) ? sources : [])
+    .map((source, index) => buildGroupHeroRosterPromptLine(source, index))
+    .filter(Boolean);
+  if (!rosterLines.length) return prompt;
+
+  return `${prompt}
+
+Roster requirements:
+- Treat each input image as one roster participant reference.
+- If an input image includes multiple people, use the person centered by the face/body crop as that roster participant.
+- Render every roster participant exactly once unless the source is unusable.
+- Preserve age-appropriate likeness cues, hairstyle, facial hair, glasses, clothing, and visible body/clothing details from each participant reference.
+- Do not draw Face IDs, labels, names, captions, or debug text in the artwork.
+
+Roster:
+${rosterLines.join('\n')}`;
+}
+
+function buildGroupHeroRosterPromptLine(source, index) {
+  const faceClusterId = source.personReferenceFaceClusterId || source.person_reference_face_cluster_id || source.rosterFaceClusterId || source.roster_face_cluster_id || '';
+  const faceId = source.personReferenceFaceId || source.person_reference_face_id || buildGroupHeroFacePublicId(faceClusterId);
+  const visibleBody = source.personReferenceVisibleBody || source.person_reference_visible_body || '';
+  const sourceKind = (source.mediaType || source.media_type || 'photo') === 'video' ? 'video thumbnail' : 'photo';
+  const referenceHint = faceId ? ` Face ID ${faceId}.` : '';
+  const bodyHint = visibleBody ? ` Visible crop: ${visibleBody.replace(/_/g, ' ')}.` : '';
+  return `- Participant ${index + 1}.${referenceHint} Source: ${sourceKind}.${bodyHint}`;
+}
+
+function buildGroupHeroFacePublicId(clusterId) {
+  const short = String(clusterId || '')
+    .replace(/^face\s*/i, '')
+    .replace(/^face-/, '')
+    .replace(/[^A-Za-z0-9]+/g, '')
+    .slice(0, 6);
+  return short ? `F-${short}` : '';
 }
 
 function buildGroupHeroPersonReferenceCrop(face) {
@@ -2252,7 +2296,8 @@ function selectDistinctGroupHeroSources(sources) {
     const newClusterIds = faceClusterIds.filter((clusterId) => !seenFaceClusters.has(clusterId));
     const duplicateClusterIds = faceClusterIds.filter((clusterId) => seenFaceClusters.has(clusterId));
 
-    if (selected.length >= GROUP_HERO_MAX_INPUTS) {
+    const remainingSlots = GROUP_HERO_MAX_INPUTS - selected.length;
+    if (remainingSlots <= 0) {
       decisions.push(buildGroupHeroSourceDecision(source, 'skipped', 'max-inputs-reached', {
         faceClusterIds,
         newClusterIds,
@@ -2262,12 +2307,60 @@ function selectDistinctGroupHeroSources(sources) {
       continue;
     }
 
-    if (faceClusterIds.length > 0 && newClusterIds.length === 0) {
-      decisions.push(buildGroupHeroSourceDecision(source, 'skipped', 'duplicate-face-cluster', {
+    if (faceClusterIds.length > 0) {
+      if (newClusterIds.length === 0) {
+        decisions.push(buildGroupHeroSourceDecision(source, 'skipped', 'duplicate-face-cluster', {
+          faceClusterIds,
+          newClusterIds,
+          duplicateClusterIds,
+          guestKey
+        }));
+        continue;
+      }
+
+      const participantFaces = selectGroupHeroParticipantFaces(source.faceDetails || [], newClusterIds, remainingSlots);
+      if (!participantFaces.length) {
+        if (guestKey) seenGuestKeys.add(guestKey);
+        for (const clusterId of newClusterIds) {
+          seenFaceClusters.add(clusterId);
+        }
+        selected.push({
+          ...source,
+          rosterParticipantId: `${source.id}:${newClusterIds[0] || 'face'}`,
+          rosterFaceClusterId: newClusterIds[0] || '',
+          rosterFaceId: buildGroupHeroFacePublicId(newClusterIds[0] || ''),
+          personReferenceFace: null
+        });
+        decisions.push(buildGroupHeroSourceDecision(source, 'selected', 'adds-face-cluster', {
+          faceClusterIds,
+          newClusterIds,
+          duplicateClusterIds,
+          guestKey,
+          score: newClusterIds.length
+        }));
+        continue;
+      }
+
+      if (guestKey) seenGuestKeys.add(guestKey);
+      for (const face of participantFaces) {
+        const clusterId = face.clusterId || face.cluster_id || '';
+        if (!clusterId || seenFaceClusters.has(clusterId)) continue;
+        seenFaceClusters.add(clusterId);
+        selected.push({
+          ...source,
+          rosterParticipantId: `${source.id}:${clusterId}`,
+          rosterFaceClusterId: clusterId,
+          rosterFaceId: buildGroupHeroFacePublicId(clusterId),
+          personReferenceFace: face
+        });
+      }
+
+      decisions.push(buildGroupHeroSourceDecision(source, 'selected', 'adds-face-cluster', {
         faceClusterIds,
-        newClusterIds,
+        newClusterIds: participantFaces.map((face) => face.clusterId || face.cluster_id || '').filter(Boolean),
         duplicateClusterIds,
-        guestKey
+        guestKey,
+        score: participantFaces.length
       }));
       continue;
     }
@@ -2283,12 +2376,10 @@ function selectDistinctGroupHeroSources(sources) {
     }
 
     if (guestKey) seenGuestKeys.add(guestKey);
-    for (const clusterId of faceClusterIds) {
-      seenFaceClusters.add(clusterId);
-    }
     const selectedSource = {
       ...source,
-      personReferenceFace: selectGroupHeroPersonReferenceFace(source.faceDetails || [], newClusterIds)
+      rosterParticipantId: source.id,
+      personReferenceFace: null
     };
     selected.push(selectedSource);
     decisions.push(buildGroupHeroSourceDecision(source, 'selected', faceClusterIds.length ? 'adds-face-cluster' : 'fallback-name-or-unknown', {
@@ -2303,16 +2394,27 @@ function selectDistinctGroupHeroSources(sources) {
   return { sources: selected, decisions };
 }
 
-function selectGroupHeroPersonReferenceFace(faces, newClusterIds = []) {
+function selectGroupHeroParticipantFaces(faces, newClusterIds = [], limit = GROUP_HERO_MAX_INPUTS) {
   const candidates = (Array.isArray(faces) ? faces : []).filter((face) => normalizeGroupHeroFaceBoundingBox(face.boundingBox || face.boundingBoxJson));
-  if (!candidates.length) return null;
+  if (!candidates.length) return [];
   const newClusterSet = new Set(newClusterIds || []);
-  return [...candidates].sort((left, right) => {
-    const leftNew = newClusterSet.has(left.clusterId) ? 1 : 0;
-    const rightNew = newClusterSet.has(right.clusterId) ? 1 : 0;
+  const bestByCluster = new Map();
+
+  for (const face of candidates) {
+    const clusterId = face.clusterId || face.cluster_id || '';
+    if (!clusterId || !newClusterSet.has(clusterId)) continue;
+    const current = bestByCluster.get(clusterId);
+    if (!current || scoreGroupHeroPersonReferenceFace(face) > scoreGroupHeroPersonReferenceFace(current)) {
+      bestByCluster.set(clusterId, face);
+    }
+  }
+
+  return Array.from(bestByCluster.values()).sort((left, right) => {
+    const leftNew = newClusterSet.has(left.clusterId || left.cluster_id || '') ? 1 : 0;
+    const rightNew = newClusterSet.has(right.clusterId || right.cluster_id || '') ? 1 : 0;
     if (leftNew !== rightNew) return rightNew - leftNew;
     return scoreGroupHeroPersonReferenceFace(right) - scoreGroupHeroPersonReferenceFace(left);
-  })[0];
+  }).slice(0, Math.max(0, Number(limit) || 0));
 }
 
 function scoreGroupHeroPersonReferenceFace(face) {

@@ -531,7 +531,9 @@ test('group hero sends body-aware person references for unique face clusters', a
     await drainWaitUntil(waitUntil);
 
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0].imageNames, ['guest-full-body-person-reference.jpg']);
+    assert.deepEqual(calls[0].imageNames, ['guest-full-body-cluster-full-body-person-reference.jpg']);
+    assert.match(calls[0].prompt, /Roster requirements:/);
+    assert.match(calls[0].prompt, /Participant 1/);
     assert.match(calls[0].prompt, /exactly one unique cartoon participant/i);
     assert.match(calls[0].prompt, /pants, shoes/i);
 
@@ -544,6 +546,88 @@ test('group hero sends body-aware person references for unique face clusters', a
     assert.equal(personReference.metadata.customMetadata.cropMode, 'expanded-face-body');
     assert.equal(personReference.metadata.customMetadata.visibleBody, 'full_body');
     assert.equal(new TextDecoder().decode(personReference.body), 'body-aware-person-reference');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('group hero expands one multi-face upload into separate roster participants', async () => {
+  const familyPhoto = guestSubmission({
+    id: 'guest-family',
+    object_key: 'moments/event-hero/guest-family.jpg',
+    objectKey: 'moments/event-hero/guest-family.jpg',
+    guest_name: 'Family Photo',
+    guestName: 'Family Photo',
+    status: 'approved',
+    created_at: '2026-09-19T20:05:00.000Z',
+    createdAt: '2026-09-19T20:05:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:05:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:05:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [familyPhoto],
+    faces: [
+      faceRow({
+        submission_id: 'guest-family',
+        submissionId: 'guest-family',
+        cluster_id: 'face-manabc123',
+        clusterId: 'face-manabc123',
+        face_index: 0,
+        faceIndex: 0,
+        confidence: 99.9,
+        bounding_box_json: JSON.stringify({ Left: 0.24, Top: 0.1, Width: 0.32, Height: 0.32 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.24, Top: 0.1, Width: 0.32, Height: 0.32 }),
+        quality_json: JSON.stringify({ Brightness: 86, Sharpness: 90 }),
+        qualityJson: JSON.stringify({ Brightness: 86, Sharpness: 90 })
+      }),
+      faceRow({
+        id: 'face-baby',
+        submission_id: 'guest-family',
+        submissionId: 'guest-family',
+        cluster_id: 'face-baby987',
+        clusterId: 'face-baby987',
+        face_index: 1,
+        faceIndex: 1,
+        confidence: 99.7,
+        bounding_box_json: JSON.stringify({ Left: 0.58, Top: 0.42, Width: 0.24, Height: 0.24 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.58, Top: 0.42, Width: 0.24, Height: 0.24 }),
+        quality_json: JSON.stringify({ Brightness: 92, Sharpness: 72 }),
+        qualityJson: JSON.stringify({ Brightness: 92, Sharpness: 72 })
+      })
+    ]
+  });
+  const bucket = new FakeBucket([
+    [familyPhoto.object_key, 'source-family'],
+    ['moments/event-hero/generated/person-roster/guest-family-face-manabc123-v2.jpg', 'person-man-reference'],
+    ['moments/event-hero/generated/person-roster/guest-family-face-baby987-v2.jpg', 'person-baby-reference']
+  ]);
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
+  const calls = mockOpenAi();
+
+  try {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://williamsonwallflowers.com',
+        Authorization: 'Bearer host-token'
+      }
+    }), env);
+
+    assert.equal(response.status, 202);
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].imageCount, 2);
+    assert.deepEqual(calls[0].imageNames, [
+      'guest-family-face-manabc123-person-reference.jpg',
+      'guest-family-face-baby987-person-reference.jpg'
+    ]);
+    assert.match(calls[0].prompt, /Face ID F-manabc/);
+    assert.match(calls[0].prompt, /Face ID F-baby98/);
+    assert.equal(db.groupHeroes[0].participant_count, 2);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-family', 'guest-family']);
   } finally {
     restoreFetch();
   }
