@@ -3236,7 +3236,9 @@ async function backfillMediaAuditCandidates(env, candidates, options = {}) {
   for (const candidate of candidates) {
     const now = new Date().toISOString();
     try {
-      const insight = await analyzeSubmissionMedia(env, candidate, options);
+      const existingInsight = options.includeAi ? null : await getSubmissionMediaInsight(env, candidate.id);
+      const analyzedInsight = await analyzeSubmissionMedia(env, candidate, options);
+      const insight = existingInsight ? preserveExistingMediaAuditVision(analyzedInsight, existingInsight) : analyzedInsight;
       await storeSubmissionMediaInsight(env, {
         ...insight,
         createdAt: now,
@@ -3293,6 +3295,46 @@ async function backfillMediaAuditCandidates(env, candidates, options = {}) {
   }
 
   return results;
+}
+
+async function getSubmissionMediaInsight(env, submissionId) {
+  if (!submissionId) return null;
+  return env.MOMENTS_DB.prepare(`
+    SELECT
+      vision_status AS visionStatus,
+      vision_model AS visionModel,
+      people_count AS peopleCount,
+      face_count AS faceCount,
+      dominant_colors AS dominantColors,
+      scene_tags AS sceneTags,
+      lighting_tags AS lightingTags,
+      composition_tags AS compositionTags,
+      background_cues AS backgroundCues,
+      visible_text AS visibleText,
+      summary,
+      error_message AS errorMessage
+    FROM submission_media_insights
+    WHERE submission_id = ?
+  `).bind(submissionId).first();
+}
+
+function preserveExistingMediaAuditVision(next, existing) {
+  if (!existing || !existing.visionStatus) return next;
+  return {
+    ...next,
+    visionStatus: existing.visionStatus || next.visionStatus,
+    visionModel: existing.visionModel || '',
+    peopleCount: normalizeOptionalInteger(existing.peopleCount),
+    faceCount: normalizeOptionalInteger(existing.faceCount),
+    dominantColors: parseJsonArray(existing.dominantColors),
+    sceneTags: parseJsonArray(existing.sceneTags),
+    lightingTags: parseJsonArray(existing.lightingTags),
+    compositionTags: parseJsonArray(existing.compositionTags),
+    backgroundCues: parseJsonArray(existing.backgroundCues),
+    visibleText: existing.visibleText || '',
+    summary: existing.summary || '',
+    errorMessage: existing.errorMessage || ''
+  };
 }
 
 async function analyzeSubmissionMedia(env, submission, options = {}) {

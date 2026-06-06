@@ -266,6 +266,55 @@ test('admin media audit backfill extracts JPEG EXIF capture, camera, and GPS met
   assert.equal(insight.exifMetadataVersion, 1);
 });
 
+test('metadata-only media audit backfill preserves existing AI vision fields', async () => {
+  const bytes = jpegWithExifBytes(640, 480);
+  const photo = submission({
+    id: 'vision-photo',
+    object_key: 'moments/event-audit/vision-photo.jpg',
+    mime_type: 'image/jpeg',
+    size: bytes.byteLength
+  });
+  const db = new MediaAuditFakeDb({
+    submissions: [photo],
+    insights: [insight({
+      submission_id: 'vision-photo',
+      vision_status: 'ready',
+      vision_model: 'gpt-4.1-mini',
+      people_count: 3,
+      face_count: 2,
+      scene_tags: JSON.stringify(['lake house']),
+      lighting_tags: JSON.stringify(['warm light']),
+      background_cues: JSON.stringify(['oak ridge']),
+      summary: 'existing vision summary',
+      exif_metadata_version: 0
+    })]
+  });
+  const env = envWithDb(db, new FakeBucket([[photo.object_key, bytes]]));
+  const waitUntil = [];
+
+  const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/admin/events/event-audit/media-audit/backfill', {
+    method: 'POST',
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      'X-Admin-Token': 'admin-token',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ limit: 5, includeAi: false })
+  }), env, { waitUntil: (work) => waitUntil.push(work) });
+
+  assert.equal(response.status, 202);
+  await drainWaitUntil(waitUntil);
+
+  const insightRow = db.insights.find((row) => row.submission_id === 'vision-photo');
+  assert.equal(insightRow.vision_status, 'ready');
+  assert.equal(insightRow.vision_model, 'gpt-4.1-mini');
+  assert.equal(insightRow.people_count, 3);
+  assert.equal(insightRow.summary, 'existing vision summary');
+  assert.deepEqual(JSON.parse(insightRow.scene_tags), ['lake house']);
+  assert.equal(insightRow.exif_capture_time, '2026-06-06T14:30:00');
+  assert.equal(insightRow.exif_metadata_version, 1);
+});
+
 test('optional media audit vision only sends AI-eligible guest media and host media', async () => {
   const aiGuest = submission({
     id: 'ai-guest',
@@ -520,6 +569,25 @@ class MediaAuditFakeStatement {
 
     if (this.sql.includes('FROM event_media_profiles')) {
       return this.db.profiles.find((profileRow) => profileRow.event_id === this.params[0] || profileRow.eventId === this.params[0]) || null;
+    }
+
+    if (this.sql.includes('FROM submission_media_insights') && this.sql.includes('WHERE submission_id = ?')) {
+      const row = this.db.insights.find((item) => item.submission_id === this.params[0] || item.submissionId === this.params[0]);
+      if (!row) return null;
+      return {
+        visionStatus: row.vision_status || row.visionStatus,
+        visionModel: row.vision_model || row.visionModel,
+        peopleCount: row.people_count ?? row.peopleCount,
+        faceCount: row.face_count ?? row.faceCount,
+        dominantColors: row.dominant_colors || row.dominantColors,
+        sceneTags: row.scene_tags || row.sceneTags,
+        lightingTags: row.lighting_tags || row.lightingTags,
+        compositionTags: row.composition_tags || row.compositionTags,
+        backgroundCues: row.background_cues || row.backgroundCues,
+        visibleText: row.visible_text || row.visibleText,
+        summary: row.summary || '',
+        errorMessage: row.error_message || row.errorMessage
+      };
     }
 
     if (this.sql.includes('COUNT(*) AS count') && this.sql.includes('LEFT JOIN submission_media_insights')) {
