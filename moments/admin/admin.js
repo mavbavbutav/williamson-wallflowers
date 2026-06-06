@@ -720,6 +720,8 @@ function buildMediaAuditExifFacts(insight) {
   if (insight.exifSoftware) facts.push(`software ${insight.exifSoftware}`);
   if (insight.exifOrientation) facts.push(`exif orientation ${insight.exifOrientation}`);
   if (insight.exifMetadataVersion) facts.push(`exif v${insight.exifMetadataVersion}`);
+  if (insight.reverseGeocodingStatus) facts.push(`geocode ${insight.reverseGeocodingStatus}`);
+  if (insight.reverseGeocodingProvider) facts.push(`provider ${insight.reverseGeocodingProvider}`);
   if (insight.uploaderIpAddress) facts.push(`uploader IP ${insight.uploaderIpAddress}`);
   return facts;
 }
@@ -749,9 +751,14 @@ function buildMediaAuditLocationCues(insight) {
   ];
   if (insight.exifGpsCity) cues.unshift(`gps city: ${insight.exifGpsCity}`);
   if (insight.exifGpsRegion) cues.unshift(`gps region: ${insight.exifGpsRegion}`);
+  if (insight.exifGpsCounty) cues.push(`county: ${insight.exifGpsCounty}`);
+  if (insight.exifGpsCountry) cues.push(`country: ${insight.exifGpsCountry}`);
+  if (insight.exifGpsPostcode) cues.push(`postcode: ${insight.exifGpsPostcode}`);
   if (insight.exifGpsLatitude !== null && insight.exifGpsLongitude !== null) cues.unshift(`gps ${Number(insight.exifGpsLatitude).toFixed(5)}, ${Number(insight.exifGpsLongitude).toFixed(5)}`);
   if (insight.exifGpsAltitudeMeters !== null) cues.push(`altitude ${Math.round(Number(insight.exifGpsAltitudeMeters))}m`);
   if (insight.exifGpsPrecision) cues.push(`precision ${insight.exifGpsPrecision}`);
+  if (insight.exifGpsDisplayName) cues.push(`address: ${insight.exifGpsDisplayName}`);
+  if (insight.reverseGeocodingError) cues.push(`geocode error: ${insight.reverseGeocodingError}`);
   if (insight.uploaderIpAddress) cues.push(`uploader IP ${insight.uploaderIpAddress}`);
   if (insight.visibleText) cues.push(`visible text: ${insight.visibleText}`);
   return Array.from(new Set(cues.filter(Boolean)));

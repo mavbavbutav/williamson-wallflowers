@@ -10,12 +10,14 @@ const BASE_ENV = {
   PUBLIC_SITE_URL: 'https://williamsonwallflowers.com',
   MOMENTS_API_URL: 'https://api.example.com',
   ALLOWED_ORIGINS: 'https://williamsonwallflowers.com',
-  OPENAI_API_KEY: 'openai-test-key'
+  OPENAI_API_KEY: 'openai-test-key',
+  REVERSE_GEOCODING_ENABLED: 'false'
 };
 
 test('media audit migration creates submission insights and event profiles', async () => {
   const migration = await readFile(new URL('../migrations/0016_wallflower_media_audit.sql', import.meta.url), 'utf8');
   const exifMigration = await readFile(new URL('../migrations/0017_wallflower_media_exif_audit.sql', import.meta.url), 'utf8');
+  const reverseGeocodeMigration = await readFile(new URL('../migrations/0018_wallflower_media_reverse_geocode.sql', import.meta.url), 'utf8');
 
   assert.match(migration, /CREATE TABLE IF NOT EXISTS submission_media_insights/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS event_media_profiles/);
@@ -27,6 +29,10 @@ test('media audit migration creates submission insights and event profiles', asy
   assert.match(exifMigration, /exif_gps_region TEXT/);
   assert.match(exifMigration, /exif_gps_precision TEXT/);
   assert.match(exifMigration, /exif_metadata_version INTEGER NOT NULL DEFAULT 0/);
+  assert.match(reverseGeocodeMigration, /exif_gps_country TEXT/);
+  assert.match(reverseGeocodeMigration, /exif_gps_display_name TEXT/);
+  assert.match(reverseGeocodeMigration, /reverse_geocoding_status TEXT NOT NULL DEFAULT ''/);
+  assert.match(reverseGeocodeMigration, /reverse_geocoding_version INTEGER NOT NULL DEFAULT 0/);
 });
 
 test('admin frontend exposes the private media audit report controls', async () => {
@@ -37,13 +43,15 @@ test('admin frontend exposes the private media audit report controls', async () 
   assert.match(adminHtml, /id="mediaAuditPanel"/);
   assert.match(adminHtml, /Run AI vision audit/);
   assert.match(adminHtml, /Location cues/);
-  assert.match(adminHtml, /admin\.js\?v=20260606-media-exif-audit-1/);
-  assert.match(adminHtml, /styles\.css\?v=20260606-media-exif-audit-1/);
+  assert.match(adminHtml, /admin\.js\?v=20260606-reverse-geocode-1/);
+  assert.match(adminHtml, /styles\.css\?v=20260606-reverse-geocode-1/);
   assert.match(adminJs, /\/admin\/events\/\$\{encodeURIComponent\(eventId\)\}\/media-audit/);
   assert.match(adminJs, /previewUrl/);
   assert.match(adminJs, /EXIF and upload/);
   assert.match(adminJs, /uploader IP/);
   assert.match(adminJs, /includeAi/);
+  assert.match(adminJs, /exifGpsDisplayName/);
+  assert.match(adminJs, /reverseGeocodingStatus/);
   assert.match(styles, /\.media-audit-panel/);
   assert.match(styles, /\.media-audit-preview/);
 });
@@ -266,6 +274,70 @@ test('admin media audit backfill extracts JPEG EXIF capture, camera, and GPS met
   assert.equal(insight.exifMetadataVersion, 1);
 });
 
+test('admin media audit backfill reverse geocodes embedded GPS metadata', async () => {
+  const bytes = jpegWithExifBytes(640, 480);
+  const photo = submission({
+    id: 'gps-photo',
+    object_key: 'moments/event-audit/gps-photo.jpg',
+    mime_type: 'image/jpeg',
+    size: bytes.byteLength
+  });
+  const db = new MediaAuditFakeDb({ submissions: [photo] });
+  const env = envWithDb(db, new FakeBucket([[photo.object_key, bytes]]), {
+    REVERSE_GEOCODING_ENABLED: 'true'
+  });
+  const waitUntil = [];
+  const calls = mockReverseGeocode();
+
+  try {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/admin/events/event-audit/media-audit/backfill', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://williamsonwallflowers.com',
+        'X-Admin-Token': 'admin-token',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ limit: 5 })
+    }), env, { waitUntil: (work) => waitUntil.push(work) });
+
+    assert.equal(response.status, 202);
+    await drainWaitUntil(waitUntil);
+  } finally {
+    restoreFetch();
+  }
+
+  assert.equal(calls.length, 1);
+  const geocodeUrl = new URL(calls[0].url);
+  assert.equal(geocodeUrl.searchParams.get('format'), 'jsonv2');
+  assert.equal(geocodeUrl.searchParams.get('addressdetails'), '1');
+
+  const insightRow = db.insights.find((row) => row.submission_id === 'gps-photo');
+  assert.equal(insightRow.exif_gps_city, 'Nashville');
+  assert.equal(insightRow.exif_gps_region, 'Tennessee');
+  assert.equal(insightRow.exif_gps_country, 'United States');
+  assert.equal(insightRow.exif_gps_county, 'Davidson County');
+  assert.equal(insightRow.exif_gps_postcode, '37201');
+  assert.equal(insightRow.exif_gps_display_name, 'Nashville, Davidson County, Tennessee, 37201, United States');
+  assert.equal(insightRow.reverse_geocoding_provider, 'nominatim');
+  assert.equal(insightRow.reverse_geocoding_status, 'ready');
+  assert.equal(insightRow.reverse_geocoding_version, 1);
+  assert.match(insightRow.reverse_geocoded_at, /^\d{4}-\d{2}-\d{2}T/);
+
+  const report = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/admin/events/event-audit/media-audit', {
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      'X-Admin-Token': 'admin-token'
+    }
+  }), env);
+  const payload = await report.json();
+  const insight = payload.audit.insights[0];
+  assert.equal(insight.exifGpsCity, 'Nashville');
+  assert.equal(insight.exifGpsRegion, 'Tennessee');
+  assert.equal(insight.exifGpsCountry, 'United States');
+  assert.equal(insight.exifGpsDisplayName, 'Nashville, Davidson County, Tennessee, 37201, United States');
+  assert.equal(insight.reverseGeocodingStatus, 'ready');
+});
+
 test('metadata-only media audit backfill preserves existing AI vision fields', async () => {
   const bytes = jpegWithExifBytes(640, 480);
   const photo = submission({
@@ -476,6 +548,15 @@ function insight(overrides = {}) {
     exif_gps_latitude: null,
     exif_gps_longitude: null,
     exif_gps_altitude_meters: null,
+    exif_gps_country: '',
+    exif_gps_county: '',
+    exif_gps_postcode: '',
+    exif_gps_display_name: '',
+    reverse_geocoding_provider: '',
+    reverse_geocoding_status: 'no_gps',
+    reverse_geocoding_error: '',
+    reverse_geocoded_at: '',
+    reverse_geocoding_version: 1,
     exif_camera_make: '',
     exif_camera_model: '',
     exif_lens_model: '',
@@ -599,7 +680,7 @@ class MediaAuditFakeStatement {
 
   async all() {
     if (this.sql.includes('FROM submissions s') && this.sql.includes('LEFT JOIN submission_media_insights')) {
-      return { results: this.mediaAuditCandidates().slice(0, Number(this.params[3] || 10)) };
+      return { results: this.mediaAuditCandidates().slice(0, Number(this.params[4] || 10)) };
     }
 
     if (this.sql.includes('FROM submission_media_insights i') && this.sql.includes('INNER JOIN submissions s')) {
@@ -636,6 +717,15 @@ class MediaAuditFakeStatement {
               exifGpsLatitude: row.exif_gps_latitude ?? row.exifGpsLatitude,
               exifGpsLongitude: row.exif_gps_longitude ?? row.exifGpsLongitude,
               exifGpsAltitudeMeters: row.exif_gps_altitude_meters ?? row.exifGpsAltitudeMeters,
+              exifGpsCountry: row.exif_gps_country || row.exifGpsCountry,
+              exifGpsCounty: row.exif_gps_county || row.exifGpsCounty,
+              exifGpsPostcode: row.exif_gps_postcode || row.exifGpsPostcode,
+              exifGpsDisplayName: row.exif_gps_display_name || row.exifGpsDisplayName,
+              reverseGeocodingProvider: row.reverse_geocoding_provider || row.reverseGeocodingProvider,
+              reverseGeocodingStatus: row.reverse_geocoding_status || row.reverseGeocodingStatus,
+              reverseGeocodingError: row.reverse_geocoding_error || row.reverseGeocodingError,
+              reverseGeocodedAt: row.reverse_geocoded_at || row.reverseGeocodedAt,
+              reverseGeocodingVersion: row.reverse_geocoding_version || row.reverseGeocodingVersion,
               exifCameraMake: row.exif_camera_make || row.exifCameraMake,
               exifCameraModel: row.exif_camera_model || row.exifCameraModel,
               exifLensModel: row.exif_lens_model || row.exifLensModel,
@@ -696,6 +786,15 @@ class MediaAuditFakeStatement {
         exifGpsLatitude,
         exifGpsLongitude,
         exifGpsAltitudeMeters,
+        exifGpsCountry,
+        exifGpsCounty,
+        exifGpsPostcode,
+        exifGpsDisplayName,
+        reverseGeocodingProvider,
+        reverseGeocodingStatus,
+        reverseGeocodingError,
+        reverseGeocodedAt,
+        reverseGeocodingVersion,
         exifCameraMake,
         exifCameraModel,
         exifLensModel,
@@ -739,6 +838,15 @@ class MediaAuditFakeStatement {
         exif_gps_latitude: exifGpsLatitude,
         exif_gps_longitude: exifGpsLongitude,
         exif_gps_altitude_meters: exifGpsAltitudeMeters,
+        exif_gps_country: exifGpsCountry,
+        exif_gps_county: exifGpsCounty,
+        exif_gps_postcode: exifGpsPostcode,
+        exif_gps_display_name: exifGpsDisplayName,
+        reverse_geocoding_provider: reverseGeocodingProvider,
+        reverse_geocoding_status: reverseGeocodingStatus,
+        reverse_geocoding_error: reverseGeocodingError,
+        reverse_geocoded_at: reverseGeocodedAt,
+        reverse_geocoding_version: reverseGeocodingVersion,
         exif_camera_make: exifCameraMake,
         exif_camera_model: exifCameraModel,
         exif_lens_model: exifLensModel,
@@ -824,7 +932,11 @@ class MediaAuditFakeStatement {
       .filter((item) => {
         const existing = this.db.insights.find((row) => row.submission_id === item.id || row.submissionId === item.id);
         if (!existing) return true;
-        return existing.status === 'pending' || (retryFailed && existing.status === 'failed') || Number(existing.exif_metadata_version || existing.exifMetadataVersion || 0) < 1;
+        const hasGps = Number.isFinite(Number(existing.exif_gps_latitude ?? existing.exifGpsLatitude))
+          && Number.isFinite(Number(existing.exif_gps_longitude ?? existing.exifGpsLongitude));
+        const needsExif = Number(existing.exif_metadata_version || existing.exifMetadataVersion || 0) < 1;
+        const needsReverseGeocode = hasGps && Number(existing.reverse_geocoding_version || existing.reverseGeocodingVersion || 0) < 1;
+        return existing.status === 'pending' || (retryFailed && existing.status === 'failed') || needsExif || needsReverseGeocode;
       })
       .sort((left, right) => new Date(left.created_at || left.createdAt || 0) - new Date(right.created_at || right.createdAt || 0))
       .map((item) => ({
@@ -989,6 +1101,31 @@ async function drainWaitUntil(tasks) {
 }
 
 let originalFetch = null;
+
+function mockReverseGeocode(payload = null) {
+  originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    if (String(url).includes('nominatim.openstreetmap.org/reverse')) {
+      calls.push({ url: String(url), init });
+      return new Response(JSON.stringify(payload || {
+        display_name: 'Nashville, Davidson County, Tennessee, 37201, United States',
+        address: {
+          city: 'Nashville',
+          county: 'Davidson County',
+          state: 'Tennessee',
+          postcode: '37201',
+          country: 'United States'
+        }
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    return originalFetch(url, init);
+  };
+  return calls;
+}
 
 function mockOpenAiMediaAudit() {
   originalFetch = globalThis.fetch;

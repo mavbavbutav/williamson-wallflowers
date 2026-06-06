@@ -69,6 +69,10 @@ const GROUP_HERO_PHOTO_TYPES = new Set([...GROUP_HERO_INPUT_TYPES, 'image/heic',
 const GROUP_HERO_GENERIC_IMAGE_TYPES = new Set(['application/octet-stream', 'binary/octet-stream']);
 const MEDIA_AUDIT_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const EXIF_METADATA_VERSION = 1;
+const REVERSE_GEOCODING_VERSION = 1;
+const REVERSE_GEOCODING_DEFAULT_PROVIDER = 'nominatim';
+const REVERSE_GEOCODING_DEFAULT_URL = 'https://nominatim.openstreetmap.org/reverse';
+const REVERSE_GEOCODING_TIMEOUT_MS = 6000;
 const THUMBNAIL_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const VIDEO_TYPES = new Set([
   'video/mp4',
@@ -3199,10 +3203,15 @@ async function getMediaAuditCandidates(env, eventId, limit, retryFailed = false)
         OR i.status = 'pending'
         OR (? = 1 AND i.status = 'failed')
         OR COALESCE(i.exif_metadata_version, 0) < ?
+        OR (
+          i.exif_gps_latitude IS NOT NULL
+          AND i.exif_gps_longitude IS NOT NULL
+          AND COALESCE(i.reverse_geocoding_version, 0) < ?
+        )
       )
     ORDER BY s.created_at ASC
     LIMIT ?
-  `).bind(eventId, retryFailed ? 1 : 0, EXIF_METADATA_VERSION, limit).all();
+  `).bind(eventId, retryFailed ? 1 : 0, EXIF_METADATA_VERSION, REVERSE_GEOCODING_VERSION, limit).all();
 
   return result.results || [];
 }
@@ -3224,8 +3233,13 @@ async function countMediaAuditCandidates(env, eventId, retryFailed = false) {
         OR i.status = 'pending'
         OR (? = 1 AND i.status = 'failed')
         OR COALESCE(i.exif_metadata_version, 0) < ?
+        OR (
+          i.exif_gps_latitude IS NOT NULL
+          AND i.exif_gps_longitude IS NOT NULL
+          AND COALESCE(i.reverse_geocoding_version, 0) < ?
+        )
       )
-  `).bind(eventId, retryFailed ? 1 : 0, EXIF_METADATA_VERSION).first();
+  `).bind(eventId, retryFailed ? 1 : 0, EXIF_METADATA_VERSION, REVERSE_GEOCODING_VERSION).first();
 
   return Number(row?.count || 0);
 }
@@ -3280,6 +3294,15 @@ async function backfillMediaAuditCandidates(env, candidates, options = {}) {
         exifGpsLatitude: null,
         exifGpsLongitude: null,
         exifGpsAltitudeMeters: null,
+        exifGpsCountry: '',
+        exifGpsCounty: '',
+        exifGpsPostcode: '',
+        exifGpsDisplayName: '',
+        reverseGeocodingProvider: '',
+        reverseGeocodingStatus: 'failed',
+        reverseGeocodingError: '',
+        reverseGeocodedAt: '',
+        reverseGeocodingVersion: 0,
         exifCameraMake: '',
         exifCameraModel: '',
         exifLensModel: '',
@@ -3354,6 +3377,7 @@ async function analyzeSubmissionMedia(env, submission, options = {}) {
   const bytes = new Uint8Array(await object.arrayBuffer());
   const detected = inspectImageBytes(bytes, source.mimeType, source.objectKey || source.originalFilename);
   const exif = parseExifMetadata(bytes, detected.format);
+  const geocode = await maybeReverseGeocodeExifGps(env, exif);
   const qualityScore = scoreMediaAuditImage(detected, bytes.byteLength);
   let vision = {
     status: options.includeAi ? 'not_allowed' : 'not_requested',
@@ -3400,12 +3424,21 @@ async function analyzeSubmissionMedia(env, submission, options = {}) {
     skipReason: detected.format ? '' : 'unsupported-or-unknown-image-format',
     errorMessage: vision.errorMessage || '',
     exifCaptureTime: exif.captureTime,
-    exifGpsCity: exif.gpsCity,
-    exifGpsRegion: exif.gpsRegion,
+    exifGpsCity: geocode.city || exif.gpsCity,
+    exifGpsRegion: geocode.region || exif.gpsRegion,
     exifGpsPrecision: exif.gpsPrecision,
     exifGpsLatitude: exif.gpsLatitude,
     exifGpsLongitude: exif.gpsLongitude,
     exifGpsAltitudeMeters: exif.gpsAltitudeMeters,
+    exifGpsCountry: geocode.country || exif.gpsCountry || '',
+    exifGpsCounty: geocode.county || exif.gpsCounty || '',
+    exifGpsPostcode: geocode.postcode || exif.gpsPostcode || '',
+    exifGpsDisplayName: geocode.displayName || exif.gpsDisplayName || '',
+    reverseGeocodingProvider: geocode.provider,
+    reverseGeocodingStatus: geocode.status,
+    reverseGeocodingError: geocode.errorMessage,
+    reverseGeocodedAt: geocode.resolvedAt,
+    reverseGeocodingVersion: geocode.version,
     exifCameraMake: exif.cameraMake,
     exifCameraModel: exif.cameraModel,
     exifLensModel: exif.lensModel,
@@ -3469,6 +3502,15 @@ function skippedMediaInsight(submission, source, reason) {
     exifGpsLatitude: null,
     exifGpsLongitude: null,
     exifGpsAltitudeMeters: null,
+    exifGpsCountry: '',
+    exifGpsCounty: '',
+    exifGpsPostcode: '',
+    exifGpsDisplayName: '',
+    reverseGeocodingProvider: '',
+    reverseGeocodingStatus: 'no_gps',
+    reverseGeocodingError: '',
+    reverseGeocodedAt: '',
+    reverseGeocodingVersion: REVERSE_GEOCODING_VERSION,
     exifCameraMake: '',
     exifCameraModel: '',
     exifLensModel: '',
@@ -3639,11 +3681,127 @@ function emptyExifMetadata() {
     gpsLatitude: null,
     gpsLongitude: null,
     gpsAltitudeMeters: null,
+    gpsCountry: '',
+    gpsCounty: '',
+    gpsPostcode: '',
+    gpsDisplayName: '',
     cameraMake: '',
     cameraModel: '',
     lensModel: '',
     software: '',
     orientation: ''
+  };
+}
+
+function emptyReverseGeocode(status = 'not_requested', provider = getReverseGeocodingProvider({}), version = REVERSE_GEOCODING_VERSION) {
+  return {
+    status,
+    provider,
+    city: '',
+    region: '',
+    country: '',
+    county: '',
+    postcode: '',
+    displayName: '',
+    errorMessage: '',
+    resolvedAt: '',
+    version
+  };
+}
+
+async function maybeReverseGeocodeExifGps(env, exif) {
+  const latitude = Number(exif?.gpsLatitude);
+  const longitude = Number(exif?.gpsLongitude);
+  const provider = getReverseGeocodingProvider(env);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return emptyReverseGeocode('no_gps', provider);
+  }
+
+  if (!isReverseGeocodingEnabled(env)) {
+    return emptyReverseGeocode('disabled', provider);
+  }
+
+  try {
+    return await requestReverseGeocode(env, latitude, longitude, provider);
+  } catch (error) {
+    return {
+      ...emptyReverseGeocode('failed', provider, 0),
+      errorMessage: cleanText(error.message || error, 500)
+    };
+  }
+}
+
+function isReverseGeocodingEnabled(env) {
+  return String(env.REVERSE_GEOCODING_ENABLED || 'true').toLowerCase() !== 'false';
+}
+
+function getReverseGeocodingProvider(env) {
+  return cleanText(env.REVERSE_GEOCODING_PROVIDER || '', 40) || REVERSE_GEOCODING_DEFAULT_PROVIDER;
+}
+
+async function requestReverseGeocode(env, latitude, longitude, provider) {
+  if (provider !== 'nominatim') {
+    return requestNominatimReverseGeocode(env, latitude, longitude, provider);
+  }
+  return requestNominatimReverseGeocode(env, latitude, longitude, provider);
+}
+
+async function requestNominatimReverseGeocode(env, latitude, longitude, provider = REVERSE_GEOCODING_DEFAULT_PROVIDER) {
+  const endpoint = cleanText(env.REVERSE_GEOCODING_URL || '', 240) || REVERSE_GEOCODING_DEFAULT_URL;
+  const supportEmail = cleanText(env.SUPPORT_EMAIL || '', 140);
+  const url = new URL(endpoint);
+  url.searchParams.set('format', 'jsonv2');
+  url.searchParams.set('lat', String(latitude));
+  url.searchParams.set('lon', String(longitude));
+  url.searchParams.set('zoom', '10');
+  url.searchParams.set('addressdetails', '1');
+  if (supportEmail) url.searchParams.set('email', supportEmail);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REVERSE_GEOCODING_TIMEOUT_MS);
+  try {
+    const response = await fetch(url.toString(), {
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': `Wallflower Moments Media Audit/1.0 (${supportEmail || 'https://williamsonwallflowers.com'})`
+      },
+      signal: controller.signal
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload?.error || `Reverse geocoding failed with status ${response.status}.`);
+    }
+    return normalizeReverseGeocodePayload(payload, provider);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function normalizeReverseGeocodePayload(payload, provider) {
+  const address = payload?.address || {};
+  const city = cleanText(
+    address.city || address.town || address.village || address.hamlet || address.municipality || address.city_district || '',
+    120
+  );
+  const region = cleanText(address.state || address.region || address.province || address.state_district || '', 120);
+  const county = cleanText(address.county || '', 120);
+  const country = cleanText(address.country || '', 120);
+  const postcode = cleanText(address.postcode || '', 40);
+  const displayName = cleanText(payload?.display_name || '', 260);
+
+  return {
+    status: city || region || country || displayName ? 'ready' : 'not_found',
+    provider,
+    city,
+    region,
+    county,
+    country,
+    postcode,
+    displayName,
+    errorMessage: '',
+    resolvedAt: new Date().toISOString(),
+    version: REVERSE_GEOCODING_VERSION
   };
 }
 
@@ -3990,10 +4148,13 @@ async function storeSubmissionMediaInsight(env, insight) {
       lighting_tags, composition_tags, background_cues, visible_text, summary,
       skip_reason, error_message, exif_capture_time, exif_gps_city, exif_gps_region,
       exif_gps_precision, exif_gps_latitude, exif_gps_longitude, exif_gps_altitude_meters,
-      exif_camera_make, exif_camera_model, exif_lens_model, exif_software, exif_orientation,
-      exif_metadata_version, analyzed_at, created_at, updated_at
+      exif_gps_country, exif_gps_county, exif_gps_postcode, exif_gps_display_name,
+      reverse_geocoding_provider, reverse_geocoding_status, reverse_geocoding_error,
+      reverse_geocoded_at, reverse_geocoding_version, exif_camera_make, exif_camera_model,
+      exif_lens_model, exif_software, exif_orientation, exif_metadata_version,
+      analyzed_at, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(submission_id) DO UPDATE SET
       event_id = excluded.event_id,
       status = excluded.status,
@@ -4026,6 +4187,15 @@ async function storeSubmissionMediaInsight(env, insight) {
       exif_gps_latitude = excluded.exif_gps_latitude,
       exif_gps_longitude = excluded.exif_gps_longitude,
       exif_gps_altitude_meters = excluded.exif_gps_altitude_meters,
+      exif_gps_country = excluded.exif_gps_country,
+      exif_gps_county = excluded.exif_gps_county,
+      exif_gps_postcode = excluded.exif_gps_postcode,
+      exif_gps_display_name = excluded.exif_gps_display_name,
+      reverse_geocoding_provider = excluded.reverse_geocoding_provider,
+      reverse_geocoding_status = excluded.reverse_geocoding_status,
+      reverse_geocoding_error = excluded.reverse_geocoding_error,
+      reverse_geocoded_at = excluded.reverse_geocoded_at,
+      reverse_geocoding_version = excluded.reverse_geocoding_version,
       exif_camera_make = excluded.exif_camera_make,
       exif_camera_model = excluded.exif_camera_model,
       exif_lens_model = excluded.exif_lens_model,
@@ -4067,6 +4237,15 @@ async function storeSubmissionMediaInsight(env, insight) {
     insight.exifGpsLatitude === null || insight.exifGpsLatitude === undefined ? null : Number(insight.exifGpsLatitude),
     insight.exifGpsLongitude === null || insight.exifGpsLongitude === undefined ? null : Number(insight.exifGpsLongitude),
     insight.exifGpsAltitudeMeters === null || insight.exifGpsAltitudeMeters === undefined ? null : Number(insight.exifGpsAltitudeMeters),
+    cleanText(insight.exifGpsCountry, 120),
+    cleanText(insight.exifGpsCounty, 120),
+    cleanText(insight.exifGpsPostcode, 40),
+    cleanText(insight.exifGpsDisplayName, 260),
+    cleanText(insight.reverseGeocodingProvider, 40),
+    cleanText(insight.reverseGeocodingStatus, 40),
+    cleanText(insight.reverseGeocodingError, 500),
+    cleanText(insight.reverseGeocodedAt, 64),
+    Number(insight.reverseGeocodingVersion || 0),
     cleanText(insight.exifCameraMake, 120),
     cleanText(insight.exifCameraModel, 120),
     cleanText(insight.exifLensModel, 160),
@@ -4212,6 +4391,15 @@ async function getEventMediaInsightRows(env, eventId) {
       i.exif_gps_latitude AS exifGpsLatitude,
       i.exif_gps_longitude AS exifGpsLongitude,
       i.exif_gps_altitude_meters AS exifGpsAltitudeMeters,
+      i.exif_gps_country AS exifGpsCountry,
+      i.exif_gps_county AS exifGpsCounty,
+      i.exif_gps_postcode AS exifGpsPostcode,
+      i.exif_gps_display_name AS exifGpsDisplayName,
+      i.reverse_geocoding_provider AS reverseGeocodingProvider,
+      i.reverse_geocoding_status AS reverseGeocodingStatus,
+      i.reverse_geocoding_error AS reverseGeocodingError,
+      i.reverse_geocoded_at AS reverseGeocodedAt,
+      i.reverse_geocoding_version AS reverseGeocodingVersion,
       i.exif_camera_make AS exifCameraMake,
       i.exif_camera_model AS exifCameraModel,
       i.exif_lens_model AS exifLensModel,
@@ -4357,6 +4545,15 @@ async function toMediaInsightClient(row, request, env) {
     exifGpsLatitude: normalizeOptionalNumber(row.exifGpsLatitude ?? row.exif_gps_latitude),
     exifGpsLongitude: normalizeOptionalNumber(row.exifGpsLongitude ?? row.exif_gps_longitude),
     exifGpsAltitudeMeters: normalizeOptionalNumber(row.exifGpsAltitudeMeters ?? row.exif_gps_altitude_meters),
+    exifGpsCountry: row.exifGpsCountry || row.exif_gps_country || '',
+    exifGpsCounty: row.exifGpsCounty || row.exif_gps_county || '',
+    exifGpsPostcode: row.exifGpsPostcode || row.exif_gps_postcode || '',
+    exifGpsDisplayName: row.exifGpsDisplayName || row.exif_gps_display_name || '',
+    reverseGeocodingProvider: row.reverseGeocodingProvider || row.reverse_geocoding_provider || '',
+    reverseGeocodingStatus: row.reverseGeocodingStatus || row.reverse_geocoding_status || '',
+    reverseGeocodingError: row.reverseGeocodingError || row.reverse_geocoding_error || '',
+    reverseGeocodedAt: row.reverseGeocodedAt || row.reverse_geocoded_at || '',
+    reverseGeocodingVersion: Number(row.reverseGeocodingVersion || row.reverse_geocoding_version || 0),
     exifCameraMake: row.exifCameraMake || row.exif_camera_make || '',
     exifCameraModel: row.exifCameraModel || row.exif_camera_model || '',
     exifLensModel: row.exifLensModel || row.exif_lens_model || '',
