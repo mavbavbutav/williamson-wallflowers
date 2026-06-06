@@ -52,6 +52,11 @@ const GROUP_HERO_FORCE_RATE_WINDOW_SECONDS = 60 * 60;
 const GROUP_HERO_GENERATION_STALE_SECONDS = 5 * 60;
 const GROUP_HERO_FAILED_RETRY_LIMIT = 3;
 const GROUP_HERO_DEFAULT_MODEL = 'gpt-image-1.5';
+const GROUP_HERO_FACE_DEDUP_VERSION = 1;
+const GROUP_HERO_FACE_PROVIDER_DEFAULT = 'aws-rekognition';
+const GROUP_HERO_FACE_MATCH_THRESHOLD = 97;
+const GROUP_HERO_FACE_SOFT_MATCH_THRESHOLD = 90;
+const GROUP_HERO_FACE_MAX_FACES = 24;
 const MEDIA_AUDIT_DEFAULT_MODEL = 'gpt-4.1-mini';
 const GROUP_HERO_PROMPT = buildGroupHeroPrompt('the event');
 const STANDARD_RETENTION_DAYS = 90;
@@ -1979,6 +1984,18 @@ async function getEventGroupHero(env, eventId) {
 }
 
 async function getGroupHeroSourceSubmissions(env, eventId) {
+  const compatibleSources = await getGroupHeroCandidateSubmissions(env, eventId);
+  await ensureGroupHeroFaceAnalyses(env, eventId, compatibleSources);
+  const clusterMap = await getGroupHeroFaceClusterMap(env, eventId, compatibleSources.map((source) => source.id));
+  const selection = selectDistinctGroupHeroSources(compatibleSources.map((source) => ({
+    ...source,
+    faceClusterIds: clusterMap.get(source.id) || []
+  })));
+  await storeGroupHeroSourceDecisions(env, eventId, selection.decisions);
+  return selection.sources;
+}
+
+async function getGroupHeroCandidateSubmissions(env, eventId) {
   const result = await env.MOMENTS_DB.prepare(`
     SELECT
       id,
@@ -2058,26 +2075,66 @@ async function getGroupHeroSourceSubmissions(env, eventId) {
     };
   });
 
-  return selectDistinctGroupHeroSources(compatibleSources);
+  return compatibleSources;
 }
 
 function selectDistinctGroupHeroSources(sources) {
   const selected = [];
+  const decisions = [];
+  const seenFaceClusters = new Set();
   const seenGuestKeys = new Set();
 
   for (const source of sources) {
-    if (selected.length >= GROUP_HERO_MAX_INPUTS) break;
-
+    const faceClusterIds = uniqueCleanList(source.faceClusterIds || source.face_cluster_ids || []);
     const guestKey = getGroupHeroGuestKey(source.guestName || source.guest_name || '');
-    if (guestKey) {
-      if (seenGuestKeys.has(guestKey)) continue;
-      seenGuestKeys.add(guestKey);
+    const newClusterIds = faceClusterIds.filter((clusterId) => !seenFaceClusters.has(clusterId));
+    const duplicateClusterIds = faceClusterIds.filter((clusterId) => seenFaceClusters.has(clusterId));
+
+    if (selected.length >= GROUP_HERO_MAX_INPUTS) {
+      decisions.push(buildGroupHeroSourceDecision(source, 'skipped', 'max-inputs-reached', {
+        faceClusterIds,
+        newClusterIds,
+        duplicateClusterIds,
+        guestKey
+      }));
+      continue;
     }
 
+    if (faceClusterIds.length > 0 && newClusterIds.length === 0) {
+      decisions.push(buildGroupHeroSourceDecision(source, 'skipped', 'duplicate-face-cluster', {
+        faceClusterIds,
+        newClusterIds,
+        duplicateClusterIds,
+        guestKey
+      }));
+      continue;
+    }
+
+    if (faceClusterIds.length === 0 && guestKey && seenGuestKeys.has(guestKey)) {
+      decisions.push(buildGroupHeroSourceDecision(source, 'skipped', 'duplicate-guest-name', {
+        faceClusterIds,
+        newClusterIds,
+        duplicateClusterIds,
+        guestKey
+      }));
+      continue;
+    }
+
+    if (guestKey) seenGuestKeys.add(guestKey);
+    for (const clusterId of faceClusterIds) {
+      seenFaceClusters.add(clusterId);
+    }
     selected.push(source);
+    decisions.push(buildGroupHeroSourceDecision(source, 'selected', faceClusterIds.length ? 'adds-face-cluster' : 'fallback-name-or-unknown', {
+      faceClusterIds,
+      newClusterIds,
+      duplicateClusterIds,
+      guestKey,
+      score: faceClusterIds.length ? newClusterIds.length : 0.5
+    }));
   }
 
-  return selected;
+  return { sources: selected, decisions };
 }
 
 function getGroupHeroGuestKey(value) {
@@ -2088,6 +2145,512 @@ function getGroupHeroGuestKey(value) {
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function uniqueCleanList(values) {
+  const seen = new Set();
+  const output = [];
+  for (const value of Array.isArray(values) ? values : []) {
+    const clean = cleanText(value, 120);
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    output.push(clean);
+  }
+  return output;
+}
+
+function buildGroupHeroSourceDecision(source, decision, reason, details = {}) {
+  return {
+    submissionId: source.id,
+    decision,
+    reason,
+    clusterIds: details.faceClusterIds || [],
+    newClusterIds: details.newClusterIds || [],
+    duplicateClusterIds: details.duplicateClusterIds || [],
+    guestKey: details.guestKey || '',
+    score: Number(details.score || 0)
+  };
+}
+
+async function ensureGroupHeroFaceAnalyses(env, eventId, sources) {
+  if (!sources.length || !isGroupHeroFaceDedupeEnabled(env) || !hasGroupHeroFaceProviderConfig(env)) return;
+  const provider = getGroupHeroFaceProvider(env);
+  if (provider !== 'aws-rekognition') return;
+
+  const collectionId = getAwsRekognitionCollectionId(env, eventId);
+  await ensureAwsRekognitionFaceCollection(env, collectionId);
+
+  for (const source of sources) {
+    const sourceObjectKey = source.aiReferenceObjectKey || source.objectKey || source.object_key || '';
+    const existing = await getSubmissionFaceAnalysis(env, source.id);
+    if (
+      existing
+      && Number(existing.faceSignatureVersion || existing.face_signature_version || 0) >= GROUP_HERO_FACE_DEDUP_VERSION
+      && (existing.sourceObjectKey || existing.source_object_key || '') === sourceObjectKey
+      && ['ready', 'no_faces', 'skipped'].includes(existing.status || '')
+    ) {
+      continue;
+    }
+
+    await analyzeAndStoreGroupHeroFaces(env, eventId, source, provider, collectionId);
+  }
+
+  await rebuildEventFaceClusters(env, eventId, provider);
+}
+
+async function analyzeAndStoreGroupHeroFaces(env, eventId, source, provider, collectionId) {
+  const now = new Date().toISOString();
+  const sourceObjectKey = source.aiReferenceObjectKey || source.objectKey || source.object_key || '';
+  try {
+    const sourceObject = await getGroupHeroSourceObject(env, source);
+    if (!['image/jpeg', 'image/png'].includes(sourceObject.mimeType)) {
+      await storeSubmissionFaceAnalysis(env, {
+        submissionId: source.id,
+        eventId,
+        sourceObjectKey,
+        provider,
+        status: 'skipped',
+        faceCount: 0,
+        errorMessage: 'unsupported-face-image-format',
+        analyzedAt: now
+      });
+      return;
+    }
+
+    const bytes = new Uint8Array(await r2ObjectToArrayBuffer(sourceObject.object));
+    const faceRecords = await indexAwsRekognitionFaces(env, collectionId, source.id, bytes);
+    await env.MOMENTS_DB.prepare('DELETE FROM submission_faces WHERE submission_id = ?').bind(source.id).run();
+    const knownFaces = await getKnownEventFaces(env, eventId, provider);
+    let faceIndex = 0;
+
+    for (const record of faceRecords) {
+      const providerFaceId = cleanText(record?.Face?.FaceId || '', 120);
+      if (!providerFaceId) continue;
+      const match = await findBestKnownFaceMatch(env, collectionId, providerFaceId, knownFaces);
+      const clusterId = match.clusterId || await createGroupHeroFaceClusterId(eventId, providerFaceId);
+      const face = {
+        id: `${source.id}:face:${faceIndex}:v${GROUP_HERO_FACE_DEDUP_VERSION}`,
+        eventId,
+        submissionId: source.id,
+        faceIndex,
+        provider,
+        providerFaceId,
+        clusterId,
+        confidence: Number(record?.Face?.Confidence || 0),
+        boundingBox: record?.Face?.BoundingBox || {},
+        quality: record?.FaceDetail?.Quality || {},
+        matchConfidence: match.confidence || 0,
+        status: 'ready',
+        createdAt: now,
+        updatedAt: now
+      };
+      await storeSubmissionFace(env, face);
+      knownFaces.push({ providerFaceId, clusterId });
+      faceIndex += 1;
+    }
+
+    await storeSubmissionFaceAnalysis(env, {
+      submissionId: source.id,
+      eventId,
+      sourceObjectKey,
+      provider,
+      status: faceIndex > 0 ? 'ready' : 'no_faces',
+      faceCount: faceIndex,
+      errorMessage: '',
+      analyzedAt: now
+    });
+  } catch (error) {
+    await storeSubmissionFaceAnalysis(env, {
+      submissionId: source.id,
+      eventId,
+      sourceObjectKey,
+      provider,
+      status: 'failed',
+      faceCount: 0,
+      errorMessage: cleanText(error.message || error, 500),
+      analyzedAt: now
+    });
+  }
+}
+
+async function getSubmissionFaceAnalysis(env, submissionId) {
+  return env.MOMENTS_DB.prepare(`
+    SELECT submission_id AS submissionId, source_object_key AS sourceObjectKey, status,
+      face_signature_version AS faceSignatureVersion
+    FROM submission_face_analyses
+    WHERE submission_id = ?
+  `).bind(submissionId).first();
+}
+
+async function storeSubmissionFaceAnalysis(env, analysis) {
+  const now = new Date().toISOString();
+  await env.MOMENTS_DB.prepare(`
+    INSERT INTO submission_face_analyses (
+      submission_id, event_id, source_object_key, provider, status, face_count,
+      error_message, face_signature_version, analyzed_at, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(submission_id) DO UPDATE SET
+      event_id = excluded.event_id,
+      source_object_key = excluded.source_object_key,
+      provider = excluded.provider,
+      status = excluded.status,
+      face_count = excluded.face_count,
+      error_message = excluded.error_message,
+      face_signature_version = excluded.face_signature_version,
+      analyzed_at = excluded.analyzed_at,
+      updated_at = excluded.updated_at
+  `).bind(
+    analysis.submissionId,
+    analysis.eventId,
+    analysis.sourceObjectKey,
+    analysis.provider,
+    analysis.status,
+    Number(analysis.faceCount || 0),
+    analysis.errorMessage || '',
+    GROUP_HERO_FACE_DEDUP_VERSION,
+    analysis.analyzedAt || now,
+    now,
+    now
+  ).run();
+}
+
+async function storeSubmissionFace(env, face) {
+  await env.MOMENTS_DB.prepare(`
+    INSERT INTO submission_faces (
+      id, event_id, submission_id, face_index, provider, provider_face_id,
+      cluster_id, confidence, bounding_box_json, quality_json, match_confidence,
+      status, face_signature_version, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(submission_id, face_index, face_signature_version) DO UPDATE SET
+      provider = excluded.provider,
+      provider_face_id = excluded.provider_face_id,
+      cluster_id = excluded.cluster_id,
+      confidence = excluded.confidence,
+      bounding_box_json = excluded.bounding_box_json,
+      quality_json = excluded.quality_json,
+      match_confidence = excluded.match_confidence,
+      status = excluded.status,
+      updated_at = excluded.updated_at
+  `).bind(
+    face.id,
+    face.eventId,
+    face.submissionId,
+    Number(face.faceIndex || 0),
+    face.provider,
+    face.providerFaceId,
+    face.clusterId,
+    Number(face.confidence || 0),
+    JSON.stringify(face.boundingBox || {}),
+    JSON.stringify(face.quality || {}),
+    Number(face.matchConfidence || 0),
+    face.status || 'ready',
+    GROUP_HERO_FACE_DEDUP_VERSION,
+    face.createdAt,
+    face.updatedAt
+  ).run();
+}
+
+async function getKnownEventFaces(env, eventId, provider) {
+  const result = await env.MOMENTS_DB.prepare(`
+    SELECT provider_face_id AS providerFaceId, cluster_id AS clusterId
+    FROM submission_faces
+    WHERE event_id = ? AND provider = ? AND face_signature_version = ? AND status = 'ready'
+  `).bind(eventId, provider, GROUP_HERO_FACE_DEDUP_VERSION).all();
+  return (result.results || []).map((row) => ({
+    providerFaceId: row.providerFaceId || row.provider_face_id || '',
+    clusterId: row.clusterId || row.cluster_id || ''
+  })).filter((row) => row.providerFaceId && row.clusterId);
+}
+
+async function getGroupHeroFaceClusterMap(env, eventId, sourceIds) {
+  const sourceSet = new Set(sourceIds || []);
+  const map = new Map();
+  if (!sourceSet.size || !isGroupHeroFaceDedupeEnabled(env)) return map;
+
+  const result = await env.MOMENTS_DB.prepare(`
+    SELECT submission_id AS submissionId, cluster_id AS clusterId
+    FROM submission_faces
+    WHERE event_id = ? AND face_signature_version = ? AND status = 'ready'
+  `).bind(eventId, GROUP_HERO_FACE_DEDUP_VERSION).all();
+
+  for (const row of result.results || []) {
+    const submissionId = row.submissionId || row.submission_id || '';
+    const clusterId = row.clusterId || row.cluster_id || '';
+    if (!sourceSet.has(submissionId) || !clusterId) continue;
+    const clusters = map.get(submissionId) || [];
+    clusters.push(clusterId);
+    map.set(submissionId, uniqueCleanList(clusters));
+  }
+  return map;
+}
+
+async function rebuildEventFaceClusters(env, eventId, provider) {
+  const result = await env.MOMENTS_DB.prepare(`
+    SELECT cluster_id AS clusterId, provider_face_id AS providerFaceId, submission_id AS submissionId
+    FROM submission_faces
+    WHERE event_id = ? AND provider = ? AND face_signature_version = ? AND status = 'ready'
+    ORDER BY created_at ASC
+  `).bind(eventId, provider, GROUP_HERO_FACE_DEDUP_VERSION).all();
+  const clusters = new Map();
+  for (const row of result.results || []) {
+    const clusterId = row.clusterId || row.cluster_id || '';
+    if (!clusterId) continue;
+    const cluster = clusters.get(clusterId) || {
+      id: clusterId,
+      providerFaceId: row.providerFaceId || row.provider_face_id || '',
+      submissionIds: []
+    };
+    const submissionId = row.submissionId || row.submission_id || '';
+    if (submissionId && !cluster.submissionIds.includes(submissionId)) cluster.submissionIds.push(submissionId);
+    clusters.set(clusterId, cluster);
+  }
+
+  await env.MOMENTS_DB.prepare('DELETE FROM event_face_clusters WHERE event_id = ?').bind(eventId).run();
+  const now = new Date().toISOString();
+  for (const cluster of clusters.values()) {
+    await env.MOMENTS_DB.prepare(`
+      INSERT INTO event_face_clusters (
+        id, event_id, provider, representative_face_id, representative_submission_id,
+        source_submission_ids, face_count, status, face_signature_version, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, ?)
+    `).bind(
+      cluster.id,
+      eventId,
+      provider,
+      cluster.providerFaceId,
+      cluster.submissionIds[0] || '',
+      JSON.stringify(cluster.submissionIds),
+      cluster.submissionIds.length,
+      GROUP_HERO_FACE_DEDUP_VERSION,
+      now,
+      now
+    ).run();
+  }
+}
+
+async function storeGroupHeroSourceDecisions(env, eventId, decisions) {
+  if (!decisions.length) return;
+  await env.MOMENTS_DB.prepare('DELETE FROM event_group_hero_source_decisions WHERE event_id = ?').bind(eventId).run();
+  const now = new Date().toISOString();
+  for (const decision of decisions) {
+    await env.MOMENTS_DB.prepare(`
+      INSERT INTO event_group_hero_source_decisions (
+        event_id, submission_id, decision, reason, cluster_ids, new_cluster_ids,
+        duplicate_cluster_ids, guest_key, score, created_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      eventId,
+      decision.submissionId,
+      decision.decision,
+      decision.reason,
+      JSON.stringify(decision.clusterIds || []),
+      JSON.stringify(decision.newClusterIds || []),
+      JSON.stringify(decision.duplicateClusterIds || []),
+      decision.guestKey || '',
+      Number(decision.score || 0),
+      now
+    ).run();
+  }
+}
+
+async function findBestKnownFaceMatch(env, collectionId, providerFaceId, knownFaces) {
+  const matches = await searchAwsRekognitionFaces(env, collectionId, providerFaceId);
+  let best = { clusterId: '', confidence: 0 };
+  for (const match of matches) {
+    const faceId = cleanText(match?.Face?.FaceId || '', 120);
+    const similarity = Number(match?.Similarity || 0);
+    if (!faceId || faceId === providerFaceId || similarity < getGroupHeroFaceMatchThreshold(env)) continue;
+    const known = knownFaces.find((face) => face.providerFaceId === faceId);
+    if (known && similarity > best.confidence) {
+      best = { clusterId: known.clusterId, confidence: similarity };
+    }
+  }
+  return best;
+}
+
+async function createGroupHeroFaceClusterId(eventId, providerFaceId) {
+  const hash = await sha256Hex(`${eventId}:${providerFaceId}:${GROUP_HERO_FACE_DEDUP_VERSION}`);
+  return `face-${hash.slice(0, 24)}`;
+}
+
+function isGroupHeroFaceDedupeEnabled(env) {
+  return String(env.GROUP_HERO_FACE_DEDUP_ENABLED || 'true').toLowerCase() !== 'false';
+}
+
+function getGroupHeroFaceProvider(env) {
+  return cleanText(env.GROUP_HERO_FACE_PROVIDER || '', 40) || GROUP_HERO_FACE_PROVIDER_DEFAULT;
+}
+
+function getGroupHeroFaceMatchThreshold(env) {
+  const value = Number(env.GROUP_HERO_FACE_MATCH_THRESHOLD || GROUP_HERO_FACE_MATCH_THRESHOLD);
+  return Number.isFinite(value) ? Math.max(80, Math.min(value, 99.9)) : GROUP_HERO_FACE_MATCH_THRESHOLD;
+}
+
+function hasGroupHeroFaceProviderConfig(env) {
+  if (getGroupHeroFaceProvider(env) !== 'aws-rekognition') return false;
+  return Boolean(getAwsRekognitionRegion(env) && getAwsAccessKeyId(env) && getAwsSecretAccessKey(env));
+}
+
+function getAwsRekognitionRegion(env) {
+  return cleanText(env.AWS_REGION || env.AWS_REKOGNITION_REGION || '', 80);
+}
+
+function getAwsAccessKeyId(env) {
+  return cleanText(env.AWS_ACCESS_KEY_ID || env.AWS_REKOGNITION_ACCESS_KEY_ID || '', 200);
+}
+
+function getAwsSecretAccessKey(env) {
+  return cleanText(env.AWS_SECRET_ACCESS_KEY || env.AWS_REKOGNITION_SECRET_ACCESS_KEY || '', 300);
+}
+
+function getAwsSessionToken(env) {
+  return cleanText(env.AWS_SESSION_TOKEN || env.AWS_REKOGNITION_SESSION_TOKEN || '', 600);
+}
+
+function getAwsRekognitionCollectionId(env, eventId) {
+  const prefix = cleanText(env.AWS_REKOGNITION_COLLECTION_PREFIX || 'wallflower-moments', 60)
+    .replace(/[^A-Za-z0-9_.-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'wallflower-moments';
+  const cleanEventId = cleanText(eventId, 80).replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '') || 'event';
+  return `${prefix}-${cleanEventId}`.slice(0, 255);
+}
+
+async function ensureAwsRekognitionFaceCollection(env, collectionId) {
+  try {
+    await callAwsRekognition(env, 'RekognitionService.CreateCollection', { CollectionId: collectionId });
+  } catch (error) {
+    if (!String(error.message || '').includes('ResourceAlreadyExistsException')) throw error;
+  }
+}
+
+async function deleteAwsRekognitionFaceCollectionForEvent(env, eventId) {
+  if (!hasGroupHeroFaceProviderConfig(env)) return;
+  try {
+    await callAwsRekognition(env, 'RekognitionService.DeleteCollection', {
+      CollectionId: getAwsRekognitionCollectionId(env, eventId)
+    });
+  } catch (error) {
+    if (!String(error.message || '').includes('ResourceNotFoundException')) {
+      console.error('AWS Rekognition collection delete failed', eventId, String(error.message || error));
+    }
+  }
+}
+
+async function indexAwsRekognitionFaces(env, collectionId, submissionId, bytes) {
+  const payload = await callAwsRekognition(env, 'RekognitionService.IndexFaces', {
+    CollectionId: collectionId,
+    Image: { Bytes: base64EncodeBytes(bytes) },
+    ExternalImageId: cleanText(submissionId, 80).replace(/[^A-Za-z0-9_.:-]+/g, '_').slice(0, 255),
+    MaxFaces: GROUP_HERO_FACE_MAX_FACES,
+    QualityFilter: 'AUTO',
+    DetectionAttributes: ['DEFAULT']
+  });
+  return Array.isArray(payload.FaceRecords) ? payload.FaceRecords : [];
+}
+
+async function searchAwsRekognitionFaces(env, collectionId, providerFaceId) {
+  const payload = await callAwsRekognition(env, 'RekognitionService.SearchFaces', {
+    CollectionId: collectionId,
+    FaceId: providerFaceId,
+    FaceMatchThreshold: GROUP_HERO_FACE_SOFT_MATCH_THRESHOLD,
+    MaxFaces: 10
+  });
+  return Array.isArray(payload.FaceMatches) ? payload.FaceMatches : [];
+}
+
+async function callAwsRekognition(env, target, payload) {
+  const region = getAwsRekognitionRegion(env);
+  const host = `rekognition.${region}.amazonaws.com`;
+  const body = JSON.stringify(payload || {});
+  const now = new Date();
+  const amzDate = toAwsAmzDate(now);
+  const dateStamp = amzDate.slice(0, 8);
+  const headers = {
+    'content-type': 'application/x-amz-json-1.1',
+    host,
+    'x-amz-date': amzDate,
+    'x-amz-target': target
+  };
+  const sessionToken = getAwsSessionToken(env);
+  if (sessionToken) headers['x-amz-security-token'] = sessionToken;
+
+  const authorization = await signAwsRequest(env, {
+    method: 'POST',
+    canonicalUri: '/',
+    body,
+    headers,
+    dateStamp,
+    amzDate,
+    region,
+    service: 'rekognition'
+  });
+
+  const response = await fetch(`https://${host}/`, {
+    method: 'POST',
+    headers: {
+      ...headers,
+      Authorization: authorization
+    },
+    body
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const type = data.__type || data.code || `AWS ${response.status}`;
+    const message = data.Message || data.message || data.Message_ || `Rekognition request failed with status ${response.status}.`;
+    throw new Error(`${type}: ${message}`);
+  }
+  return data;
+}
+
+async function signAwsRequest(env, request) {
+  const signedHeaderNames = Object.keys(request.headers).sort();
+  const canonicalHeaders = signedHeaderNames.map((name) => `${name}:${String(request.headers[name]).trim()}\n`).join('');
+  const signedHeaders = signedHeaderNames.join(';');
+  const payloadHash = await sha256Hex(request.body);
+  const canonicalRequest = [
+    request.method,
+    request.canonicalUri,
+    '',
+    canonicalHeaders,
+    signedHeaders,
+    payloadHash
+  ].join('\n');
+  const credentialScope = `${request.dateStamp}/${request.region}/${request.service}/aws4_request`;
+  const stringToSign = [
+    'AWS4-HMAC-SHA256',
+    request.amzDate,
+    credentialScope,
+    await sha256Hex(canonicalRequest)
+  ].join('\n');
+  const signature = bytesToHex(await getAwsSignatureKey(getAwsSecretAccessKey(env), request.dateStamp, request.region, request.service, stringToSign));
+  return `AWS4-HMAC-SHA256 Credential=${getAwsAccessKeyId(env)}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+}
+
+async function getAwsSignatureKey(secretKey, dateStamp, regionName, serviceName, stringToSign) {
+  const encoder = new TextEncoder();
+  const dateKey = await hmacSha256Bytes(encoder.encode(`AWS4${secretKey}`), dateStamp);
+  const dateRegionKey = await hmacSha256Bytes(dateKey, regionName);
+  const dateRegionServiceKey = await hmacSha256Bytes(dateRegionKey, serviceName);
+  const signingKey = await hmacSha256Bytes(dateRegionServiceKey, 'aws4_request');
+  return hmacSha256Bytes(signingKey, stringToSign);
+}
+
+async function hmacSha256Bytes(keyBytes, value) {
+  const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(value));
+  return new Uint8Array(signature);
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function toAwsAmzDate(date) {
+  return date.toISOString().replace(/[:-]|\.\d{3}/g, '');
 }
 
 async function storeEventGroupHeroState(env, state) {
@@ -4895,8 +5458,13 @@ async function deleteAdminEvent(request, env, corsHeaders, eventId) {
     WHERE active_event_id = ?
   `).bind(now, eventId).run();
   await env.MOMENTS_DB.prepare('DELETE FROM time_capsule_items WHERE event_id = ?').bind(eventId).run();
+  await env.MOMENTS_DB.prepare('DELETE FROM event_group_hero_source_decisions WHERE event_id = ?').bind(eventId).run();
+  await env.MOMENTS_DB.prepare('DELETE FROM event_face_clusters WHERE event_id = ?').bind(eventId).run();
+  await env.MOMENTS_DB.prepare('DELETE FROM submission_faces WHERE event_id = ?').bind(eventId).run();
+  await env.MOMENTS_DB.prepare('DELETE FROM submission_face_analyses WHERE event_id = ?').bind(eventId).run();
   await env.MOMENTS_DB.prepare('DELETE FROM submissions WHERE event_id = ?').bind(eventId).run();
   await env.MOMENTS_DB.prepare('DELETE FROM events WHERE id = ?').bind(eventId).run();
+  await deleteAwsRekognitionFaceCollectionForEvent(env, eventId);
 
   let deletedMedia = 0;
   const mediaErrors = [];

@@ -13,6 +13,17 @@ const BASE_ENV = {
   OPENAI_API_KEY: 'openai-test-key'
 };
 
+test('group hero face dedupe migration stores analyses, faces, clusters, and decisions', async () => {
+  const migration = await readFile(new URL('../migrations/0019_wallflower_group_hero_face_dedupe.sql', import.meta.url), 'utf8');
+
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS submission_face_analyses/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS submission_faces/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS event_face_clusters/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS event_group_hero_source_decisions/);
+  assert.match(migration, /face_signature_version INTEGER NOT NULL DEFAULT 0/);
+  assert.match(migration, /idx_submission_faces_event_cluster/);
+});
+
 test('guest upload stores AI artwork consent only when provided', async () => {
   const db = new GroupHeroFakeDb();
   const bucket = new FakeBucket();
@@ -389,6 +400,84 @@ test('group hero dedupes repeated guest names before generating artwork', async 
     assert.equal(db.groupHeroes[0].status, 'ready');
     assert.equal(db.groupHeroes[0].participant_count, 2);
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-linda-new', 'guest-mike']);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('group hero dedupes repeated face clusters before generating artwork', async () => {
+  const duplicateOld = guestSubmission({
+    id: 'guest-sam-old',
+    object_key: 'moments/event-hero/guest-sam-old.jpg',
+    objectKey: 'moments/event-hero/guest-sam-old.jpg',
+    guest_name: 'Sam at Cake',
+    guestName: 'Sam at Cake',
+    status: 'approved',
+    created_at: '2026-09-19T20:01:00.000Z',
+    createdAt: '2026-09-19T20:01:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:01:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:01:00.000Z'
+  });
+  const unique = guestSubmission({
+    id: 'guest-riley',
+    object_key: 'moments/event-hero/guest-riley.jpg',
+    objectKey: 'moments/event-hero/guest-riley.jpg',
+    guest_name: 'Riley',
+    guestName: 'Riley',
+    status: 'approved',
+    created_at: '2026-09-19T20:02:00.000Z',
+    createdAt: '2026-09-19T20:02:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:02:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:02:00.000Z'
+  });
+  const duplicateNew = guestSubmission({
+    id: 'guest-sam-new',
+    object_key: 'moments/event-hero/guest-sam-new.jpg',
+    objectKey: 'moments/event-hero/guest-sam-new.jpg',
+    guest_name: 'Samuel Dance Floor',
+    guestName: 'Samuel Dance Floor',
+    status: 'approved',
+    created_at: '2026-09-19T20:03:00.000Z',
+    createdAt: '2026-09-19T20:03:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:03:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:03:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [duplicateOld, unique, duplicateNew],
+    faces: [
+      faceRow({ submission_id: 'guest-sam-old', submissionId: 'guest-sam-old', cluster_id: 'cluster-sam', clusterId: 'cluster-sam' }),
+      faceRow({ submission_id: 'guest-sam-new', submissionId: 'guest-sam-new', cluster_id: 'cluster-sam', clusterId: 'cluster-sam' }),
+      faceRow({ submission_id: 'guest-riley', submissionId: 'guest-riley', cluster_id: 'cluster-riley', clusterId: 'cluster-riley' })
+    ]
+  });
+  const bucket = new FakeBucket([
+    [duplicateOld.object_key, 'source-sam-old'],
+    [unique.object_key, 'source-riley'],
+    [duplicateNew.object_key, 'source-sam-new']
+  ]);
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
+  const calls = mockOpenAi();
+
+  try {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://williamsonwallflowers.com',
+        Authorization: 'Bearer host-token'
+      }
+    }), env);
+
+    assert.equal(response.status, 202);
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].imageCount, 2);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-sam-new', 'guest-riley']);
+    const skipped = db.sourceDecisions.find((decision) => decision.submission_id === 'guest-sam-old');
+    assert.equal(skipped.decision, 'skipped');
+    assert.equal(skipped.reason, 'duplicate-face-cluster');
   } finally {
     restoreFetch();
   }
@@ -1547,6 +1636,38 @@ function readyHero(overrides = {}) {
   };
 }
 
+function faceRow(overrides = {}) {
+  return {
+    id: 'face-1',
+    event_id: 'event-hero',
+    eventId: 'event-hero',
+    submission_id: 'guest-approved',
+    submissionId: 'guest-approved',
+    face_index: 0,
+    faceIndex: 0,
+    provider: 'aws-rekognition',
+    provider_face_id: 'provider-face-1',
+    providerFaceId: 'provider-face-1',
+    cluster_id: 'cluster-1',
+    clusterId: 'cluster-1',
+    confidence: 99,
+    bounding_box_json: '{}',
+    boundingBoxJson: '{}',
+    quality_json: '{}',
+    qualityJson: '{}',
+    match_confidence: 99,
+    matchConfidence: 99,
+    status: 'ready',
+    face_signature_version: 1,
+    faceSignatureVersion: 1,
+    created_at: '2026-09-19T20:30:00.000Z',
+    createdAt: '2026-09-19T20:30:00.000Z',
+    updated_at: '2026-09-19T20:30:00.000Z',
+    updatedAt: '2026-09-19T20:30:00.000Z',
+    ...overrides
+  };
+}
+
 class FakeBucket {
   constructor(seed = []) {
     this.objects = new Map();
@@ -1659,6 +1780,10 @@ class GroupHeroFakeDb {
     }];
     this.submissions = seed.submissions ? seed.submissions.map((submission) => ({ ...submission })) : [];
     this.groupHeroes = seed.groupHeroes ? seed.groupHeroes.map((hero) => ({ ...hero })) : [];
+    this.faceAnalyses = seed.faceAnalyses ? seed.faceAnalyses.map((analysis) => ({ ...analysis })) : [];
+    this.faces = seed.faces ? seed.faces.map((face) => ({ ...face })) : [];
+    this.faceClusters = seed.faceClusters ? seed.faceClusters.map((cluster) => ({ ...cluster })) : [];
+    this.sourceDecisions = seed.sourceDecisions ? seed.sourceDecisions.map((decision) => ({ ...decision })) : [];
   }
 
   prepare(sql) {
@@ -1740,6 +1865,22 @@ class GroupHeroFakeStatement {
       };
     }
 
+    if (this.sql.includes('FROM submission_faces')) {
+      const eventId = this.params[0];
+      return {
+        results: this.db.faces
+          .filter((face) => (face.event_id || face.eventId) === eventId)
+          .filter((face) => (face.status || 'ready') === 'ready')
+          .filter((face) => Number(face.face_signature_version || face.faceSignatureVersion || 0) >= 1)
+          .map((face) => ({
+            ...face,
+            submissionId: face.submission_id || face.submissionId,
+            clusterId: face.cluster_id || face.clusterId,
+            providerFaceId: face.provider_face_id || face.providerFaceId
+          }))
+      };
+    }
+
     if (this.sql.includes('FROM submissions') && this.sql.includes('ai_artwork_consent_at IS NOT NULL')) {
       const [eventId, limit] = this.params;
       const includesHostSources = this.sql.includes("source IN ('guest', 'host')");
@@ -1812,6 +1953,47 @@ class GroupHeroFakeStatement {
         count: 1,
         updatedAt: this.params[2]
       });
+    }
+
+    if (this.sql.includes('DELETE FROM event_group_hero_source_decisions')) {
+      this.db.sourceDecisions = this.db.sourceDecisions.filter((decision) => (decision.event_id || decision.eventId) !== this.params[0]);
+    }
+
+    if (this.sql.includes('INSERT INTO event_group_hero_source_decisions')) {
+      const [
+        eventId,
+        submissionId,
+        decision,
+        reason,
+        clusterIds,
+        newClusterIds,
+        duplicateClusterIds,
+        guestKey,
+        score,
+        createdAt
+      ] = this.params;
+      const row = {
+        event_id: eventId,
+        eventId,
+        submission_id: submissionId,
+        submissionId,
+        decision,
+        reason,
+        cluster_ids: clusterIds,
+        clusterIds,
+        new_cluster_ids: newClusterIds,
+        newClusterIds,
+        duplicate_cluster_ids: duplicateClusterIds,
+        duplicateClusterIds,
+        guest_key: guestKey,
+        guestKey,
+        score,
+        created_at: createdAt,
+        createdAt
+      };
+      const index = this.db.sourceDecisions.findIndex((item) => (item.event_id || item.eventId) === eventId && (item.submission_id || item.submissionId) === submissionId);
+      if (index >= 0) this.db.sourceDecisions[index] = row;
+      else this.db.sourceDecisions.push(row);
     }
 
     if (this.sql.includes('UPDATE rate_limits')) {
