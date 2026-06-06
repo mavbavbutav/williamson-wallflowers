@@ -2972,6 +2972,89 @@ textarea:focus-visible {
   white-space: pre-wrap;
 }
 
+.media-audit-panel {
+  scroll-margin-top: 1rem;
+}
+
+.media-audit-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.42fr) minmax(0, 1fr);
+  align-items: end;
+  gap: 0.75rem;
+}
+
+.media-audit-toolbar .row-actions {
+  justify-content: flex-end;
+}
+
+.media-audit-summary .empty-state.is-compact {
+  align-items: start;
+  border-radius: 8px;
+  padding: 0.85rem;
+  text-align: left;
+}
+
+.media-audit-stats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.media-audit-stat {
+  min-width: 0;
+  border: 1px solid rgba(222, 211, 200, 0.86);
+  border-radius: 8px;
+  padding: 0.72rem;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.media-audit-stat strong,
+.media-audit-stat span {
+  display: block;
+}
+
+.media-audit-stat strong {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.media-audit-stat span {
+  margin-top: 0.28rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.media-audit-tags {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.media-audit-tag-group {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+  border: 1px solid rgba(222, 211, 200, 0.72);
+  border-radius: 8px;
+  padding: 0.7rem;
+  background: rgba(255, 250, 245, 0.58);
+}
+
+.media-audit-tag-group strong {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.media-audit-tag-group div,
+.media-audit-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .guide-step {
   display: grid;
   gap: 0.35rem;
@@ -3902,6 +3985,22 @@ tr:last-child td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .media-audit-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .media-audit-toolbar .row-actions {
+    justify-content: stretch;
+  }
+
+  .media-audit-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .media-audit-tags {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .setup-guide {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -4381,6 +4480,11 @@ tr:last-child td {
 
   .admin-page .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .media-audit-stats,
+  .media-audit-tags {
+    grid-template-columns: 1fr;
   }
 
   .attention-list,

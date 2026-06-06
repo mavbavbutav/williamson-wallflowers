@@ -42,6 +42,8 @@ const DEFAULT_EVENT_MAX_BYTES = 10 * 1024 * 1024 * 1024;
 const RETENTION_CLEANUP_LIMIT = 100;
 const STREAM_BACKFILL_DEFAULT_LIMIT = 10;
 const STREAM_BACKFILL_MAX_LIMIT = 25;
+const MEDIA_AUDIT_BACKFILL_DEFAULT_LIMIT = 10;
+const MEDIA_AUDIT_BACKFILL_MAX_LIMIT = 25;
 const GROUP_HERO_MAX_INPUTS = 16;
 const GROUP_HERO_SOURCE_LOOKBACK_LIMIT = GROUP_HERO_MAX_INPUTS * 4;
 const GROUP_HERO_TOKEN_TTL_SECONDS = 6 * 60 * 60;
@@ -50,6 +52,7 @@ const GROUP_HERO_FORCE_RATE_WINDOW_SECONDS = 60 * 60;
 const GROUP_HERO_GENERATION_STALE_SECONDS = 5 * 60;
 const GROUP_HERO_FAILED_RETRY_LIMIT = 3;
 const GROUP_HERO_DEFAULT_MODEL = 'gpt-image-1.5';
+const MEDIA_AUDIT_DEFAULT_MODEL = 'gpt-4.1-mini';
 const GROUP_HERO_PROMPT = buildGroupHeroPrompt('the event');
 const STANDARD_RETENTION_DAYS = 90;
 const TIME_CAPSULE_RETENTION_DAYS = 365;
@@ -64,6 +67,7 @@ const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/hei
 const GROUP_HERO_INPUT_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const GROUP_HERO_PHOTO_TYPES = new Set([...GROUP_HERO_INPUT_TYPES, 'image/heic', 'image/heif']);
 const GROUP_HERO_GENERIC_IMAGE_TYPES = new Set(['application/octet-stream', 'binary/octet-stream']);
+const MEDIA_AUDIT_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const THUMBNAIL_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const VIDEO_TYPES = new Set([
   'video/mp4',
@@ -285,7 +289,7 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
     }
 
     if (parts[0] === 'admin') {
-      return handleAdminApi(request, env, url, corsHeaders, parts.slice(1));
+      return handleAdminApi(request, env, url, corsHeaders, parts.slice(1), ctx);
     }
 
     return json({ ok: false, message: 'Moments route not found.' }, 404, corsHeaders);
@@ -2783,7 +2787,7 @@ function hostnameForOrigin(value) {
   }
 }
 
-async function handleAdminApi(request, env, url, corsHeaders, parts) {
+async function handleAdminApi(request, env, url, corsHeaders, parts, ctx) {
   if (!isAdminRequest(request, url, env)) {
     return json({ ok: false, message: 'Admin token is required.' }, 401, corsHeaders);
   }
@@ -2802,6 +2806,14 @@ async function handleAdminApi(request, env, url, corsHeaders, parts) {
 
   if (request.method === 'POST' && parts[0] === 'stream-backfill') {
     return runStreamBackfill(request, env, corsHeaders);
+  }
+
+  if (request.method === 'GET' && parts[0] === 'events' && parts[1] && parts[2] === 'media-audit') {
+    return getAdminMediaAudit(request, env, corsHeaders, parts[1]);
+  }
+
+  if (request.method === 'POST' && parts[0] === 'events' && parts[1] && parts[2] === 'media-audit' && parts[3] === 'backfill') {
+    return runAdminMediaAuditBackfill(request, env, corsHeaders, parts[1], ctx);
   }
 
   if (request.method === 'POST' && parts[0] === 'events') {
@@ -3066,6 +3078,1002 @@ function toStreamBackfillCandidateClient(row) {
     streamUidPresent: Boolean(row.streamUid || row.stream_uid),
     createdAt: row.createdAt || row.created_at || ''
   };
+}
+
+async function getAdminMediaAudit(request, env, corsHeaders, eventId) {
+  const event = await getEventById(env, eventId);
+
+  if (!event) {
+    return json({ ok: false, message: 'Event not found.' }, 404, corsHeaders);
+  }
+
+  const [profile, insights, pending] = await Promise.all([
+    getEventMediaProfileClient(env, event.id),
+    getEventMediaInsights(env, event.id, 50),
+    countMediaAuditCandidates(env, event.id, false)
+  ]);
+
+  return json({
+    ok: true,
+    event: toEventClient(event, env),
+    audit: {
+      profile,
+      pending,
+      insights: insights.map(toMediaInsightClient)
+    }
+  }, 200, corsHeaders);
+}
+
+async function runAdminMediaAuditBackfill(request, env, corsHeaders, eventId, ctx) {
+  const event = await getEventById(env, eventId);
+
+  if (!event) {
+    return json({ ok: false, message: 'Event not found.' }, 404, corsHeaders);
+  }
+
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+
+  const requestedLimit = Number(body.limit || MEDIA_AUDIT_BACKFILL_DEFAULT_LIMIT);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(requestedLimit, MEDIA_AUDIT_BACKFILL_MAX_LIMIT))
+    : MEDIA_AUDIT_BACKFILL_DEFAULT_LIMIT;
+  const retryFailed = normalizeBoolean(body.retryFailed);
+  const includeAi = normalizeBoolean(body.includeAi || body.includeVision);
+  const candidates = await getMediaAuditCandidates(env, event.id, limit, retryFailed);
+  const pending = await countMediaAuditCandidates(env, event.id, retryFailed);
+
+  const work = (async () => {
+    if (candidates.length) {
+      await backfillMediaAuditCandidates(env, candidates, { includeAi });
+    }
+    await refreshEventMediaProfile(env, event.id);
+  })();
+
+  if (ctx && typeof ctx.waitUntil === 'function') {
+    ctx.waitUntil(work);
+  } else {
+    await work;
+  }
+
+  return json({
+    ok: true,
+    status: candidates.length ? 'queued' : 'current',
+    eventId: event.id,
+    limit,
+    retryFailed,
+    includeAi,
+    pending,
+    queued: candidates.length,
+    candidates: candidates.map(toMediaAuditCandidateClient)
+  }, candidates.length ? 202 : 200, corsHeaders);
+}
+
+async function getMediaAuditCandidates(env, eventId, limit, retryFailed = false) {
+  const result = await env.MOMENTS_DB.prepare(`
+    SELECT
+      s.id,
+      s.event_id AS eventId,
+      s.media_type AS mediaType,
+      s.source,
+      s.object_key AS objectKey,
+      s.original_filename AS originalFilename,
+      s.mime_type AS mimeType,
+      s.size,
+      s.thumbnail_object_key AS thumbnailObjectKey,
+      s.thumbnail_mime_type AS thumbnailMimeType,
+      s.thumbnail_size AS thumbnailSize,
+      s.ai_artwork_consent_at AS aiArtworkConsentAt,
+      s.status,
+      s.deleted_at AS deletedAt,
+      s.created_at AS createdAt,
+      s.updated_at AS updatedAt
+    FROM submissions s
+    LEFT JOIN submission_media_insights i ON i.submission_id = s.id
+    WHERE s.event_id = ?
+      AND s.status = 'approved'
+      AND s.deleted_at IS NULL
+      AND (
+        (s.media_type = 'photo' AND s.object_key IS NOT NULL)
+        OR (s.media_type = 'video' AND s.thumbnail_object_key IS NOT NULL)
+      )
+      AND (
+        i.submission_id IS NULL
+        OR i.status = 'pending'
+        OR (? = 1 AND i.status = 'failed')
+      )
+    ORDER BY s.created_at ASC
+    LIMIT ?
+  `).bind(eventId, retryFailed ? 1 : 0, limit).all();
+
+  return result.results || [];
+}
+
+async function countMediaAuditCandidates(env, eventId, retryFailed = false) {
+  const row = await env.MOMENTS_DB.prepare(`
+    SELECT COUNT(*) AS count
+    FROM submissions s
+    LEFT JOIN submission_media_insights i ON i.submission_id = s.id
+    WHERE s.event_id = ?
+      AND s.status = 'approved'
+      AND s.deleted_at IS NULL
+      AND (
+        (s.media_type = 'photo' AND s.object_key IS NOT NULL)
+        OR (s.media_type = 'video' AND s.thumbnail_object_key IS NOT NULL)
+      )
+      AND (
+        i.submission_id IS NULL
+        OR i.status = 'pending'
+        OR (? = 1 AND i.status = 'failed')
+      )
+  `).bind(eventId, retryFailed ? 1 : 0).first();
+
+  return Number(row?.count || 0);
+}
+
+async function backfillMediaAuditCandidates(env, candidates, options = {}) {
+  const results = [];
+
+  for (const candidate of candidates) {
+    const now = new Date().toISOString();
+    try {
+      const insight = await analyzeSubmissionMedia(env, candidate, options);
+      await storeSubmissionMediaInsight(env, {
+        ...insight,
+        createdAt: now,
+        updatedAt: now,
+        analyzedAt: insight.analyzedAt || now
+      });
+      results.push({ id: candidate.id, status: insight.status });
+    } catch (error) {
+      await storeSubmissionMediaInsight(env, {
+        submissionId: candidate.id,
+        eventId: candidate.eventId || candidate.event_id,
+        status: 'failed',
+        sourceKind: getMediaAuditSource(candidate).sourceKind,
+        sourceObjectKey: getMediaAuditSource(candidate).objectKey,
+        mimeType: getMediaAuditSource(candidate).mimeType,
+        format: '',
+        size: Number(candidate.size || 0),
+        width: 0,
+        height: 0,
+        orientation: '',
+        qualityScore: 0,
+        visionStatus: 'failed',
+        visionModel: '',
+        peopleCount: null,
+        faceCount: null,
+        dominantColors: [],
+        sceneTags: [],
+        lightingTags: [],
+        compositionTags: [],
+        backgroundCues: [],
+        visibleText: '',
+        summary: '',
+        skipReason: '',
+        errorMessage: cleanText(error.message || error, 500),
+        analyzedAt: now,
+        createdAt: now,
+        updatedAt: now
+      });
+      results.push({ id: candidate.id, status: 'failed' });
+    }
+  }
+
+  return results;
+}
+
+async function analyzeSubmissionMedia(env, submission, options = {}) {
+  const eventId = submission.eventId || submission.event_id;
+  const submissionId = submission.id;
+  const source = getMediaAuditSource(submission);
+
+  if (!source.objectKey) {
+    return skippedMediaInsight(submission, source, 'missing-source-object');
+  }
+
+  const object = await env.MOMENTS_BUCKET.get(source.objectKey);
+  if (!object) {
+    return skippedMediaInsight(submission, source, 'missing-r2-object');
+  }
+
+  const bytes = new Uint8Array(await object.arrayBuffer());
+  const detected = inspectImageBytes(bytes, source.mimeType, source.objectKey || source.originalFilename);
+  const qualityScore = scoreMediaAuditImage(detected, bytes.byteLength);
+  let vision = {
+    status: options.includeAi ? 'not_allowed' : 'not_requested',
+    model: '',
+    peopleCount: null,
+    faceCount: null,
+    dominantColors: [],
+    sceneTags: [],
+    lightingTags: [],
+    compositionTags: [],
+    backgroundCues: [],
+    visibleText: '',
+    summary: ''
+  };
+
+  if (options.includeAi) {
+    vision = await maybeRunMediaAuditVision(env, submission, bytes, detected.mimeType || source.mimeType);
+  }
+
+  return {
+    submissionId,
+    eventId,
+    status: 'analyzed',
+    sourceKind: source.sourceKind,
+    sourceObjectKey: source.objectKey,
+    mimeType: detected.mimeType || source.mimeType,
+    format: detected.format,
+    size: bytes.byteLength,
+    width: detected.width,
+    height: detected.height,
+    orientation: getMediaOrientation(detected.width, detected.height),
+    qualityScore,
+    visionStatus: vision.status,
+    visionModel: vision.model,
+    peopleCount: vision.peopleCount,
+    faceCount: vision.faceCount,
+    dominantColors: vision.dominantColors,
+    sceneTags: vision.sceneTags,
+    lightingTags: vision.lightingTags,
+    compositionTags: vision.compositionTags,
+    backgroundCues: vision.backgroundCues,
+    visibleText: vision.visibleText,
+    summary: vision.summary,
+    skipReason: detected.format ? '' : 'unsupported-or-unknown-image-format',
+    errorMessage: vision.errorMessage || '',
+    analyzedAt: new Date().toISOString()
+  };
+}
+
+function getMediaAuditSource(submission) {
+  const mediaType = submission.mediaType || submission.media_type || '';
+  if (mediaType === 'video') {
+    return {
+      sourceKind: 'video_thumbnail',
+      objectKey: submission.thumbnailObjectKey || submission.thumbnail_object_key || '',
+      mimeType: getBaseMimeType(submission.thumbnailMimeType || submission.thumbnail_mime_type || ''),
+      originalFilename: submission.thumbnailObjectKey || submission.thumbnail_object_key || ''
+    };
+  }
+
+  return {
+    sourceKind: mediaType === 'photo' ? 'photo' : mediaType || 'unknown',
+    objectKey: submission.objectKey || submission.object_key || '',
+    mimeType: getBaseMimeType(submission.mimeType || submission.mime_type || ''),
+    originalFilename: submission.originalFilename || submission.original_filename || ''
+  };
+}
+
+function skippedMediaInsight(submission, source, reason) {
+  return {
+    submissionId: submission.id,
+    eventId: submission.eventId || submission.event_id,
+    status: 'skipped',
+    sourceKind: source.sourceKind,
+    sourceObjectKey: source.objectKey || '',
+    mimeType: source.mimeType || '',
+    format: '',
+    size: 0,
+    width: 0,
+    height: 0,
+    orientation: '',
+    qualityScore: 0,
+    visionStatus: 'not_requested',
+    visionModel: '',
+    peopleCount: null,
+    faceCount: null,
+    dominantColors: [],
+    sceneTags: [],
+    lightingTags: [],
+    compositionTags: [],
+    backgroundCues: [],
+    visibleText: '',
+    summary: '',
+    skipReason: reason,
+    errorMessage: '',
+    analyzedAt: new Date().toISOString()
+  };
+}
+
+async function maybeRunMediaAuditVision(env, submission, bytes, mimeType) {
+  if (!isMediaAuditAiAllowed(submission)) {
+    return emptyVisionAudit('not_allowed');
+  }
+
+  const baseMimeType = getBaseMimeType(mimeType);
+  if (!MEDIA_AUDIT_IMAGE_TYPES.has(baseMimeType)) {
+    return emptyVisionAudit('unsupported_format');
+  }
+
+  const apiKey = getOpenAiApiKey(env);
+  if (!apiKey) {
+    return emptyVisionAudit('unavailable');
+  }
+
+  try {
+    return await requestOpenAiMediaAudit(env, apiKey, bytes, baseMimeType);
+  } catch (error) {
+    return {
+      ...emptyVisionAudit('failed'),
+      errorMessage: cleanText(error.message || error, 500)
+    };
+  }
+}
+
+function isMediaAuditAiAllowed(submission) {
+  const source = submission.source || 'guest';
+  if (source === 'host') return true;
+  return Boolean(submission.aiArtworkConsentAt || submission.ai_artwork_consent_at);
+}
+
+function emptyVisionAudit(status) {
+  return {
+    status,
+    model: '',
+    peopleCount: null,
+    faceCount: null,
+    dominantColors: [],
+    sceneTags: [],
+    lightingTags: [],
+    compositionTags: [],
+    backgroundCues: [],
+    visibleText: '',
+    summary: '',
+    errorMessage: ''
+  };
+}
+
+async function requestOpenAiMediaAudit(env, apiKey, bytes, mimeType) {
+  const model = getOpenAiMediaAuditModel(env);
+  const prompt = [
+    'Analyze this private event upload for aggregate event styling and artwork planning.',
+    'Do not identify people, infer names, exact addresses, sensitive traits, or relationships.',
+    'Return compact JSON only with these keys:',
+    'people_count, face_count, dominant_colors, scene_tags, lighting_tags, composition_tags, background_cues, visible_text, summary.',
+    'Use short lowercase tags. If readable text appears, summarize only event-signage-level text and ignore private messages.'
+  ].join(' ');
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model,
+      input: [{
+        role: 'user',
+        content: [
+          { type: 'input_text', text: prompt },
+          {
+            type: 'input_image',
+            image_url: `data:${mimeType};base64,${base64EncodeBytes(bytes)}`,
+            detail: 'low'
+          }
+        ]
+      }]
+    })
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = payload?.error?.message || `OpenAI media audit failed with status ${response.status}.`;
+    throw new Error(cleanText(message, 500));
+  }
+
+  const outputText = getResponsesOutputText(payload);
+  const parsed = parseJsonObject(outputText);
+  return {
+    status: 'ready',
+    model,
+    peopleCount: normalizeOptionalInteger(parsed.people_count),
+    faceCount: normalizeOptionalInteger(parsed.face_count),
+    dominantColors: normalizeTagList(parsed.dominant_colors, 8),
+    sceneTags: normalizeTagList(parsed.scene_tags, 10),
+    lightingTags: normalizeTagList(parsed.lighting_tags, 8),
+    compositionTags: normalizeTagList(parsed.composition_tags, 8),
+    backgroundCues: normalizeTagList(parsed.background_cues, 8),
+    visibleText: cleanText(parsed.visible_text, 160),
+    summary: cleanText(parsed.summary, 220),
+    errorMessage: ''
+  };
+}
+
+function getOpenAiMediaAuditModel(env) {
+  return cleanText(env.OPENAI_MEDIA_AUDIT_MODEL || '', 80) || MEDIA_AUDIT_DEFAULT_MODEL;
+}
+
+function getResponsesOutputText(payload) {
+  if (typeof payload?.output_text === 'string') return payload.output_text;
+  const parts = [];
+  for (const item of payload?.output || []) {
+    for (const content of item?.content || []) {
+      if (typeof content?.text === 'string') parts.push(content.text);
+      if (typeof content?.output_text === 'string') parts.push(content.output_text);
+    }
+  }
+  return parts.join('\n').trim();
+}
+
+function parseJsonObject(value) {
+  const raw = String(value || '').trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      try {
+        const parsed = JSON.parse(raw.slice(start, end + 1));
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+  }
+  return {};
+}
+
+function inspectImageBytes(bytes, mimeType = '', filename = '') {
+  const format = detectImageFormat(bytes, mimeType, filename);
+  const dimensions = getImageDimensions(bytes, format);
+  return {
+    format,
+    mimeType: formatToMimeType(format) || getBaseMimeType(mimeType),
+    width: dimensions.width,
+    height: dimensions.height
+  };
+}
+
+function detectImageFormat(bytes, mimeType = '', filename = '') {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'png';
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpeg';
+  if (bytes.length >= 12 && asciiBytes(bytes, 0, 4) === 'RIFF' && asciiBytes(bytes, 8, 4) === 'WEBP') return 'webp';
+  if (bytes.length >= 6 && (asciiBytes(bytes, 0, 6) === 'GIF87a' || asciiBytes(bytes, 0, 6) === 'GIF89a')) return 'gif';
+
+  const baseMimeType = getBaseMimeType(mimeType);
+  if (baseMimeType === 'image/png') return 'png';
+  if (baseMimeType === 'image/jpeg') return 'jpeg';
+  if (baseMimeType === 'image/webp') return 'webp';
+  if (baseMimeType === 'image/gif') return 'gif';
+
+  const extension = getFileExtension(filename);
+  if (extension === 'png') return 'png';
+  if (extension === 'jpg' || extension === 'jpeg') return 'jpeg';
+  if (extension === 'webp') return 'webp';
+  if (extension === 'gif') return 'gif';
+  if (extension === 'heic' || extension === 'heif') return 'heic';
+  return '';
+}
+
+function getImageDimensions(bytes, format) {
+  if (format === 'png' && bytes.length >= 24) {
+    return { width: readUint32BE(bytes, 16), height: readUint32BE(bytes, 20) };
+  }
+  if (format === 'gif' && bytes.length >= 10) {
+    return { width: readUint16LE(bytes, 6), height: readUint16LE(bytes, 8) };
+  }
+  if (format === 'jpeg') {
+    return getJpegDimensions(bytes);
+  }
+  if (format === 'webp') {
+    return getWebpDimensions(bytes);
+  }
+  return { width: 0, height: 0 };
+}
+
+function getJpegDimensions(bytes) {
+  let offset = 2;
+  while (offset + 9 < bytes.length) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    const marker = bytes[offset + 1];
+    offset += 2;
+    if (marker === 0xd8 || marker === 0x01) continue;
+    if (marker === 0xd9 || marker === 0xda) break;
+    if (offset + 2 > bytes.length) break;
+
+    const length = readUint16BE(bytes, offset);
+    if (length < 2 || offset + length > bytes.length) break;
+
+    if (
+      (marker >= 0xc0 && marker <= 0xc3) ||
+      (marker >= 0xc5 && marker <= 0xc7) ||
+      (marker >= 0xc9 && marker <= 0xcb) ||
+      (marker >= 0xcd && marker <= 0xcf)
+    ) {
+      return {
+        height: readUint16BE(bytes, offset + 3),
+        width: readUint16BE(bytes, offset + 5)
+      };
+    }
+
+    offset += length;
+  }
+  return { width: 0, height: 0 };
+}
+
+function getWebpDimensions(bytes) {
+  const chunk = asciiBytes(bytes, 12, 4);
+  if (chunk === 'VP8X' && bytes.length >= 30) {
+    return {
+      width: 1 + readUint24LE(bytes, 24),
+      height: 1 + readUint24LE(bytes, 27)
+    };
+  }
+  if (chunk === 'VP8L' && bytes.length >= 25 && bytes[20] === 0x2f) {
+    const bits = bytes[21] | (bytes[22] << 8) | (bytes[23] << 16) | (bytes[24] << 24);
+    return {
+      width: 1 + (bits & 0x3fff),
+      height: 1 + ((bits >> 14) & 0x3fff)
+    };
+  }
+  if (chunk === 'VP8 ' && bytes.length >= 30) {
+    return {
+      width: readUint16LE(bytes, 26) & 0x3fff,
+      height: readUint16LE(bytes, 28) & 0x3fff
+    };
+  }
+  return { width: 0, height: 0 };
+}
+
+function scoreMediaAuditImage(details, size) {
+  const width = Number(details.width || 0);
+  const height = Number(details.height || 0);
+  if (!width || !height) return 0.15;
+
+  const shortest = Math.min(width, height);
+  const longest = Math.max(width, height);
+  const megapixels = (width * height) / 1000000;
+  let score = 0.35;
+  if (shortest >= 512) score += 0.2;
+  if (shortest >= 900) score += 0.15;
+  if (megapixels >= 1) score += 0.15;
+  if (megapixels >= 3) score += 0.1;
+  if (longest / Math.max(shortest, 1) <= 2.2) score += 0.05;
+  if (Number(size || 0) < 15000) score -= 0.1;
+  return Math.max(0, Math.min(1, Number(score.toFixed(2))));
+}
+
+function getMediaOrientation(width, height) {
+  const w = Number(width || 0);
+  const h = Number(height || 0);
+  if (!w || !h) return 'unknown';
+  if (Math.abs(w - h) <= Math.max(w, h) * 0.05) return 'square';
+  return w > h ? 'landscape' : 'portrait';
+}
+
+async function storeSubmissionMediaInsight(env, insight) {
+  const now = new Date().toISOString();
+  await env.MOMENTS_DB.prepare(`
+    INSERT INTO submission_media_insights (
+      submission_id, event_id, status, source_kind, source_object_key, mime_type,
+      format, size, width, height, orientation, quality_score, vision_status,
+      vision_model, people_count, face_count, dominant_colors, scene_tags,
+      lighting_tags, composition_tags, background_cues, visible_text, summary,
+      skip_reason, error_message, analyzed_at, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(submission_id) DO UPDATE SET
+      event_id = excluded.event_id,
+      status = excluded.status,
+      source_kind = excluded.source_kind,
+      source_object_key = excluded.source_object_key,
+      mime_type = excluded.mime_type,
+      format = excluded.format,
+      size = excluded.size,
+      width = excluded.width,
+      height = excluded.height,
+      orientation = excluded.orientation,
+      quality_score = excluded.quality_score,
+      vision_status = excluded.vision_status,
+      vision_model = excluded.vision_model,
+      people_count = excluded.people_count,
+      face_count = excluded.face_count,
+      dominant_colors = excluded.dominant_colors,
+      scene_tags = excluded.scene_tags,
+      lighting_tags = excluded.lighting_tags,
+      composition_tags = excluded.composition_tags,
+      background_cues = excluded.background_cues,
+      visible_text = excluded.visible_text,
+      summary = excluded.summary,
+      skip_reason = excluded.skip_reason,
+      error_message = excluded.error_message,
+      analyzed_at = excluded.analyzed_at,
+      updated_at = excluded.updated_at
+  `).bind(
+    insight.submissionId,
+    insight.eventId,
+    insight.status || 'analyzed',
+    insight.sourceKind || '',
+    insight.sourceObjectKey || '',
+    insight.mimeType || '',
+    insight.format || '',
+    Number(insight.size || 0),
+    Number(insight.width || 0),
+    Number(insight.height || 0),
+    insight.orientation || '',
+    Number(insight.qualityScore || 0),
+    insight.visionStatus || 'not_requested',
+    insight.visionModel || '',
+    insight.peopleCount === null || insight.peopleCount === undefined ? null : Number(insight.peopleCount),
+    insight.faceCount === null || insight.faceCount === undefined ? null : Number(insight.faceCount),
+    JSON.stringify(normalizeTagList(insight.dominantColors, 12)),
+    JSON.stringify(normalizeTagList(insight.sceneTags, 16)),
+    JSON.stringify(normalizeTagList(insight.lightingTags, 12)),
+    JSON.stringify(normalizeTagList(insight.compositionTags, 12)),
+    JSON.stringify(normalizeTagList(insight.backgroundCues, 12)),
+    cleanText(insight.visibleText, 160),
+    cleanText(insight.summary, 260),
+    cleanText(insight.skipReason, 120),
+    cleanText(insight.errorMessage, 500),
+    insight.analyzedAt || now,
+    insight.createdAt || now,
+    insight.updatedAt || now
+  ).run();
+}
+
+async function refreshEventMediaProfile(env, eventId) {
+  const rows = await getEventMediaInsightRows(env, eventId);
+  const profile = buildEventMediaProfile(eventId, rows);
+  await storeEventMediaProfile(env, profile);
+  return profile;
+}
+
+async function getEventMediaProfileClient(env, eventId) {
+  const existing = await getEventMediaProfile(env, eventId);
+  if (existing) return toMediaProfileClient(existing);
+  const rows = await getEventMediaInsightRows(env, eventId);
+  return buildEventMediaProfile(eventId, rows);
+}
+
+async function getEventMediaProfile(env, eventId) {
+  return env.MOMENTS_DB.prepare(`
+    SELECT
+      event_id AS eventId,
+      status,
+      submission_count AS submissionCount,
+      analyzed_count AS analyzedCount,
+      skipped_count AS skippedCount,
+      failed_count AS failedCount,
+      photo_count AS photoCount,
+      video_thumbnail_count AS videoThumbnailCount,
+      ai_analyzed_count AS aiAnalyzedCount,
+      people_count AS peopleCount,
+      face_count AS faceCount,
+      average_quality_score AS averageQualityScore,
+      dominant_colors AS dominantColors,
+      scene_tags AS sceneTags,
+      lighting_tags AS lightingTags,
+      composition_tags AS compositionTags,
+      background_cues AS backgroundCues,
+      profile_summary AS profileSummary,
+      generated_at AS generatedAt,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM event_media_profiles
+    WHERE event_id = ?
+  `).bind(eventId).first();
+}
+
+async function storeEventMediaProfile(env, profile) {
+  const now = new Date().toISOString();
+  await env.MOMENTS_DB.prepare(`
+    INSERT INTO event_media_profiles (
+      event_id, status, submission_count, analyzed_count, skipped_count, failed_count,
+      photo_count, video_thumbnail_count, ai_analyzed_count, people_count, face_count,
+      average_quality_score, dominant_colors, scene_tags, lighting_tags, composition_tags,
+      background_cues, profile_summary, generated_at, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(event_id) DO UPDATE SET
+      status = excluded.status,
+      submission_count = excluded.submission_count,
+      analyzed_count = excluded.analyzed_count,
+      skipped_count = excluded.skipped_count,
+      failed_count = excluded.failed_count,
+      photo_count = excluded.photo_count,
+      video_thumbnail_count = excluded.video_thumbnail_count,
+      ai_analyzed_count = excluded.ai_analyzed_count,
+      people_count = excluded.people_count,
+      face_count = excluded.face_count,
+      average_quality_score = excluded.average_quality_score,
+      dominant_colors = excluded.dominant_colors,
+      scene_tags = excluded.scene_tags,
+      lighting_tags = excluded.lighting_tags,
+      composition_tags = excluded.composition_tags,
+      background_cues = excluded.background_cues,
+      profile_summary = excluded.profile_summary,
+      generated_at = excluded.generated_at,
+      updated_at = excluded.updated_at
+  `).bind(
+    profile.eventId,
+    profile.status,
+    Number(profile.submissionCount || 0),
+    Number(profile.analyzedCount || 0),
+    Number(profile.skippedCount || 0),
+    Number(profile.failedCount || 0),
+    Number(profile.photoCount || 0),
+    Number(profile.videoThumbnailCount || 0),
+    Number(profile.aiAnalyzedCount || 0),
+    Number(profile.peopleCount || 0),
+    Number(profile.faceCount || 0),
+    Number(profile.averageQualityScore || 0),
+    JSON.stringify(normalizeTagList(profile.dominantColors, 12)),
+    JSON.stringify(normalizeTagList(profile.sceneTags, 16)),
+    JSON.stringify(normalizeTagList(profile.lightingTags, 12)),
+    JSON.stringify(normalizeTagList(profile.compositionTags, 12)),
+    JSON.stringify(normalizeTagList(profile.backgroundCues, 12)),
+    cleanText(profile.profileSummary, 360),
+    profile.generatedAt || now,
+    profile.createdAt || now,
+    profile.updatedAt || now
+  ).run();
+}
+
+async function getEventMediaInsightRows(env, eventId) {
+  const result = await env.MOMENTS_DB.prepare(`
+    SELECT
+      i.submission_id AS submissionId,
+      i.event_id AS eventId,
+      i.status,
+      i.source_kind AS sourceKind,
+      i.source_object_key AS sourceObjectKey,
+      i.mime_type AS mimeType,
+      i.format,
+      i.size,
+      i.width,
+      i.height,
+      i.orientation,
+      i.quality_score AS qualityScore,
+      i.vision_status AS visionStatus,
+      i.vision_model AS visionModel,
+      i.people_count AS peopleCount,
+      i.face_count AS faceCount,
+      i.dominant_colors AS dominantColors,
+      i.scene_tags AS sceneTags,
+      i.lighting_tags AS lightingTags,
+      i.composition_tags AS compositionTags,
+      i.background_cues AS backgroundCues,
+      i.visible_text AS visibleText,
+      i.summary,
+      i.skip_reason AS skipReason,
+      i.error_message AS errorMessage,
+      i.analyzed_at AS analyzedAt,
+      i.created_at AS createdAt,
+      i.updated_at AS updatedAt,
+      s.media_type AS mediaType,
+      s.source,
+      s.created_at AS submissionCreatedAt
+    FROM submission_media_insights i
+    INNER JOIN submissions s ON s.id = i.submission_id
+    WHERE i.event_id = ?
+      AND s.status = 'approved'
+      AND s.deleted_at IS NULL
+    ORDER BY i.updated_at DESC
+  `).bind(eventId).all();
+
+  return result.results || [];
+}
+
+async function getEventMediaInsights(env, eventId, limit = 50) {
+  const rows = await getEventMediaInsightRows(env, eventId);
+  return rows.slice(0, Math.max(1, Math.min(Number(limit) || 50, 100)));
+}
+
+function buildEventMediaProfile(eventId, rows) {
+  const analyzed = rows.filter((row) => row.status === 'analyzed');
+  const generatedAt = new Date().toISOString();
+  const averageQualityScore = analyzed.length
+    ? Number((analyzed.reduce((sum, row) => sum + Number(row.qualityScore || row.quality_score || 0), 0) / analyzed.length).toFixed(2))
+    : 0;
+  const peopleCount = rows.reduce((sum, row) => sum + Number(row.peopleCount ?? row.people_count ?? 0), 0);
+  const faceCount = rows.reduce((sum, row) => sum + Number(row.faceCount ?? row.face_count ?? 0), 0);
+  const sceneTags = topTags(rows, 'sceneTags', 'scene_tags', 8);
+  const lightingTags = topTags(rows, 'lightingTags', 'lighting_tags', 6);
+  const compositionTags = topTags(rows, 'compositionTags', 'composition_tags', 6);
+  const dominantColors = topTags(rows, 'dominantColors', 'dominant_colors', 6);
+  const backgroundCues = topTags(rows, 'backgroundCues', 'background_cues', 6);
+
+  return {
+    eventId,
+    status: rows.some((row) => row.status === 'failed') ? 'partial' : 'ready',
+    submissionCount: rows.length,
+    analyzedCount: analyzed.length,
+    skippedCount: rows.filter((row) => row.status === 'skipped').length,
+    failedCount: rows.filter((row) => row.status === 'failed').length,
+    photoCount: rows.filter((row) => row.sourceKind === 'photo' || row.source_kind === 'photo').length,
+    videoThumbnailCount: rows.filter((row) => row.sourceKind === 'video_thumbnail' || row.source_kind === 'video_thumbnail').length,
+    aiAnalyzedCount: rows.filter((row) => (row.visionStatus || row.vision_status) === 'ready').length,
+    peopleCount,
+    faceCount,
+    averageQualityScore,
+    dominantColors,
+    sceneTags,
+    lightingTags,
+    compositionTags,
+    backgroundCues,
+    profileSummary: buildMediaProfileSummary(rows.length, analyzed.length, sceneTags, lightingTags, dominantColors),
+    generatedAt,
+    createdAt: generatedAt,
+    updatedAt: generatedAt
+  };
+}
+
+function buildMediaProfileSummary(total, analyzed, sceneTags, lightingTags, dominantColors) {
+  if (!total) return 'No approved photo or video thumbnail media has been audited yet.';
+  const ingredients = [...sceneTags.slice(0, 3), ...lightingTags.slice(0, 2), ...dominantColors.slice(0, 2)].filter(Boolean);
+  const suffix = ingredients.length ? ` Key cues: ${ingredients.join(', ')}.` : '';
+  return `${analyzed} of ${total} approved visual moments have audit data.${suffix}`;
+}
+
+function toMediaProfileClient(row) {
+  return {
+    eventId: row.eventId || row.event_id,
+    status: row.status || 'empty',
+    submissionCount: Number(row.submissionCount || row.submission_count || 0),
+    analyzedCount: Number(row.analyzedCount || row.analyzed_count || 0),
+    skippedCount: Number(row.skippedCount || row.skipped_count || 0),
+    failedCount: Number(row.failedCount || row.failed_count || 0),
+    photoCount: Number(row.photoCount || row.photo_count || 0),
+    videoThumbnailCount: Number(row.videoThumbnailCount || row.video_thumbnail_count || 0),
+    aiAnalyzedCount: Number(row.aiAnalyzedCount || row.ai_analyzed_count || 0),
+    peopleCount: Number(row.peopleCount || row.people_count || 0),
+    faceCount: Number(row.faceCount || row.face_count || 0),
+    averageQualityScore: Number(row.averageQualityScore || row.average_quality_score || 0),
+    dominantColors: parseJsonArray(row.dominantColors || row.dominant_colors),
+    sceneTags: parseJsonArray(row.sceneTags || row.scene_tags),
+    lightingTags: parseJsonArray(row.lightingTags || row.lighting_tags),
+    compositionTags: parseJsonArray(row.compositionTags || row.composition_tags),
+    backgroundCues: parseJsonArray(row.backgroundCues || row.background_cues),
+    profileSummary: row.profileSummary || row.profile_summary || '',
+    generatedAt: row.generatedAt || row.generated_at || '',
+    updatedAt: row.updatedAt || row.updated_at || ''
+  };
+}
+
+function toMediaInsightClient(row) {
+  return {
+    submissionId: row.submissionId || row.submission_id,
+    eventId: row.eventId || row.event_id,
+    status: row.status,
+    source: row.source || 'guest',
+    sourceKind: row.sourceKind || row.source_kind || '',
+    mediaType: row.mediaType || row.media_type || '',
+    mimeType: row.mimeType || row.mime_type || '',
+    format: row.format || '',
+    size: Number(row.size || 0),
+    width: Number(row.width || 0),
+    height: Number(row.height || 0),
+    orientation: row.orientation || '',
+    qualityScore: Number(row.qualityScore || row.quality_score || 0),
+    visionStatus: row.visionStatus || row.vision_status || 'not_requested',
+    peopleCount: normalizeOptionalInteger(row.peopleCount ?? row.people_count),
+    faceCount: normalizeOptionalInteger(row.faceCount ?? row.face_count),
+    dominantColors: parseJsonArray(row.dominantColors || row.dominant_colors),
+    sceneTags: parseJsonArray(row.sceneTags || row.scene_tags),
+    lightingTags: parseJsonArray(row.lightingTags || row.lighting_tags),
+    compositionTags: parseJsonArray(row.compositionTags || row.composition_tags),
+    backgroundCues: parseJsonArray(row.backgroundCues || row.background_cues),
+    visibleText: row.visibleText || row.visible_text || '',
+    summary: row.summary || '',
+    skipReason: row.skipReason || row.skip_reason || '',
+    errorMessage: row.errorMessage || row.error_message || '',
+    analyzedAt: row.analyzedAt || row.analyzed_at || '',
+    updatedAt: row.updatedAt || row.updated_at || ''
+  };
+}
+
+function toMediaAuditCandidateClient(row) {
+  const source = getMediaAuditSource(row);
+  return {
+    id: row.id,
+    eventId: row.eventId || row.event_id,
+    mediaType: row.mediaType || row.media_type,
+    source: row.source || 'guest',
+    sourceKind: source.sourceKind,
+    aiEligible: isMediaAuditAiAllowed(row),
+    createdAt: row.createdAt || row.created_at || ''
+  };
+}
+
+function topTags(rows, camelKey, snakeKey, limit) {
+  const counts = new Map();
+  for (const row of rows) {
+    for (const tag of parseJsonArray(row[camelKey] || row[snakeKey])) {
+      counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, limit)
+    .map(([tag]) => tag);
+}
+
+function parseJsonArray(value) {
+  if (Array.isArray(value)) return normalizeTagList(value, 20);
+  try {
+    const parsed = JSON.parse(String(value || '[]'));
+    return normalizeTagList(parsed, 20);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeTagList(value, limit = 10) {
+  const source = Array.isArray(value) ? value : String(value || '').split(',');
+  const tags = [];
+  const seen = new Set();
+  for (const item of source) {
+    const tag = cleanText(item, 50).toLowerCase();
+    if (!tag || seen.has(tag)) continue;
+    seen.add(tag);
+    tags.push(tag);
+    if (tags.length >= limit) break;
+  }
+  return tags;
+}
+
+function normalizeOptionalInteger(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.round(number)) : null;
+}
+
+function asciiBytes(bytes, offset, length) {
+  if (offset + length > bytes.length) return '';
+  let value = '';
+  for (let index = offset; index < offset + length; index += 1) {
+    value += String.fromCharCode(bytes[index]);
+  }
+  return value;
+}
+
+function readUint16BE(bytes, offset) {
+  return ((bytes[offset] || 0) << 8) | (bytes[offset + 1] || 0);
+}
+
+function readUint16LE(bytes, offset) {
+  return (bytes[offset] || 0) | ((bytes[offset + 1] || 0) << 8);
+}
+
+function readUint24LE(bytes, offset) {
+  return (bytes[offset] || 0) | ((bytes[offset + 1] || 0) << 8) | ((bytes[offset + 2] || 0) << 16);
+}
+
+function readUint32BE(bytes, offset) {
+  return ((bytes[offset] || 0) * 0x1000000)
+    + ((bytes[offset + 1] || 0) << 16)
+    + ((bytes[offset + 2] || 0) << 8)
+    + (bytes[offset + 3] || 0);
+}
+
+function formatToMimeType(format) {
+  if (format === 'jpeg') return 'image/jpeg';
+  if (format === 'png') return 'image/png';
+  if (format === 'webp') return 'image/webp';
+  if (format === 'gif') return 'image/gif';
+  if (format === 'heic') return 'image/heic';
+  return '';
+}
+
+function base64EncodeBytes(bytes) {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(offset, offset + chunkSize));
+  }
+  return btoa(binary);
 }
 
 async function cleanExpiredMedia(env, limit = RETENTION_CLEANUP_LIMIT) {

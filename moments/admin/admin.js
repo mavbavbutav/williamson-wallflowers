@@ -17,6 +17,8 @@ let adminToken = getAdminToken();
 let events = [];
 let tags = [];
 let wallDevices = [];
+let mediaAuditEventId = "";
+let mediaAudit = null;
 
 init();
 
@@ -34,6 +36,10 @@ function init() {
   qs("#eventForm").addEventListener("submit", createEvent);
   qs("#eventEditForm").addEventListener("submit", updateSelectedEventDetails);
   qs("#editEventSelect").addEventListener("change", () => populateEventEditForm(qs("#editEventSelect").value));
+  qs("#mediaAuditEventSelect").addEventListener("change", () => loadMediaAudit(qs("#mediaAuditEventSelect").value));
+  qs("#mediaAuditRefreshButton").addEventListener("click", () => loadMediaAudit(qs("#mediaAuditEventSelect").value));
+  qs("#mediaAuditBackfillButton").addEventListener("click", () => runMediaAuditBackfill(false));
+  qs("#mediaAuditAiBackfillButton").addEventListener("click", () => runMediaAuditBackfill(true));
   qs("#tagForm").addEventListener("submit", createTag);
   qs("#assignTagForm").addEventListener("submit", assignTag);
   qs("#wallDeviceForm").addEventListener("submit", createWallDevice);
@@ -67,6 +73,8 @@ async function loadAdmin() {
     renderTags();
     renderWallDeviceForm();
     renderWallDevices();
+    renderMediaAuditForm();
+    await loadMediaAudit(mediaAuditEventId || qs("#mediaAuditEventSelect").value, { quiet: true });
     if (shouldFocusTitle) focusElement(qs("#adminTitle"));
   } catch (error) {
     qs("#authPanel").hidden = false;
@@ -464,6 +472,190 @@ function renderEvents() {
   qs("#eventsTable").innerHTML = rows || `<tr><td colspan="5">No events created yet.</td></tr>`;
   qs("#eventsCards").innerHTML = cards || `<div class="empty-state">No events created yet.</div>`;
   bindEventActions();
+}
+
+function renderMediaAuditForm() {
+  const select = qs("#mediaAuditEventSelect");
+  const hasEvents = events.length > 0;
+  const nextEventId = events.some((event) => event.id === mediaAuditEventId)
+    ? mediaAuditEventId
+    : events[0]?.id || "";
+  mediaAuditEventId = nextEventId;
+  select.innerHTML = hasEvents
+    ? events.map((event) => `<option value="${escapeAttribute(event.id)}">${escapeHtml(event.name)}</option>`).join("")
+    : `<option value="">No events created</option>`;
+  select.value = nextEventId;
+  select.disabled = !hasEvents;
+  qs("#mediaAuditRefreshButton").disabled = !hasEvents;
+  qs("#mediaAuditBackfillButton").disabled = !hasEvents;
+  qs("#mediaAuditAiBackfillButton").disabled = !hasEvents;
+
+  if (!hasEvents) {
+    mediaAudit = null;
+    renderMediaAudit();
+  }
+}
+
+async function loadMediaAudit(eventId, { quiet = false } = {}) {
+  if (!eventId) {
+    mediaAudit = null;
+    renderMediaAudit();
+    return;
+  }
+
+  mediaAuditEventId = eventId;
+  qs("#mediaAuditStatusLabel").textContent = quiet ? "Loading" : "Refreshing";
+
+  try {
+    const result = await adminRequest(`/admin/events/${encodeURIComponent(eventId)}/media-audit`);
+    mediaAudit = result.audit || null;
+    renderMediaAudit();
+  } catch (error) {
+    mediaAudit = null;
+    renderMediaAudit(error.message || "Could not load media audit.");
+    if (!quiet) showAdminNotice(error.message || "Could not load media audit.", "error");
+  }
+}
+
+async function runMediaAuditBackfill(includeAi) {
+  const eventId = qs("#mediaAuditEventSelect").value;
+  if (!eventId) {
+    showAdminNotice("Choose an event before running media audit.", "error");
+    return;
+  }
+
+  const button = includeAi ? qs("#mediaAuditAiBackfillButton") : qs("#mediaAuditBackfillButton");
+  try {
+    setButtonBusy(button, true, includeAi ? "Queuing AI..." : "Queuing audit...");
+    const result = await adminRequest(`/admin/events/${encodeURIComponent(eventId)}/media-audit/backfill`, {
+      method: "POST",
+      body: JSON.stringify({
+        limit: 25,
+        includeAi,
+        retryFailed: includeAi
+      })
+    });
+    showAdminNotice(`${includeAi ? "AI vision audit" : "Media audit"} queued ${result.queued || 0} of ${result.pending || 0} pending items.`, "success");
+    await loadMediaAudit(eventId, { quiet: true });
+    window.setTimeout(() => loadMediaAudit(eventId, { quiet: true }), 2200);
+  } catch (error) {
+    showAdminNotice(error.message || "Could not run media audit.", "error");
+  } finally {
+    setButtonBusy(button, false);
+  }
+}
+
+function renderMediaAudit(errorMessage = "") {
+  const profile = mediaAudit?.profile || {};
+  const insights = mediaAudit?.insights || [];
+  const pending = Number(mediaAudit?.pending || 0);
+
+  qs("#mediaAuditStatusLabel").textContent = errorMessage
+    ? "Error"
+    : profile.status
+    ? `${profile.status}${pending ? ` | ${pending} pending` : ""}`
+    : "No report";
+
+  qs("#mediaAuditSummary").innerHTML = errorMessage
+    ? `<div class="empty-state is-compact"><strong>Report unavailable.</strong><span>${escapeHtml(errorMessage)}</span></div>`
+    : `<div class="empty-state is-compact"><strong>${escapeHtml(profile.profileSummary || "No approved visual media has been audited yet.")}</strong><span>${escapeHtml(buildMediaAuditSubtext(profile, pending))}</span></div>`;
+
+  qs("#mediaAuditStats").innerHTML = renderMediaAuditStats(profile, pending);
+  qs("#mediaAuditTags").innerHTML = renderMediaAuditTagGroups(profile);
+  qs("#mediaAuditInsights").innerHTML = insights.length
+    ? insights.map(renderMediaAuditInsightRow).join("")
+    : `<tr><td colspan="4">No audited media yet. Run the audit for this event.</td></tr>`;
+  qs("#mediaAuditCards").innerHTML = insights.length
+    ? insights.map(renderMediaAuditCard).join("")
+    : `<div class="empty-state">No audited media yet. Run the audit for this event.</div>`;
+}
+
+function buildMediaAuditSubtext(profile, pending) {
+  const analyzed = Number(profile.analyzedCount || 0);
+  const total = Number(profile.submissionCount || 0);
+  const ai = Number(profile.aiAnalyzedCount || 0);
+  return `${analyzed}/${total} analyzed, ${ai} AI vision-analyzed, ${pending} pending.`;
+}
+
+function renderMediaAuditStats(profile, pending) {
+  const values = [
+    ["Analyzed", profile.analyzedCount || 0],
+    ["Photos", profile.photoCount || 0],
+    ["Video stills", profile.videoThumbnailCount || 0],
+    ["AI vision", profile.aiAnalyzedCount || 0],
+    ["Faces seen", profile.faceCount || 0],
+    ["Pending", pending]
+  ];
+  return values.map(([label, value]) => `
+    <div class="media-audit-stat">
+      <strong>${escapeHtml(value)}</strong>
+      <span>${escapeHtml(label)}</span>
+    </div>
+  `).join("");
+}
+
+function renderMediaAuditTagGroups(profile) {
+  const groups = [
+    ["Scene", profile.sceneTags],
+    ["Lighting", profile.lightingTags],
+    ["Colors", profile.dominantColors],
+    ["Composition", profile.compositionTags],
+    ["Background", profile.backgroundCues]
+  ];
+  return groups.map(([label, tags]) => `
+    <div class="media-audit-tag-group">
+      <strong>${escapeHtml(label)}</strong>
+      <div>${renderAuditPills(tags)}</div>
+    </div>
+  `).join("");
+}
+
+function renderMediaAuditInsightRow(insight) {
+  return `
+    <tr>
+      <td>
+        <strong>${escapeHtml(insight.submissionId)}</strong><br />
+        <span class="muted">${escapeHtml(`${insight.source || "guest"} ${insight.mediaType || insight.sourceKind || "media"}`)}</span>
+      </td>
+      <td>
+        <span class="status-pill">${escapeHtml(insight.format || "unknown")}</span>
+        <span class="status-pill">${escapeHtml(`${insight.width || 0}x${insight.height || 0}`)}</span>
+        <span class="status-pill">${escapeHtml(insight.orientation || "unknown")}</span>
+      </td>
+      <td>
+        <span class="status-pill">${escapeHtml(insight.visionStatus || "not_requested")}</span>
+        ${insight.faceCount !== null ? `<span class="status-pill">${escapeHtml(`${insight.faceCount} faces`)}</span>` : ""}
+      </td>
+      <td>${renderAuditPills([...(insight.sceneTags || []), ...(insight.lightingTags || [])])}</td>
+    </tr>
+  `;
+}
+
+function renderMediaAuditCard(insight) {
+  return `
+    <article class="admin-mobile-card">
+      <div class="mobile-card-heading">
+        <div>
+          <strong>${escapeHtml(insight.submissionId)}</strong>
+          <span>${escapeHtml(`${insight.source || "guest"} ${insight.mediaType || insight.sourceKind || "media"}`)}</span>
+        </div>
+        <span class="status-pill">${escapeHtml(insight.visionStatus || "not_requested")}</span>
+      </div>
+      <div class="button-row">
+        <span class="status-pill">${escapeHtml(insight.format || "unknown")}</span>
+        <span class="status-pill">${escapeHtml(`${insight.width || 0}x${insight.height || 0}`)}</span>
+        <span class="status-pill">${escapeHtml(insight.orientation || "unknown")}</span>
+      </div>
+      <div class="media-audit-card-tags">${renderAuditPills([...(insight.sceneTags || []), ...(insight.lightingTags || [])])}</div>
+    </article>
+  `;
+}
+
+function renderAuditPills(tags = []) {
+  const values = Array.isArray(tags) ? tags.filter(Boolean).slice(0, 8) : [];
+  return values.length
+    ? values.map((tag) => `<span class="status-pill">${escapeHtml(tag)}</span>`).join("")
+    : `<span class="muted">No tags yet</span>`;
 }
 
 function renderEventEditForm(selectedEventId = qs("#editEventSelect")?.value || "") {
@@ -1116,7 +1308,7 @@ function focusElement(element) {
 }
 
 function escapeHtml(value) {
-  return String(value || "").replace(/[&<>"']/g, (char) => ({
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
     "<": "&lt;",
     ">": "&gt;",
