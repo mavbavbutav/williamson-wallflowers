@@ -2788,7 +2788,13 @@ function hostnameForOrigin(value) {
 }
 
 async function handleAdminApi(request, env, url, corsHeaders, parts, ctx) {
-  if (!isAdminRequest(request, url, env)) {
+  const isMediaAuditRoute = parts[0] === 'events' && parts[1] && parts[2] === 'media-audit';
+  const isAdminAuthorized = isAdminRequest(request, url, env);
+  const isEventMediaAuditAuthorized = !isAdminAuthorized && isMediaAuditRoute
+    ? await isEventAdminMediaAuditRequest(request, env, url, parts[1])
+    : false;
+
+  if (!isAdminAuthorized && !isEventMediaAuditAuthorized) {
     return json({ ok: false, message: 'Admin token is required.' }, 401, corsHeaders);
   }
 
@@ -5841,6 +5847,18 @@ function isAdminRequest(request, url, env) {
   const token = headerToken || bearer || queryToken;
 
   return Boolean(env.MOMENTS_ADMIN_TOKEN && token && token === env.MOMENTS_ADMIN_TOKEN);
+}
+
+async function isEventAdminMediaAuditRequest(request, env, url, eventId) {
+  const headerToken = request.headers.get('X-Admin-Token') || '';
+  const auth = request.headers.get('Authorization') || '';
+  const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7) : '';
+  const queryToken = url.searchParams.get('adminToken') || '';
+  const token = headerToken || bearer || queryToken;
+
+  if (!token || !eventId) return false;
+  const event = await getEventById(env, eventId);
+  return Boolean(event?.adminToken && token === event.adminToken);
 }
 
 function getGuestAutoApprovalConfig(event) {

@@ -64,6 +64,58 @@ test('media audit backfill is admin-only and rejects host tokens', async () => {
   assert.equal(db.insights.length, 0);
 });
 
+test('event admin token can access only the scoped media audit endpoint', async () => {
+  const photo = submission({
+    id: 'photo-1',
+    object_key: 'moments/event-audit/photo-1.png',
+    mime_type: 'image/png',
+    size: pngBytes(320, 240).byteLength
+  });
+  const db = new MediaAuditFakeDb({ submissions: [photo] });
+  const env = envWithDb(db, new FakeBucket([[photo.object_key, pngBytes(320, 240)]]));
+  const waitUntil = [];
+
+  const overviewResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/admin/overview', {
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      'X-Admin-Token': 'event-admin-token'
+    }
+  }), env);
+  const backfillResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/admin/events/event-audit/media-audit/backfill', {
+    method: 'POST',
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      'X-Admin-Token': 'event-admin-token',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ limit: 1 })
+  }), env, { waitUntil: (work) => waitUntil.push(work) });
+
+  assert.equal(overviewResponse.status, 401);
+  assert.equal(backfillResponse.status, 202);
+  await drainWaitUntil(waitUntil);
+  assert.equal(db.insights.length, 1);
+});
+
+test('event admin token cannot access another event media audit', async () => {
+  const db = new MediaAuditFakeDb({
+    events: [
+      eventRecord({ id: 'event-audit', adminToken: 'event-admin-token' }),
+      eventRecord({ id: 'other-event', adminToken: 'other-admin-token' })
+    ]
+  });
+  const env = envWithDb(db, new FakeBucket());
+
+  const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/admin/events/other-event/media-audit', {
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      'X-Admin-Token': 'event-admin-token'
+    }
+  }), env);
+
+  assert.equal(response.status, 401);
+});
+
 test('admin media audit backfill analyzes approved photos and video thumbnails', async () => {
   const photo = submission({
     id: 'photo-1',
@@ -244,6 +296,35 @@ function submission(overrides = {}) {
   };
 }
 
+function eventRecord(overrides = {}) {
+  return {
+    id: 'event-audit',
+    name: 'Media Audit Test',
+    eventDate: '2026-09-19',
+    eventStartAt: null,
+    countdownEnabled: 0,
+    countdownMessage: 'Party starts in',
+    guestUploadsBeforeCountdownEnabled: 0,
+    partyViewSwipeEnabled: 0,
+    autoApprovePartyViewEnabled: 0,
+    autoApproveTimeCapsuleEnabled: 0,
+    hostName: 'Taylor',
+    hostEmail: 'taylor@example.com',
+    hostToken: 'host-token',
+    adminToken: 'event-admin-token',
+    status: 'active',
+    retentionExpiresAt: '2027-09-19T23:59:59.000Z',
+    createdAt: '2026-05-01T00:00:00.000Z',
+    updatedAt: '2026-05-01T00:00:00.000Z',
+    timeCapsuleEnabled: true,
+    timeCapsuleStatus: 'published',
+    timeCapsuleTitle: 'Media Audit Test Time Capsule',
+    timeCapsuleShareToken: 'share-token',
+    timeCapsulePublishedAt: '2026-05-01T00:00:00.000Z',
+    ...overrides
+  };
+}
+
 function insight(overrides = {}) {
   return {
     submission_id: 'photo-1',
@@ -324,31 +405,7 @@ class FakeBucket {
 
 class MediaAuditFakeDb {
   constructor(seed = {}) {
-    this.events = [{
-      id: 'event-audit',
-      name: 'Media Audit Test',
-      eventDate: '2026-09-19',
-      eventStartAt: null,
-      countdownEnabled: 0,
-      countdownMessage: 'Party starts in',
-      guestUploadsBeforeCountdownEnabled: 0,
-      partyViewSwipeEnabled: 0,
-      autoApprovePartyViewEnabled: 0,
-      autoApproveTimeCapsuleEnabled: 0,
-      hostName: 'Taylor',
-      hostEmail: 'taylor@example.com',
-      hostToken: 'host-token',
-      adminToken: 'event-admin-token',
-      status: 'active',
-      retentionExpiresAt: '2027-09-19T23:59:59.000Z',
-      createdAt: '2026-05-01T00:00:00.000Z',
-      updatedAt: '2026-05-01T00:00:00.000Z',
-      timeCapsuleEnabled: true,
-      timeCapsuleStatus: 'published',
-      timeCapsuleTitle: 'Media Audit Test Time Capsule',
-      timeCapsuleShareToken: 'share-token',
-      timeCapsulePublishedAt: '2026-05-01T00:00:00.000Z'
-    }];
+    this.events = seed.events ? seed.events.map((item) => ({ ...item })) : [eventRecord()];
     this.submissions = seed.submissions ? seed.submissions.map((item) => ({ ...item })) : [];
     this.insights = seed.insights ? seed.insights.map((item) => ({ ...item })) : [];
     this.profiles = seed.profiles ? seed.profiles.map((item) => ({ ...item })) : [];
