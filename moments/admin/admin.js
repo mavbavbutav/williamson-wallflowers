@@ -40,6 +40,7 @@ function init() {
   qs("#mediaAuditRefreshButton").addEventListener("click", () => loadMediaAudit(qs("#mediaAuditEventSelect").value));
   qs("#mediaAuditBackfillButton").addEventListener("click", () => runMediaAuditBackfill(false));
   qs("#mediaAuditAiBackfillButton").addEventListener("click", () => runMediaAuditBackfill(true));
+  qs("#mediaAuditFaceBoxesToggle").addEventListener("change", renderMediaAudit);
   qs("#tagForm").addEventListener("submit", createTag);
   qs("#assignTagForm").addEventListener("submit", assignTag);
   qs("#wallDeviceForm").addEventListener("submit", createWallDevice);
@@ -549,6 +550,10 @@ function renderMediaAudit(errorMessage = "") {
   const profile = mediaAudit?.profile || {};
   const insights = mediaAudit?.insights || [];
   const pending = Number(mediaAudit?.pending || 0);
+  const faceDedupe = mediaAudit?.faceDedupe || {};
+  const showFaceBoxes = Boolean(qs("#mediaAuditFaceBoxesToggle")?.checked);
+
+  qs("#mediaAuditPanel")?.classList.toggle("is-showing-face-boxes", showFaceBoxes);
 
   qs("#mediaAuditStatusLabel").textContent = errorMessage
     ? "Error"
@@ -561,6 +566,7 @@ function renderMediaAudit(errorMessage = "") {
     : `<div class="empty-state is-compact"><strong>${escapeHtml(profile.profileSummary || "No approved visual media has been audited yet.")}</strong><span>${escapeHtml(buildMediaAuditSubtext(profile, pending))}</span></div>`;
 
   qs("#mediaAuditStats").innerHTML = renderMediaAuditStats(profile, pending);
+  qs("#mediaAuditFaceSummary").innerHTML = errorMessage ? "" : renderMediaAuditFaceSummary(faceDedupe);
   qs("#mediaAuditTags").innerHTML = renderMediaAuditTagGroups(profile);
   qs("#mediaAuditInsights").innerHTML = insights.length
     ? insights.map(renderMediaAuditInsightRow).join("")
@@ -594,6 +600,35 @@ function renderMediaAuditStats(profile, pending) {
   `).join("");
 }
 
+function renderMediaAuditFaceSummary(faceDedupe) {
+  const values = [
+    ["Provider", faceDedupe.provider || "not configured"],
+    ["Analyzed", faceDedupe.analyzedSubmissions || 0],
+    ["Detected faces", faceDedupe.detectedFaces || 0],
+    ["Unique clusters", faceDedupe.uniqueFaceClusters || 0],
+    ["Hero selected", faceDedupe.selectedSources || 0],
+    ["Skipped dupes", faceDedupe.skippedDuplicateSources || 0]
+  ];
+  const latest = faceDedupe.latestDecisionAt ? `Last hero decision ${formatDateTime(faceDedupe.latestDecisionAt)}.` : "";
+
+  return `
+    <div class="media-audit-face-summary-card">
+      <div>
+        <strong>AI face dedupe</strong>
+        <p class="muted">${escapeHtml(faceDedupe.summary || "No Rekognition face analysis has been stored for this event yet.")} ${escapeHtml(latest)}</p>
+      </div>
+      <div class="media-audit-face-summary-grid">
+        ${values.map(([label, value]) => `
+          <span>
+            <strong>${escapeHtml(value)}</strong>
+            <small>${escapeHtml(label)}</small>
+          </span>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderMediaAuditTagGroups(profile) {
   const groups = [
     ["Location cues", profile.backgroundCues],
@@ -620,6 +655,7 @@ function renderMediaAuditInsightRow(insight) {
           ${renderMediaAuditDetailBlock("Display", renderAuditPills(buildMediaAuditDisplayFacts(insight), "No dimensions yet", 6))}
           ${renderMediaAuditDetailBlock("EXIF and upload", renderAuditPills(buildMediaAuditExifFacts(insight), "No EXIF or upload metadata", 8))}
           ${renderMediaAuditDetailBlock("AI and people", renderAuditPills(buildMediaAuditVisionFacts(insight), "AI not run", 6))}
+          ${renderMediaAuditDetailBlock("Face dedupe", renderAuditPills(buildMediaAuditFaceDedupeFacts(insight), "No Rekognition face data", 8))}
           ${renderMediaAuditDetailBlock("Style tags", renderAuditPills(buildMediaAuditStyleTags(insight), "No style tags yet", 10))}
         </div>
       </td>
@@ -639,6 +675,7 @@ function renderMediaAuditCard(insight) {
       ${renderMediaAuditDetailBlock("Display", renderAuditPills(buildMediaAuditDisplayFacts(insight), "No dimensions yet", 6))}
       ${renderMediaAuditDetailBlock("EXIF and upload", renderAuditPills(buildMediaAuditExifFacts(insight), "No EXIF or upload metadata", 8))}
       ${renderMediaAuditDetailBlock("AI and people", renderAuditPills(buildMediaAuditVisionFacts(insight), "AI not run", 6))}
+      ${renderMediaAuditDetailBlock("Face dedupe", renderAuditPills(buildMediaAuditFaceDedupeFacts(insight), "No Rekognition face data", 8))}
       ${renderMediaAuditDetailBlock("Style tags", renderAuditPills(buildMediaAuditStyleTags(insight), "No style tags yet", 10))}
       ${renderMediaAuditDetailBlock("Location cues", renderMediaAuditLocation(insight))}
     </article>
@@ -658,8 +695,40 @@ function renderMediaAuditPreview(insight) {
   return `
     <${tag} class="media-audit-preview is-${escapeAttribute(insight.orientation || "unknown")}" style="--audit-aspect: ${escapeAttribute(aspect)};"${href}>
       ${content}
+      ${renderMediaAuditFaceBoxes(insight)}
       <small>${escapeHtml(kind)}</small>
     </${tag}>
+  `;
+}
+
+function renderMediaAuditFaceBoxes(insight) {
+  const faces = Array.isArray(insight.faces) ? insight.faces.filter((face) => face?.boundingBox) : [];
+  if (!faces.length) return "";
+
+  return `
+    <span class="media-audit-face-boxes" aria-hidden="true">
+      ${faces.map(renderMediaAuditFaceBox).join("")}
+    </span>
+  `;
+}
+
+function renderMediaAuditFaceBox(face) {
+  const box = face.boundingBox || {};
+  const label = face.clusterLabel || `face ${Number(face.index || 0) + 1}`;
+  const state = face.matched ? "match" : "unique";
+  const confidence = Number(face.matchConfidence || face.confidence || 0);
+  const confidenceLabel = confidence ? ` ${confidence.toFixed(1)}%` : "";
+  const style = [
+    `left:${toPercent(box.left)}`,
+    `top:${toPercent(box.top)}`,
+    `width:${toPercent(box.width)}`,
+    `height:${toPercent(box.height)}`
+  ].join(";");
+
+  return `
+    <span class="media-audit-face-box is-${escapeAttribute(state)}" style="${escapeAttribute(style)}" title="${escapeAttribute(`${state} ${label}${confidenceLabel}`)}">
+      <span>${escapeHtml(state === "match" ? `match ${shortFaceClusterLabel(label)}` : "unique")}</span>
+    </span>
   `;
 }
 
@@ -733,6 +802,52 @@ function buildMediaAuditVisionFacts(insight) {
   if (insight.summary) facts.push(insight.summary);
   if (insight.skipReason) facts.push(insight.skipReason);
   return facts;
+}
+
+function buildMediaAuditFaceDedupeFacts(insight) {
+  const facts = [];
+  const analysis = insight.faceAnalysis || {};
+  const dedupe = insight.faceDedupe || {};
+  const faces = Array.isArray(insight.faces) ? insight.faces : [];
+  const matchedFaces = faces.filter((face) => face.matched).length;
+  const uniqueFaces = faces.length - matchedFaces;
+
+  if (analysis.status) facts.push(`rekognition ${analysis.status}`);
+  if (analysis.faceCount !== undefined && analysis.faceCount !== null) facts.push(`${analysis.faceCount} detected`);
+  if (uniqueFaces) facts.push(`${uniqueFaces} unique`);
+  if (matchedFaces) facts.push(`${matchedFaces} matched`);
+  if (dedupe.decision) facts.push(formatMediaAuditDedupeDecision(dedupe.decision));
+  if (dedupe.reason) facts.push(formatMediaAuditDedupeReason(dedupe.reason));
+  if (dedupe.duplicateClusterIds?.length) facts.push(`duplicate clusters ${dedupe.duplicateClusterIds.map(shortFaceClusterLabel).join(", ")}`);
+  if (dedupe.newClusterIds?.length) facts.push(`new clusters ${dedupe.newClusterIds.map(shortFaceClusterLabel).join(", ")}`);
+  faces.slice(0, 4).forEach((face) => {
+    const confidence = Number(face.matchConfidence || face.confidence || 0);
+    facts.push(`${face.matched ? "match" : "unique"} ${face.clusterLabel || `face ${Number(face.index || 0) + 1}`}${confidence ? ` ${Math.round(confidence)}%` : ""}`);
+  });
+  if (analysis.errorMessage) facts.push(`face error ${analysis.errorMessage}`);
+  return facts;
+}
+
+function formatMediaAuditDedupeDecision(value) {
+  if (value === "selected") return "selected for hero";
+  if (value === "skipped") return "skipped for hero";
+  return value;
+}
+
+function formatMediaAuditDedupeReason(value) {
+  return String(value || "")
+    .replace(/-/g, " ")
+    .replace(/^duplicate face cluster$/i, "duplicate face cluster");
+}
+
+function shortFaceClusterLabel(value) {
+  return String(value || "").replace(/^face\s*/i, "").replace(/^face-/, "").slice(0, 6) || "face";
+}
+
+function toPercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "0%";
+  return `${Math.max(0, Math.min(100, number * 100)).toFixed(2)}%`;
 }
 
 function buildMediaAuditStyleTags(insight) {

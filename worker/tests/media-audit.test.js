@@ -43,17 +43,23 @@ test('admin frontend exposes the private media audit report controls', async () 
   assert.match(adminHtml, /id="mediaAuditPanel"/);
   assert.match(adminHtml, /Run AI vision audit/);
   assert.match(adminHtml, /Location cues/);
-  assert.match(adminHtml, /admin\.js\?v=20260606-reverse-geocode-1/);
-  assert.match(adminHtml, /styles\.css\?v=20260606-reverse-geocode-1/);
+  assert.match(adminHtml, /id="mediaAuditFaceBoxesToggle"/);
+  assert.match(adminHtml, /id="mediaAuditFaceSummary"/);
+  assert.match(adminHtml, /admin\.js\?v=20260606-face-dedupe-1/);
+  assert.match(adminHtml, /styles\.css\?v=20260606-face-dedupe-1/);
   assert.match(adminJs, /\/admin\/events\/\$\{encodeURIComponent\(eventId\)\}\/media-audit/);
   assert.match(adminJs, /previewUrl/);
   assert.match(adminJs, /EXIF and upload/);
+  assert.match(adminJs, /Face dedupe/);
+  assert.match(adminJs, /renderMediaAuditFaceBoxes/);
+  assert.match(adminJs, /buildMediaAuditFaceDedupeFacts/);
   assert.match(adminJs, /uploader IP/);
   assert.match(adminJs, /includeAi/);
   assert.match(adminJs, /exifGpsDisplayName/);
   assert.match(adminJs, /reverseGeocodingStatus/);
   assert.match(styles, /\.media-audit-panel/);
   assert.match(styles, /\.media-audit-preview/);
+  assert.match(styles, /\.media-audit-face-box/);
 });
 
 test('media audit backfill is admin-only and rejects host tokens', async () => {
@@ -201,7 +207,29 @@ test('admin media audit can return stored profile and insight rows', async () =>
   const db = new MediaAuditFakeDb({
     submissions: [submission({ id: 'photo-1' })],
     insights: [insight({ submission_id: 'photo-1', width: 1024, height: 768 })],
-    profiles: [profile({ submission_count: 1, analyzed_count: 1, photo_count: 1 })]
+    profiles: [profile({ submission_count: 1, analyzed_count: 1, photo_count: 1 })],
+    faceAnalyses: [faceAnalysis({ submission_id: 'photo-1', face_count: 1 })],
+    faces: [
+      faceRow({
+        id: 'face-photo-1',
+        submission_id: 'photo-1',
+        cluster_id: 'face-matchabc123',
+        bounding_box_json: JSON.stringify({ Left: 0.1, Top: 0.2, Width: 0.3, Height: 0.4 }),
+        match_confidence: 98.7
+      }),
+      faceRow({
+        id: 'face-photo-2',
+        submission_id: 'photo-2',
+        cluster_id: 'face-matchabc123'
+      })
+    ],
+    sourceDecisions: [sourceDecision({
+      submission_id: 'photo-1',
+      decision: 'selected',
+      reason: 'new-face-cluster',
+      cluster_ids: JSON.stringify(['face-matchabc123']),
+      new_cluster_ids: JSON.stringify(['face-matchabc123'])
+    })]
   });
   const env = envWithDb(db, new FakeBucket());
 
@@ -215,12 +243,25 @@ test('admin media audit can return stored profile and insight rows', async () =>
 
   assert.equal(response.status, 200);
   assert.equal(payload.audit.profile.analyzedCount, 1);
+  assert.equal(payload.audit.faceDedupe.detectedFaces, 2);
+  assert.equal(payload.audit.faceDedupe.uniqueFaceClusters, 1);
+  assert.equal(payload.audit.faceDedupe.selectedSources, 1);
   assert.equal(payload.audit.insights.length, 1);
   assert.equal(payload.audit.insights[0].width, 1024);
   assert.equal(payload.audit.insights[0].displayAspectRatio, 1.3333);
   assert.equal(payload.audit.insights[0].previewKind, 'photo');
   assert.match(payload.audit.insights[0].previewUrl, /^https:\/\/api\.example\.com\/moments-api\/media\/photo-1\?mediaToken=/);
   assert.equal(payload.audit.insights[0].visionStatus, 'not_requested');
+  assert.equal(payload.audit.insights[0].faceAnalysis.status, 'ready');
+  assert.equal(payload.audit.insights[0].faceDedupe.decision, 'selected');
+  assert.equal(payload.audit.insights[0].faces.length, 1);
+  assert.equal(payload.audit.insights[0].faces[0].matched, true);
+  assert.deepEqual(payload.audit.insights[0].faces[0].boundingBox, {
+    left: 0.1,
+    top: 0.2,
+    width: 0.3,
+    height: 0.4
+  });
 });
 
 test('admin media audit backfill extracts JPEG EXIF capture, camera, and GPS metadata', async () => {
@@ -597,6 +638,60 @@ function profile(overrides = {}) {
   };
 }
 
+function faceAnalysis(overrides = {}) {
+  return {
+    submission_id: 'photo-1',
+    event_id: 'event-audit',
+    source_object_key: 'moments/event-audit/photo-1.jpg',
+    provider: 'aws-rekognition',
+    status: 'ready',
+    face_count: 1,
+    error_message: '',
+    face_signature_version: 1,
+    analyzed_at: '2026-09-19T20:31:00.000Z',
+    created_at: '2026-09-19T20:31:00.000Z',
+    updated_at: '2026-09-19T20:31:00.000Z',
+    ...overrides
+  };
+}
+
+function faceRow(overrides = {}) {
+  return {
+    id: 'face-photo-1',
+    event_id: 'event-audit',
+    submission_id: 'photo-1',
+    face_index: 0,
+    provider: 'aws-rekognition',
+    provider_face_id: 'provider-face-1',
+    cluster_id: 'face-unique123456',
+    confidence: 99.2,
+    bounding_box_json: JSON.stringify({ Left: 0.2, Top: 0.2, Width: 0.4, Height: 0.4 }),
+    quality_json: JSON.stringify({ Brightness: 80, Sharpness: 92 }),
+    match_confidence: 0,
+    status: 'ready',
+    face_signature_version: 1,
+    created_at: '2026-09-19T20:31:00.000Z',
+    updated_at: '2026-09-19T20:31:00.000Z',
+    ...overrides
+  };
+}
+
+function sourceDecision(overrides = {}) {
+  return {
+    event_id: 'event-audit',
+    submission_id: 'photo-1',
+    decision: 'selected',
+    reason: 'new-face-cluster',
+    cluster_ids: JSON.stringify(['face-unique123456']),
+    new_cluster_ids: JSON.stringify(['face-unique123456']),
+    duplicate_cluster_ids: '[]',
+    guest_key: '',
+    score: 0.75,
+    created_at: '2026-09-19T20:32:00.000Z',
+    ...overrides
+  };
+}
+
 class FakeBucket {
   constructor(seed = []) {
     this.objects = new Map(seed.map(([key, value]) => [key, toBytes(value)]));
@@ -620,6 +715,10 @@ class MediaAuditFakeDb {
     this.submissions = seed.submissions ? seed.submissions.map((item) => ({ ...item })) : [];
     this.insights = seed.insights ? seed.insights.map((item) => ({ ...item })) : [];
     this.profiles = seed.profiles ? seed.profiles.map((item) => ({ ...item })) : [];
+    this.faceAnalyses = seed.faceAnalyses ? seed.faceAnalyses.map((item) => ({ ...item })) : [];
+    this.faces = seed.faces ? seed.faces.map((item) => ({ ...item })) : [];
+    this.faceClusters = seed.faceClusters ? seed.faceClusters.map((item) => ({ ...item })) : [];
+    this.sourceDecisions = seed.sourceDecisions ? seed.sourceDecisions.map((item) => ({ ...item })) : [];
   }
 
   prepare(sql) {
@@ -650,6 +749,26 @@ class MediaAuditFakeStatement {
 
     if (this.sql.includes('FROM event_media_profiles')) {
       return this.db.profiles.find((profileRow) => profileRow.event_id === this.params[0] || profileRow.eventId === this.params[0]) || null;
+    }
+
+    if (this.sql.includes('submission_face_analyses') && this.sql.includes('event_group_hero_source_decisions')) {
+      const eventId = this.params[0];
+      const analyses = this.db.faceAnalyses.filter((row) => (row.event_id || row.eventId) === eventId);
+      const readyFaces = this.db.faces.filter((row) => (row.event_id || row.eventId) === eventId && (row.status || 'ready') === 'ready');
+      const decisions = this.db.sourceDecisions.filter((row) => (row.event_id || row.eventId) === eventId);
+      const clusters = new Set(readyFaces.map((row) => row.cluster_id || row.clusterId).filter(Boolean));
+      const storedClusters = this.db.faceClusters.filter((row) => (row.event_id || row.eventId) === eventId && (row.status || 'ready') === 'ready');
+      return {
+        analyzedSubmissions: analyses.length,
+        readyAnalyses: analyses.filter((row) => row.status === 'ready').length,
+        failedAnalyses: analyses.filter((row) => row.status === 'failed').length,
+        detectedFaces: readyFaces.length,
+        uniqueFaceClusters: clusters.size,
+        storedFaceClusters: storedClusters.length,
+        selectedSources: decisions.filter((row) => row.decision === 'selected').length,
+        skippedSources: decisions.filter((row) => row.decision === 'skipped').length,
+        latestDecisionAt: decisions.reduce((latest, row) => String(row.created_at || row.createdAt || '').localeCompare(latest) > 0 ? row.created_at || row.createdAt || '' : latest, '')
+      };
     }
 
     if (this.sql.includes('FROM submission_media_insights') && this.sql.includes('WHERE submission_id = ?')) {
@@ -745,6 +864,27 @@ class MediaAuditFakeStatement {
               submissionCreatedAt: submissionRow?.created_at || submissionRow?.createdAt
             };
           })
+      };
+    }
+
+    if (this.sql.includes('FROM submission_face_analyses') && this.sql.includes('WHERE event_id = ?')) {
+      const eventId = this.params[0];
+      return {
+        results: this.db.faceAnalyses.filter((row) => (row.event_id || row.eventId) === eventId)
+      };
+    }
+
+    if (this.sql.includes('FROM submission_faces') && this.sql.includes('WHERE event_id = ?')) {
+      const eventId = this.params[0];
+      return {
+        results: this.db.faces.filter((row) => (row.event_id || row.eventId) === eventId && (row.status || 'ready') === 'ready')
+      };
+    }
+
+    if (this.sql.includes('FROM event_group_hero_source_decisions') && this.sql.includes('WHERE event_id = ?')) {
+      const eventId = this.params[0];
+      return {
+        results: this.db.sourceDecisions.filter((row) => (row.event_id || row.eventId) === eventId)
       };
     }
 

@@ -31,7 +31,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260606-reverse-geocode-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260606-face-dedupe-1" />
 </head>
 <body class="admin-page">
   <main class="app-shell">
@@ -126,8 +126,13 @@
             <button class="small-button" type="button" id="mediaAuditBackfillButton">Run audit</button>
             <button class="small-button is-primary" type="button" id="mediaAuditAiBackfillButton">Run AI vision audit</button>
           </div>
+          <label class="checkbox-row media-audit-face-toggle" for="mediaAuditFaceBoxesToggle">
+            <input id="mediaAuditFaceBoxesToggle" type="checkbox" />
+            <span>Show face boxes</span>
+          </label>
         </div>
         <div class="media-audit-summary" id="mediaAuditSummary"></div>
+        <div class="media-audit-face-summary" id="mediaAuditFaceSummary"></div>
         <div class="media-audit-stats" id="mediaAuditStats"></div>
         <div class="media-audit-tags" id="mediaAuditTags"></div>
         <div class="table-wrap">
@@ -397,6 +402,6 @@
     </section>
   </main>
 
-  <script type="module" src="admin.js?v=20260606-reverse-geocode-1"></script>
+  <script type="module" src="admin.js?v=20260606-face-dedupe-1"></script>
 </body>
 </html>

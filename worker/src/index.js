@@ -3666,12 +3666,17 @@ async function getAdminMediaAudit(request, env, corsHeaders, eventId) {
     return json({ ok: false, message: 'Event not found.' }, 404, corsHeaders);
   }
 
-  const [profile, insights, pending] = await Promise.all([
+  const [profile, insights, pending, faceDedupe] = await Promise.all([
     getEventMediaProfileClient(env, event.id),
     getEventMediaInsights(env, event.id, 50),
-    countMediaAuditCandidates(env, event.id, false)
+    countMediaAuditCandidates(env, event.id, false),
+    getEventMediaAuditFaceDedupeClient(env, event.id)
   ]);
-  const insightClients = await Promise.all(insights.map((row) => toMediaInsightClient(row, request, env)));
+  const faceDataBySubmissionId = await getEventMediaAuditFaceDataBySubmissionId(env, event.id);
+  const insightClients = await Promise.all(insights.map((row) => {
+    const submissionId = row.submissionId || row.submission_id;
+    return toMediaInsightClient(row, request, env, faceDataBySubmissionId.get(submissionId));
+  }));
 
   return json({
     ok: true,
@@ -3679,6 +3684,7 @@ async function getAdminMediaAudit(request, env, corsHeaders, eventId) {
     audit: {
       profile,
       pending,
+      faceDedupe,
       insights: insightClients
     }
   }, 200, corsHeaders);
@@ -4997,6 +5003,255 @@ async function getEventMediaInsights(env, eventId, limit = 50) {
   return rows.slice(0, Math.max(1, Math.min(Number(limit) || 50, 100)));
 }
 
+async function getEventMediaAuditFaceDedupeClient(env, eventId) {
+  try {
+    const row = await env.MOMENTS_DB.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM submission_face_analyses WHERE event_id = ?) AS analyzedSubmissions,
+        (SELECT COUNT(*) FROM submission_face_analyses WHERE event_id = ? AND status = 'ready') AS readyAnalyses,
+        (SELECT COUNT(*) FROM submission_face_analyses WHERE event_id = ? AND status = 'failed') AS failedAnalyses,
+        (SELECT COUNT(*) FROM submission_faces WHERE event_id = ? AND status = 'ready') AS detectedFaces,
+        (SELECT COUNT(DISTINCT cluster_id) FROM submission_faces WHERE event_id = ? AND status = 'ready') AS uniqueFaceClusters,
+        (SELECT COUNT(*) FROM event_face_clusters WHERE event_id = ? AND status = 'ready') AS storedFaceClusters,
+        (SELECT COUNT(*) FROM event_group_hero_source_decisions WHERE event_id = ? AND decision = 'selected') AS selectedSources,
+        (SELECT COUNT(*) FROM event_group_hero_source_decisions WHERE event_id = ? AND decision = 'skipped') AS skippedSources,
+        (SELECT MAX(created_at) FROM event_group_hero_source_decisions WHERE event_id = ?) AS latestDecisionAt
+    `).bind(eventId, eventId, eventId, eventId, eventId, eventId, eventId, eventId, eventId).first();
+
+    const analyzedSubmissions = Number(row?.analyzedSubmissions || row?.analyzed_submissions || 0);
+    const readyAnalyses = Number(row?.readyAnalyses || row?.ready_analyses || 0);
+    const failedAnalyses = Number(row?.failedAnalyses || row?.failed_analyses || 0);
+    const detectedFaces = Number(row?.detectedFaces || row?.detected_faces || 0);
+    const uniqueFaceClusters = Math.max(
+      Number(row?.uniqueFaceClusters || row?.unique_face_clusters || 0),
+      Number(row?.storedFaceClusters || row?.stored_face_clusters || 0)
+    );
+    const selectedSources = Number(row?.selectedSources || row?.selected_sources || 0);
+    const skippedDuplicateSources = Number(row?.skippedSources || row?.skipped_sources || 0);
+
+    return {
+      enabled: isGroupHeroFaceDedupeEnabled(env),
+      provider: getGroupHeroFaceProvider(env),
+      analyzedSubmissions,
+      readyAnalyses,
+      failedAnalyses,
+      detectedFaces,
+      uniqueFaceClusters,
+      selectedSources,
+      skippedDuplicateSources,
+      latestDecisionAt: row?.latestDecisionAt || row?.latest_decision_at || '',
+      summary: buildMediaAuditFaceDedupeSummary(analyzedSubmissions, detectedFaces, uniqueFaceClusters, selectedSources, skippedDuplicateSources)
+    };
+  } catch (error) {
+    if (isMissingFaceDedupeTableError(error)) {
+      return emptyMediaAuditFaceDedupeClient(env);
+    }
+    throw error;
+  }
+}
+
+async function getEventMediaAuditFaceDataBySubmissionId(env, eventId) {
+  try {
+    const [analysesResult, facesResult, decisionsResult] = await Promise.all([
+      env.MOMENTS_DB.prepare(`
+        SELECT
+          submission_id AS submissionId,
+          provider,
+          status,
+          face_count AS faceCount,
+          error_message AS errorMessage,
+          face_signature_version AS faceSignatureVersion,
+          analyzed_at AS analyzedAt,
+          updated_at AS updatedAt
+        FROM submission_face_analyses
+        WHERE event_id = ?
+      `).bind(eventId).all(),
+      env.MOMENTS_DB.prepare(`
+        SELECT
+          id,
+          submission_id AS submissionId,
+          face_index AS faceIndex,
+          provider,
+          cluster_id AS clusterId,
+          confidence,
+          bounding_box_json AS boundingBoxJson,
+          quality_json AS qualityJson,
+          match_confidence AS matchConfidence,
+          status,
+          face_signature_version AS faceSignatureVersion,
+          updated_at AS updatedAt
+        FROM submission_faces
+        WHERE event_id = ?
+          AND status = 'ready'
+        ORDER BY submission_id ASC, face_index ASC
+      `).bind(eventId).all(),
+      env.MOMENTS_DB.prepare(`
+        SELECT
+          submission_id AS submissionId,
+          decision,
+          reason,
+          cluster_ids AS clusterIds,
+          new_cluster_ids AS newClusterIds,
+          duplicate_cluster_ids AS duplicateClusterIds,
+          score,
+          created_at AS createdAt
+        FROM event_group_hero_source_decisions
+        WHERE event_id = ?
+      `).bind(eventId).all()
+    ]);
+
+    return buildMediaAuditFaceDataMap(
+      analysesResult.results || [],
+      facesResult.results || [],
+      decisionsResult.results || []
+    );
+  } catch (error) {
+    if (isMissingFaceDedupeTableError(error)) {
+      return new Map();
+    }
+    throw error;
+  }
+}
+
+function buildMediaAuditFaceDataMap(analysisRows, faceRows, decisionRows) {
+  const bySubmissionId = new Map();
+  const clusterSubmissions = new Map();
+
+  for (const row of faceRows) {
+    const submissionId = row.submissionId || row.submission_id;
+    const clusterId = row.clusterId || row.cluster_id;
+    if (!submissionId || !clusterId) continue;
+    if (!clusterSubmissions.has(clusterId)) clusterSubmissions.set(clusterId, new Set());
+    clusterSubmissions.get(clusterId).add(submissionId);
+  }
+
+  for (const row of analysisRows) {
+    const submissionId = row.submissionId || row.submission_id;
+    if (!submissionId) continue;
+    const entry = getOrCreateMediaAuditFaceDataEntry(bySubmissionId, submissionId);
+    entry.faceAnalysis = {
+      provider: row.provider || '',
+      status: row.status || 'pending',
+      faceCount: Number(row.faceCount ?? row.face_count ?? 0),
+      errorMessage: cleanText(row.errorMessage || row.error_message || '', 240),
+      version: Number(row.faceSignatureVersion || row.face_signature_version || 0),
+      analyzedAt: row.analyzedAt || row.analyzed_at || '',
+      updatedAt: row.updatedAt || row.updated_at || ''
+    };
+  }
+
+  for (const row of decisionRows) {
+    const submissionId = row.submissionId || row.submission_id;
+    if (!submissionId) continue;
+    const entry = getOrCreateMediaAuditFaceDataEntry(bySubmissionId, submissionId);
+    entry.faceDedupe = {
+      decision: row.decision || '',
+      reason: row.reason || '',
+      clusterIds: parseJsonArray(row.clusterIds || row.cluster_ids),
+      newClusterIds: parseJsonArray(row.newClusterIds || row.new_cluster_ids),
+      duplicateClusterIds: parseJsonArray(row.duplicateClusterIds || row.duplicate_cluster_ids),
+      score: Number(row.score || 0),
+      createdAt: row.createdAt || row.created_at || ''
+    };
+  }
+
+  for (const row of faceRows) {
+    const submissionId = row.submissionId || row.submission_id;
+    if (!submissionId) continue;
+    const clusterId = row.clusterId || row.cluster_id || '';
+    const clusterSubmissionCount = clusterId ? clusterSubmissions.get(clusterId)?.size || 0 : 0;
+    const entry = getOrCreateMediaAuditFaceDataEntry(bySubmissionId, submissionId);
+    entry.faces.push({
+      id: row.id || '',
+      index: Number(row.faceIndex ?? row.face_index ?? 0),
+      provider: row.provider || '',
+      clusterId,
+      clusterLabel: formatFaceClusterLabel(clusterId),
+      confidence: normalizeOptionalNumber(row.confidence),
+      matchConfidence: normalizeOptionalNumber(row.matchConfidence ?? row.match_confidence),
+      boundingBox: toMediaAuditFaceBoundingBoxClient(row.boundingBoxJson || row.bounding_box_json),
+      quality: toMediaAuditFaceQualityClient(row.qualityJson || row.quality_json),
+      status: row.status || 'ready',
+      version: Number(row.faceSignatureVersion || row.face_signature_version || 0),
+      updatedAt: row.updatedAt || row.updated_at || '',
+      matched: clusterSubmissionCount > 1,
+      clusterSubmissionCount
+    });
+  }
+
+  for (const entry of bySubmissionId.values()) {
+    entry.faces.sort((left, right) => left.index - right.index);
+  }
+
+  return bySubmissionId;
+}
+
+function getOrCreateMediaAuditFaceDataEntry(map, submissionId) {
+  if (!map.has(submissionId)) {
+    map.set(submissionId, {
+      faceAnalysis: null,
+      faceDedupe: null,
+      faces: []
+    });
+  }
+  return map.get(submissionId);
+}
+
+function toMediaAuditFaceBoundingBoxClient(value) {
+  const box = parseJsonObject(value);
+  const left = normalizeUnitNumber(box.Left ?? box.left);
+  const top = normalizeUnitNumber(box.Top ?? box.top);
+  const width = normalizeUnitNumber(box.Width ?? box.width);
+  const height = normalizeUnitNumber(box.Height ?? box.height);
+  if (left === null || top === null || width === null || height === null || width <= 0 || height <= 0) return null;
+  return { left, top, width, height };
+}
+
+function toMediaAuditFaceQualityClient(value) {
+  const quality = parseJsonObject(value);
+  return {
+    brightness: normalizeOptionalNumber(quality.Brightness ?? quality.brightness),
+    sharpness: normalizeOptionalNumber(quality.Sharpness ?? quality.sharpness)
+  };
+}
+
+function normalizeUnitNumber(value) {
+  const number = normalizeOptionalNumber(value);
+  if (number === null) return null;
+  return Math.max(0, Math.min(1, number));
+}
+
+function formatFaceClusterLabel(clusterId) {
+  if (!clusterId) return 'unique';
+  return `face ${String(clusterId).replace(/^face-/, '').slice(0, 6)}`;
+}
+
+function buildMediaAuditFaceDedupeSummary(analyzedSubmissions, detectedFaces, uniqueFaceClusters, selectedSources, skippedDuplicateSources) {
+  if (!analyzedSubmissions) return 'No Rekognition face analysis has been stored for this event yet.';
+  const skippedCopy = skippedDuplicateSources ? ` ${skippedDuplicateSources} source${skippedDuplicateSources === 1 ? '' : 's'} were skipped as likely duplicates.` : '';
+  return `${detectedFaces} detected face${detectedFaces === 1 ? '' : 's'} across ${analyzedSubmissions} analyzed source${analyzedSubmissions === 1 ? '' : 's'}, grouped into ${uniqueFaceClusters} unique face cluster${uniqueFaceClusters === 1 ? '' : 's'}. ${selectedSources} source${selectedSources === 1 ? '' : 's'} are currently selected for hero generation.${skippedCopy}`.trim();
+}
+
+function emptyMediaAuditFaceDedupeClient(env) {
+  return {
+    enabled: isGroupHeroFaceDedupeEnabled(env),
+    provider: getGroupHeroFaceProvider(env),
+    analyzedSubmissions: 0,
+    readyAnalyses: 0,
+    failedAnalyses: 0,
+    detectedFaces: 0,
+    uniqueFaceClusters: 0,
+    selectedSources: 0,
+    skippedDuplicateSources: 0,
+    latestDecisionAt: '',
+    summary: 'No Rekognition face analysis has been stored for this event yet.'
+  };
+}
+
+function isMissingFaceDedupeTableError(error) {
+  return /no such table|no such column/i.test(String(error?.message || error || ''));
+}
+
 function buildEventMediaProfile(eventId, rows) {
   const analyzed = rows.filter((row) => row.status === 'analyzed');
   const generatedAt = new Date().toISOString();
@@ -5068,7 +5323,7 @@ function toMediaProfileClient(row) {
   };
 }
 
-async function toMediaInsightClient(row, request, env) {
+async function toMediaInsightClient(row, request, env, faceData = null) {
   const preview = await buildMediaAuditPreviewClient(row, request, env);
   const width = Number(row.width || 0);
   const height = Number(row.height || 0);
@@ -5128,7 +5383,10 @@ async function toMediaInsightClient(row, request, env) {
     submissionCreatedAt: row.submissionCreatedAt || row.submission_created_at || '',
     updatedAt: row.updatedAt || row.updated_at || '',
     previewUrl: preview.url,
-    previewKind: preview.kind
+    previewKind: preview.kind,
+    faceAnalysis: faceData?.faceAnalysis || null,
+    faceDedupe: faceData?.faceDedupe || null,
+    faces: faceData?.faces || []
   };
 }
 
