@@ -105,6 +105,40 @@ test('guest media upload sends a host-facing Resend review email', async () => {
   }
 });
 
+test('guest auto-approved upload sends a no-action host notification email', async () => {
+  const db = new UploadFakeDb({ autoApprovePartyViewEnabled: 1 });
+  const bucket = new FakeBucket();
+  const sentEmails = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    sentEmails.push({ url, body: JSON.parse(init.body), headers: init.headers });
+    return new Response('', { status: 202 });
+  };
+
+  try {
+    const env = envWithDb(db, bucket, {
+      resend: 'resend-test-key',
+      FROM_EMAIL: 'Williamson Wallflowers <noreply@example.com>'
+    });
+
+    const response = await submitGuestPhoto(env);
+
+    assert.equal(response.status, 201);
+    assert.equal(db.submissions[0].status, 'approved');
+    assert.ok(db.submissions[0].guest_visible_at);
+    assert.equal(sentEmails.length, 1);
+    assert.match(sentEmails[0].body.subject, /Jordan shared a photo/i);
+    assert.match(sentEmails[0].body.text, /No action is required because auto-approve is on/i);
+    assert.match(sentEmails[0].body.text, /Party View/);
+    assert.doesNotMatch(sentEmails[0].body.text, /Approve or reject/i);
+    assert.doesNotMatch(sentEmails[0].body.text, /Review this moment:/i);
+    assert.match(sentEmails[0].body.html, /No action is required because auto-approve is on/i);
+    assert.doesNotMatch(sentEmails[0].body.html, /Approve or reject/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('guest video upload email previews the reusable thumbnail still', async () => {
   const db = new UploadFakeDb();
   const bucket = new FakeBucket();
@@ -291,6 +325,27 @@ test('guest upload is accepted before the countdown when the host allows it', as
   assert.equal(response.status, 201);
   assert.equal(db.submissions.length, 1);
   assert.equal(bucket.puts.length, 1);
+});
+
+test('guest upload auto-approves into Party View and Time Capsule when enabled', async () => {
+  const db = new UploadFakeDb({
+    autoApprovePartyViewEnabled: 1,
+    autoApproveTimeCapsuleEnabled: 1
+  });
+  const bucket = new FakeBucket();
+  const env = envWithDb(db, bucket);
+
+  const response = await submitGuestPhoto(env);
+  const payload = await response.json();
+
+  assert.equal(response.status, 201);
+  assert.equal(payload.submission.status, 'approved');
+  assert.equal(db.submissions.length, 1);
+  assert.equal(db.submissions[0].status, 'approved');
+  assert.ok(db.submissions[0].guest_visible_at);
+  assert.equal(db.items.length, 1);
+  assert.equal(db.items[0].submission_id, db.submissions[0].id);
+  assert.equal(db.items[0].chapter, 'Guest moments');
 });
 
 test('viewer-generated video thumbnails can be saved once for older videos', async () => {
@@ -516,6 +571,9 @@ class UploadFakeDb {
       countdownEnabled: 0,
       countdownMessage: 'Party starts in',
       guestUploadsBeforeCountdownEnabled: 0,
+      partyViewSwipeEnabled: 0,
+      autoApprovePartyViewEnabled: 0,
+      autoApproveTimeCapsuleEnabled: 0,
       hostName: 'Taylor',
       hostEmail: 'taylor@example.com',
       hostToken: 'host-token',
@@ -530,7 +588,7 @@ class UploadFakeDb {
       timeCapsuleShareToken: 'share-token',
       timeCapsulePublishedAt: '2026-05-01T00:00:00.000Z',
       ...eventOverrides
-    }];
+      }];
     this.tags = [{
       id: 'tag-voice',
       publicCode: 'voice-tag',
@@ -539,6 +597,7 @@ class UploadFakeDb {
       activeEventId: 'event-voice'
     }];
     this.submissions = [];
+    this.items = [];
   }
 
   prepare(sql) {
@@ -575,6 +634,9 @@ class UploadFakeStatement {
           countdownEnabled: event.countdownEnabled,
           countdownMessage: event.countdownMessage,
           guestUploadsBeforeCountdownEnabled: event.guestUploadsBeforeCountdownEnabled,
+          partyViewSwipeEnabled: event.partyViewSwipeEnabled,
+          autoApprovePartyViewEnabled: event.autoApprovePartyViewEnabled,
+          autoApproveTimeCapsuleEnabled: event.autoApproveTimeCapsuleEnabled,
           hostName: event.hostName,
           eventStatus: event.status,
           retentionExpiresAt: event.retentionExpiresAt
@@ -625,6 +687,19 @@ class UploadFakeStatement {
       return { count: this.db.submissions.length, bytes: this.db.submissions.reduce((sum, item) => sum + Number(item.size || 0), 0) };
     }
 
+    if (this.sql.includes('MAX(sort_order)')) {
+      const eventId = this.params[0];
+      const maxSort = this.db.items
+        .filter((item) => item.event_id === eventId)
+        .reduce((max, item) => Math.max(max, Number(item.sort_order || 0)), 0);
+      return { nextSortOrder: maxSort + 1 };
+    }
+
+    if (this.sql.includes('FROM time_capsule_items') && this.sql.includes('submission_id = ?')) {
+      const [eventId, submissionId] = this.params;
+      return this.db.items.find((item) => item.event_id === eventId && item.submission_id === submissionId) || null;
+    }
+
     return null;
   }
 
@@ -665,6 +740,7 @@ class UploadFakeStatement {
     }
 
     if (this.sql.includes('INSERT INTO submissions')) {
+      const hasGuestVisibility = this.sql.includes('guest_visible_at');
       const [
         id,
         eventId,
@@ -681,9 +757,15 @@ class UploadFakeStatement {
         guestName,
         guestNote,
         consentAt,
-        createdAt,
-        updatedAt
+        statusOrCreatedAt,
+        guestVisibleAtOrUpdatedAt,
+        createdAtParam,
+        updatedAtParam
       ] = this.params;
+      const status = hasGuestVisibility ? statusOrCreatedAt : 'pending';
+      const guestVisibleAt = hasGuestVisibility ? guestVisibleAtOrUpdatedAt : null;
+      const createdAt = hasGuestVisibility ? createdAtParam : statusOrCreatedAt;
+      const updatedAt = hasGuestVisibility ? updatedAtParam : guestVisibleAtOrUpdatedAt;
       this.db.submissions.push({
         id,
         event_id: eventId,
@@ -700,7 +782,39 @@ class UploadFakeStatement {
         guest_name: guestName,
         guest_note: guestNote,
         consent_at: consentAt,
-        status: 'pending',
+        status,
+        guest_visible_at: guestVisibleAt,
+        created_at: createdAt,
+        updated_at: updatedAt
+      });
+    }
+
+    if (this.sql.includes('INSERT INTO time_capsule_items')) {
+      const [
+        id,
+        eventId,
+        submissionId,
+        title,
+        caption,
+        chapter,
+        capturedAt,
+        location,
+        sortOrder,
+        isVisible,
+        createdAt,
+        updatedAt
+      ] = this.params;
+      this.db.items.push({
+        id,
+        event_id: eventId,
+        submission_id: submissionId,
+        title,
+        caption,
+        chapter,
+        captured_at: capturedAt,
+        location,
+        sort_order: sortOrder,
+        is_visible: isVisible,
         created_at: createdAt,
         updated_at: updatedAt
       });

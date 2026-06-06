@@ -104,7 +104,7 @@ async function loadGallery() {
     applyCountdownDefaults();
     applyPartyViewDefaults();
     updateCountdownState();
-    qs("#eventMeta").textContent = `${formatDate(eventRecord.eventDate)}. Pending guest moments stay private until approved.`;
+    qs("#eventMeta").textContent = getHostEventMetaCopy();
 
     if (eventRecord.timeCapsule?.enabled) {
       qs("#workspaceToolbar").hidden = false;
@@ -121,6 +121,16 @@ async function loadGallery() {
   } catch (error) {
     setNotice(qs("#hostNotice"), error.message || "Could not load this host gallery.", "error");
   }
+}
+
+function getHostEventMetaCopy() {
+  const dateText = formatDate(eventRecord.eventDate);
+  const destinations = [];
+  if (eventRecord.autoApprovePartyViewEnabled) destinations.push("Party View");
+  if (eventRecord.autoApproveTimeCapsuleEnabled) destinations.push("Time Capsule");
+  if (destinations.length === 1) return `${dateText}. New guest moments auto-approve to ${destinations[0]}.`;
+  if (destinations.length > 1) return `${dateText}. New guest moments auto-approve to ${destinations[0]} and ${destinations[1]}.`;
+  return `${dateText}. Pending guest moments stay private until approved.`;
 }
 
 async function loadCapsule({ silent = false } = {}) {
@@ -308,6 +318,9 @@ function applyCountdownDefaults() {
 function applyPartyViewDefaults() {
   if (!eventRecord) return;
   qs("#partyViewSwipeEnabled").checked = !!eventRecord.partyViewSwipeEnabled;
+  qs("#autoApprovePartyViewEnabled").checked = !!eventRecord.autoApprovePartyViewEnabled;
+  qs("#autoApproveTimeCapsuleEnabled").checked = !!eventRecord.autoApproveTimeCapsuleEnabled;
+  qs("#autoApproveTimeCapsuleEnabled").disabled = !eventRecord.timeCapsule?.enabled;
   resetDirtySaveButton(qs("#partyViewSettingsForm"));
 }
 
@@ -1352,7 +1365,9 @@ async function savePartyViewSettings(event) {
   if (submitButton?.dataset.hasUnsavedChanges !== "true") return;
 
   const form = {
-    partyViewSwipeEnabled: qs("#partyViewSwipeEnabled").checked
+    partyViewSwipeEnabled: qs("#partyViewSwipeEnabled").checked,
+    autoApprovePartyViewEnabled: qs("#autoApprovePartyViewEnabled").checked,
+    autoApproveTimeCapsuleEnabled: qs("#autoApproveTimeCapsuleEnabled").checked
   };
 
   try {
@@ -1678,7 +1693,9 @@ function getLocalDemoHostPayload(path, options = {}) {
     const form = JSON.parse(options.body || "{}");
     localDemoHostState.event = {
       ...localDemoHostState.event,
-      partyViewSwipeEnabled: form.partyViewSwipeEnabled
+      partyViewSwipeEnabled: form.partyViewSwipeEnabled,
+      autoApprovePartyViewEnabled: form.autoApprovePartyViewEnabled,
+      autoApproveTimeCapsuleEnabled: form.autoApproveTimeCapsuleEnabled
     };
     return { event: localDemoHostState.event };
   }
@@ -1724,6 +1741,8 @@ function createLocalDemoHostState(id) {
     countdownMessage: "Party starts in",
     guestUploadsBeforeCountdownEnabled: false,
     partyViewSwipeEnabled: started,
+    autoApprovePartyViewEnabled: false,
+    autoApproveTimeCapsuleEnabled: false,
     guestLink: {
       label: "Demo guest link",
       publicCode: id,

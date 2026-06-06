@@ -244,15 +244,29 @@
           <div class="panel-heading">
             <div>
               <h3>Guest Party View</h3>
-              <p class="muted">Let guests switch this feed into the Time Capsule swipe layout from their QR link.</p>
+              <p class="muted">Choose where new guest uploads can appear automatically, and let guests use the swipe feed from their QR link.</p>
             </div>
-            <span class="status-pill">Swipe option</span>
+            <span class="status-pill">Guest routing</span>
           </div>
           <label class="settings-toggle" for="partyViewSwipeEnabled">
             <input id="partyViewSwipeEnabled" name="partyViewSwipeEnabled" type="checkbox" />
             <span>
               <strong>Enable swipe view for guests</strong>
               <span class="muted">Guests can use Grid or Swipe Feed when Party View has visible media.</span>
+            </span>
+          </label>
+          <label class="settings-toggle" for="autoApprovePartyViewEnabled">
+            <input id="autoApprovePartyViewEnabled" name="autoApprovePartyViewEnabled" type="checkbox" />
+            <span>
+              <strong>Auto-approve new guest uploads to Party View</strong>
+              <span class="muted">New guest moments skip manual approval and become visible from the QR link immediately.</span>
+            </span>
+          </label>
+          <label class="settings-toggle" for="autoApproveTimeCapsuleEnabled">
+            <input id="autoApproveTimeCapsuleEnabled" name="autoApproveTimeCapsuleEnabled" type="checkbox" />
+            <span>
+              <strong>Auto-approve new guest uploads to Time Capsule</strong>
+              <span class="muted">New guest moments skip manual approval and are added to the keepsake timeline automatically.</span>
             </span>
           </label>
           <div id="partyViewSettingsNotice" class="notice" role="status" aria-live="polite" hidden></div>
@@ -331,6 +345,6 @@
     <div class="media-modal-stage" id="modalStage"></div>
   </div>
 
-  <script type="module" src="host.js?v=20260605-ai-group-hero-1"></script>
+  <script type="module" src="host.js?v=20260605-auto-approve-1"></script>
 </body>
 </html>

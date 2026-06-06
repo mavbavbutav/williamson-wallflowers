@@ -1274,7 +1274,7 @@ test('frontends expose AI group hero UI and cache-busted assets', async () => {
   assert.match(guestJs, /formData\.append\("aiReference", aiReferenceFile\)/);
   assert.match(hostHtml, /id="groupHeroHostCard"/);
   assert.match(hostHtml, /styles\.css\?v=20260605-ai-hero-contain-1/);
-  assert.match(hostHtml, /host\.js\?v=20260605-ai-group-hero-1/);
+  assert.match(hostHtml, /host\.js\?v=20260605-auto-approve-1/);
   assert.match(hostJs, /function regenerateGroupHero/);
   assert.match(hostJs, /group-hero\/regenerate/);
   assert.match(styles, /\.group-hero-panel/);

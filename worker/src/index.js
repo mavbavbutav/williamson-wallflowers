@@ -446,6 +446,9 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
   const guestName = cleanText(formData.get('guestName'), 90);
   const guestNote = cleanText(formData.get('guestNote'), 220);
   const aiArtworkConsentAt = aiArtworkConsent ? now : null;
+  const autoApproval = getGuestAutoApprovalConfig(event);
+  const submissionStatus = autoApproval.enabled ? 'approved' : 'pending';
+  const guestVisibleAt = autoApproval.partyView ? now : null;
 
   await env.MOMENTS_BUCKET.put(objectKey, media.stream(), {
     httpMetadata: {
@@ -471,9 +474,9 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
     INSERT INTO submissions (
       id, event_id, media_type, object_key, original_filename, mime_type, size,
       thumbnail_object_key, thumbnail_mime_type, thumbnail_size, thumbnail_created_at,
-      duration_seconds, guest_name, guest_note, consent_at, status, created_at, updated_at
+      duration_seconds, guest_name, guest_note, consent_at, status, guest_visible_at, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     id,
     eventId,
@@ -490,6 +493,8 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
     guestName,
     guestNote,
     now,
+    submissionStatus,
+    guestVisibleAt,
     now,
     now
   ).run();
@@ -500,6 +505,15 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
       SET ai_artwork_consent_at = ?, updated_at = ?
       WHERE id = ?
     `).bind(aiArtworkConsentAt, now, id).run();
+  }
+
+  if (autoApproval.enabled) {
+    const approvedSubmission = await getSubmissionWithEvent(env, id);
+    if (autoApproval.timeCapsule) {
+      await createAutoTimeCapsuleItemForSubmission(env, event, approvedSubmission, now);
+    }
+    await queueStreamOptimization(env, request, approvedSubmission, ctx);
+    await queueEventGroupHeroGenerationForSubmission(env, request, approvedSubmission, ctx);
   }
 
   await queueUploadNotification(env, ctx, {
@@ -514,7 +528,9 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
     caption: '',
     guestName,
     guestNote,
-    status: 'pending',
+    status: submissionStatus,
+    autoApproved: autoApproval.enabled,
+    autoApproveDestinations: autoApproval.destinations,
     createdAt: now
   });
 
@@ -524,7 +540,7 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
     ok: true,
     submission: {
       id,
-      status: 'pending',
+      status: submissionStatus,
       aiArtworkConsent: Boolean(aiArtworkConsentAt)
     }
   }, 201, corsHeaders);
@@ -991,6 +1007,34 @@ async function createTimeCapsuleItem(request, env, url, corsHeaders, eventId, ct
   return json({ ok: true, item: await toTimeCapsuleItemClient(item, request, env) }, 201, corsHeaders);
 }
 
+async function createAutoTimeCapsuleItemForSubmission(env, event, submission, now) {
+  if (!event?.timeCapsuleEnabled || !submission?.id) return;
+  const existing = await getTimeCapsuleItemBySubmission(env, event.id, submission.id);
+  if (existing) return;
+
+  const sortOrder = await getNextTimeCapsuleSortOrder(env, event.id);
+  await env.MOMENTS_DB.prepare(`
+    INSERT INTO time_capsule_items (
+      id, event_id, submission_id, title, caption, chapter, captured_at, location,
+      sort_order, is_visible, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    crypto.randomUUID(),
+    event.id,
+    submission.id,
+    submission.guestName || 'Guest moment',
+    submission.guestNote || '',
+    'Guest moments',
+    submission.createdAt || now,
+    '',
+    sortOrder,
+    1,
+    now,
+    now
+  ).run();
+}
+
 async function updateTimeCapsuleItem(request, env, url, corsHeaders, itemId) {
   const token = getAccessToken(request, url);
   const item = await getTimeCapsuleItemWithEvent(env, itemId);
@@ -1256,14 +1300,21 @@ async function updateHostPartyViewSettings(request, env, url, corsHeaders, event
   }
 
   const partyViewSwipeEnabled = normalizeBoolean(body.partyViewSwipeEnabled) ? 1 : 0;
+  const autoApprovePartyViewEnabled = normalizeBoolean(body.autoApprovePartyViewEnabled) ? 1 : 0;
+  const autoApproveTimeCapsuleEnabled = normalizeBoolean(body.autoApproveTimeCapsuleEnabled) ? 1 : 0;
   const now = new Date().toISOString();
 
   await env.MOMENTS_DB.prepare(`
     UPDATE events
-    SET party_view_swipe_enabled = ?, updated_at = ?
+    SET party_view_swipe_enabled = ?,
+      auto_approve_party_view_enabled = ?,
+      auto_approve_time_capsule_enabled = ?,
+      updated_at = ?
     WHERE id = ? AND host_token = ?
   `).bind(
     partyViewSwipeEnabled,
+    autoApprovePartyViewEnabled,
+    autoApproveTimeCapsuleEnabled,
     now,
     event.id,
     token
@@ -1274,6 +1325,8 @@ async function updateHostPartyViewSettings(request, env, url, corsHeaders, event
     event: toEventClient({
       ...event,
       partyViewSwipeEnabled,
+      autoApprovePartyViewEnabled,
+      autoApproveTimeCapsuleEnabled,
       updatedAt: now
     }, env)
   }, 200, corsHeaders);
@@ -4140,6 +4193,7 @@ function buildGuestUploadNotificationEmail(details) {
   const eventName = details.event?.name || 'your event';
   const mediaLabel = getUploadMediaLabel(details.mediaType);
   const guestName = getUploadGuestName(details);
+  const autoApproveMessage = getAutoApproveNotificationMessage(details);
   const lines = [
     `${guestName} shared a new ${mediaLabel} for ${eventName}.`,
     '',
@@ -4150,7 +4204,12 @@ function buildGuestUploadNotificationEmail(details) {
 
   if (details.guestNote) lines.push(`Message from guest: ${details.guestNote}`);
   if (details.previewUrl) lines.push(`Preview image: ${details.previewUrl}`);
-  if (details.reviewUrl) {
+  if (autoApproveMessage) {
+    lines.push('', autoApproveMessage);
+    if (details.reviewUrl) {
+      lines.push('', 'View it in the host dashboard:', details.reviewUrl);
+    }
+  } else if (details.reviewUrl) {
     lines.push(
       '',
       'Review this moment:',
@@ -4240,7 +4299,10 @@ function buildGuestUploadNotificationHostHtml(details) {
   const mediaLabel = getUploadMediaLabel(details.mediaType);
   const guestName = getUploadGuestName(details);
   const headline = `${guestName} shared a new ${mediaLabel}`;
-  const intro = `Review this moment for ${eventName}. Approve or reject it, then choose whether it belongs in Party View, the Time Capsule, or both.`;
+  const autoApproveMessage = getAutoApproveNotificationMessage(details);
+  const intro = autoApproveMessage
+    ? `${autoApproveMessage} ${guestName} shared this ${mediaLabel} for ${eventName}.`
+    : `Review this moment for ${eventName}. Approve or reject it, then choose whether it belongs in Party View, the Time Capsule, or both.`;
   const detailRows = [
     ['Event', eventName],
     ['Guest', guestName],
@@ -4258,8 +4320,8 @@ function buildGuestUploadNotificationHostHtml(details) {
     .join('');
 
   const reviewButton = details.reviewUrl
-    ? `<a href="${escapeEmailAttribute(details.reviewUrl)}" style="display:inline-block;margin-top:20px;border-radius:8px;background:#2f6f5f;color:#fffaf5;font-size:16px;font-weight:800;line-height:1;text-decoration:none;padding:15px 20px;">Review this moment</a>
-      <p style="margin:14px 0 0;color:#7a6d66;font-size:13px;line-height:1.5;">This opens the private host dashboard so you can approve, reject, or place the moment where it belongs.</p>`
+    ? `<a href="${escapeEmailAttribute(details.reviewUrl)}" style="display:inline-block;margin-top:20px;border-radius:8px;background:#2f6f5f;color:#fffaf5;font-size:16px;font-weight:800;line-height:1;text-decoration:none;padding:15px 20px;">${autoApproveMessage ? 'View in host dashboard' : 'Review this moment'}</a>
+      <p style="margin:14px 0 0;color:#7a6d66;font-size:13px;line-height:1.5;">${autoApproveMessage ? escapeEmailHtml(autoApproveMessage) : 'This opens the private host dashboard so you can approve, reject, or place the moment where it belongs.'}</p>`
     : '';
   const previewBlock = buildUploadNotificationPreviewHtml(details, mediaLabel, eventName);
 
@@ -4335,6 +4397,21 @@ function buildUploadReviewUrl(env, details) {
   if (!eventId || !hostToken || !submissionId) return '';
 
   return `${getSiteUrl(env)}/moments/host/?event=${encodeURIComponent(eventId)}&submission=${encodeURIComponent(submissionId)}#token=${encodeURIComponent(hostToken)}`;
+}
+
+function getAutoApproveNotificationMessage(details) {
+  if (!details.autoApproved) return '';
+  const destinations = Array.isArray(details.autoApproveDestinations)
+    ? details.autoApproveDestinations.filter(Boolean)
+    : [];
+  const destinationText = destinations.length ? ` for ${formatEmailList(destinations)}` : '';
+  return `No action is required because auto-approve is on${destinationText}.`;
+}
+
+function formatEmailList(values) {
+  if (values.length <= 1) return values[0] || '';
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(', ')}, and ${values[values.length - 1]}`;
 }
 
 function getUploadNotificationSubjectSource(sourceLabel) {
@@ -4422,6 +4499,8 @@ async function getEventById(env, eventId) {
       countdown_message AS countdownMessage,
       guest_uploads_before_countdown_enabled AS guestUploadsBeforeCountdownEnabled,
       party_view_swipe_enabled AS partyViewSwipeEnabled,
+      auto_approve_party_view_enabled AS autoApprovePartyViewEnabled,
+      auto_approve_time_capsule_enabled AS autoApproveTimeCapsuleEnabled,
       host_name AS hostName,
       host_email AS hostEmail,
       host_token AS hostToken,
@@ -4455,6 +4534,8 @@ async function getHostEvent(env, eventId, token) {
       countdown_message AS countdownMessage,
       guest_uploads_before_countdown_enabled AS guestUploadsBeforeCountdownEnabled,
       party_view_swipe_enabled AS partyViewSwipeEnabled,
+      auto_approve_party_view_enabled AS autoApprovePartyViewEnabled,
+      auto_approve_time_capsule_enabled AS autoApproveTimeCapsuleEnabled,
       host_name AS hostName,
       host_email AS hostEmail,
       host_token AS hostToken,
@@ -4752,6 +4833,20 @@ function isAdminRequest(request, url, env) {
   const token = headerToken || bearer || queryToken;
 
   return Boolean(env.MOMENTS_ADMIN_TOKEN && token && token === env.MOMENTS_ADMIN_TOKEN);
+}
+
+function getGuestAutoApprovalConfig(event) {
+  const partyView = Number(event?.autoApprovePartyViewEnabled || event?.auto_approve_party_view_enabled || 0) === 1;
+  const timeCapsule = Number(event?.autoApproveTimeCapsuleEnabled || event?.auto_approve_time_capsule_enabled || 0) === 1 && Boolean(event?.timeCapsuleEnabled || event?.time_capsule_enabled);
+  const destinations = [];
+  if (partyView) destinations.push('Party View');
+  if (timeCapsule) destinations.push('Time Capsule');
+  return {
+    partyView,
+    timeCapsule,
+    enabled: partyView || timeCapsule,
+    destinations
+  };
 }
 
 function normalizeMediaType(mediaType, mimeType, filename = '') {
@@ -5146,6 +5241,8 @@ function toEventClient(row, env) {
     countdownMessage: row.countdownMessage || "",
     guestUploadsBeforeCountdownEnabled: Number(row.guestUploadsBeforeCountdownEnabled || 0) === 1,
     partyViewSwipeEnabled: Number(row.partyViewSwipeEnabled || 0) === 1,
+    autoApprovePartyViewEnabled: Number(row.autoApprovePartyViewEnabled || 0) === 1,
+    autoApproveTimeCapsuleEnabled: Number(row.autoApproveTimeCapsuleEnabled || 0) === 1,
     hostName: row.hostName,
     status: row.status,
     retentionExpiresAt: row.retentionExpiresAt,
@@ -5183,6 +5280,8 @@ function toAdminEventClient(row, env) {
     timeCapsuleShareToken: row.time_capsule_share_token || '',
     timeCapsulePublishedAt: row.time_capsule_published_at || '',
     partyViewSwipeEnabled: Number(row.party_view_swipe_enabled || 0) === 1,
+    autoApprovePartyViewEnabled: Number(row.auto_approve_party_view_enabled || row.autoApprovePartyViewEnabled || 0) === 1,
+    autoApproveTimeCapsuleEnabled: Number(row.auto_approve_time_capsule_enabled || row.autoApproveTimeCapsuleEnabled || 0) === 1,
     capsuleShareUrl: row.time_capsule_enabled && row.time_capsule_share_token
       ? buildTimeCapsuleShareUrl(env, row.id, row.time_capsule_share_token)
       : '',

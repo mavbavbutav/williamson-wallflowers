@@ -310,6 +310,33 @@ test('host can enable the guest Party View swipe feed', async () => {
   assert.equal(feedPayload.event.partyViewSwipeEnabled, true);
 });
 
+test('host can configure guest auto-approval destinations', async () => {
+  const db = new HostPostsFakeDb();
+  const env = envWithDb(db, new FakeBucket());
+
+  const updateResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-host/party-view-settings', {
+    method: 'PATCH',
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      Authorization: 'Bearer host-token'
+    },
+    body: JSON.stringify({
+      partyViewSwipeEnabled: true,
+      autoApprovePartyViewEnabled: true,
+      autoApproveTimeCapsuleEnabled: true
+    })
+  }), env);
+  const updatePayload = await updateResponse.json();
+
+  assert.equal(updateResponse.status, 200);
+  assert.equal(updatePayload.event.partyViewSwipeEnabled, true);
+  assert.equal(updatePayload.event.autoApprovePartyViewEnabled, true);
+  assert.equal(updatePayload.event.autoApproveTimeCapsuleEnabled, true);
+  assert.equal(db.events[0].partyViewSwipeEnabled, 1);
+  assert.equal(db.events[0].autoApprovePartyViewEnabled, 1);
+  assert.equal(db.events[0].autoApproveTimeCapsuleEnabled, 1);
+});
+
 test('host can push an approved guest submission to Party View', async () => {
   const db = new HostPostsFakeDb({
     submissions: [guestSubmission({ id: 'guest-approved', status: 'approved' })]
@@ -400,6 +427,8 @@ test('host and guest frontends expose Host Posts controls and party view', async
   assert.match(hostHtml, /id="hostPostsTabLabel"/);
   assert.match(hostHtml, /id="partyViewSettingsForm"/);
   assert.match(hostHtml, /id="partyViewSwipeEnabled"/);
+  assert.match(hostHtml, /id="autoApprovePartyViewEnabled"/);
+  assert.match(hostHtml, /id="autoApproveTimeCapsuleEnabled"/);
   assert.match(hostJs, /createHostPost/);
   assert.match(hostJs, /buildGuestUrl/);
   assert.match(hostJs, /renderGuestLink/);
@@ -408,6 +437,8 @@ test('host and guest frontends expose Host Posts controls and party view', async
   assert.match(hostJs, /getHostPartyViewLabel/);
   assert.match(hostJs, /Pre-Party View/);
   assert.match(hostJs, /savePartyViewSettings/);
+  assert.match(hostJs, /autoApprovePartyViewEnabled/);
+  assert.match(hostJs, /autoApproveTimeCapsuleEnabled/);
   assert.match(hostJs, /partyViewSwipeEnabled/);
   assert.match(hostJs, /\/host\/events\/\$\{encodeURIComponent\(eventId\)\}\/party-view-settings/);
   assert.match(hostJs, /setSubmissionPartyView/);
@@ -470,6 +501,13 @@ test('party view swipe migration adds a host-controlled event flag', async () =>
   const migration = await readText('../../worker/migrations/0012_wallflower_party_view_swipe.sql');
 
   assert.match(migration, /party_view_swipe_enabled INTEGER NOT NULL DEFAULT 0/);
+});
+
+test('guest auto-approval migration adds host-controlled destination flags', async () => {
+  const migration = await readText('../../worker/migrations/0015_wallflower_auto_approval_destinations.sql');
+
+  assert.match(migration, /auto_approve_party_view_enabled INTEGER NOT NULL DEFAULT 0/);
+  assert.match(migration, /auto_approve_time_capsule_enabled INTEGER NOT NULL DEFAULT 0/);
 });
 
 test('interaction migration creates reaction and comment tables', async () => {
@@ -635,7 +673,9 @@ class HostPostsFakeDb {
       timeCapsuleTitle: 'Host Post Test Time Capsule',
       timeCapsuleShareToken: 'share-token',
       timeCapsulePublishedAt: '2026-05-01T00:00:00.000Z',
-      partyViewSwipeEnabled: 0
+      partyViewSwipeEnabled: 0,
+      autoApprovePartyViewEnabled: 0,
+      autoApproveTimeCapsuleEnabled: 0
     }];
     this.tags = [{
       id: 'tag-host',
@@ -735,6 +775,8 @@ class HostPostsFakeStatement {
           countdownMessage: event.countdownMessage,
           guestUploadsBeforeCountdownEnabled: event.guestUploadsBeforeCountdownEnabled,
           partyViewSwipeEnabled: event.partyViewSwipeEnabled,
+          autoApprovePartyViewEnabled: event.autoApprovePartyViewEnabled,
+          autoApproveTimeCapsuleEnabled: event.autoApproveTimeCapsuleEnabled,
           eventStatus: event.status,
           retentionExpiresAt: event.retentionExpiresAt
         }
@@ -1010,10 +1052,27 @@ class HostPostsFakeStatement {
     }
 
     if (this.sql.includes('UPDATE events') && this.sql.includes('party_view_swipe_enabled = ?')) {
-      const [partyViewSwipeEnabled, updatedAt, id, hostToken] = this.params;
+      const hasAutoApproval = this.sql.includes('auto_approve_party_view_enabled');
+      const [
+        partyViewSwipeEnabled,
+        autoApprovePartyViewEnabledOrUpdatedAt,
+        autoApproveTimeCapsuleEnabledOrId,
+        updatedAtOrHostToken,
+        idParam,
+        hostTokenParam
+      ] = this.params;
+      const autoApprovePartyViewEnabled = hasAutoApproval ? autoApprovePartyViewEnabledOrUpdatedAt : 0;
+      const autoApproveTimeCapsuleEnabled = hasAutoApproval ? autoApproveTimeCapsuleEnabledOrId : 0;
+      const updatedAt = hasAutoApproval ? updatedAtOrHostToken : autoApprovePartyViewEnabledOrUpdatedAt;
+      const id = hasAutoApproval ? idParam : autoApproveTimeCapsuleEnabledOrId;
+      const hostToken = hasAutoApproval ? hostTokenParam : updatedAtOrHostToken;
       const event = this.db.events.find((item) => item.id === id && item.hostToken === hostToken);
       if (event) {
         event.partyViewSwipeEnabled = partyViewSwipeEnabled;
+        if (hasAutoApproval) {
+          event.autoApprovePartyViewEnabled = autoApprovePartyViewEnabled;
+          event.autoApproveTimeCapsuleEnabled = autoApproveTimeCapsuleEnabled;
+        }
         event.updatedAt = updatedAt;
       }
     }
