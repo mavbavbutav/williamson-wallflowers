@@ -483,6 +483,72 @@ test('group hero dedupes repeated face clusters before generating artwork', asyn
   }
 });
 
+test('group hero sends body-aware person references for unique face clusters', async () => {
+  const fullBody = guestSubmission({
+    id: 'guest-full-body',
+    object_key: 'moments/event-hero/guest-full-body.jpg',
+    objectKey: 'moments/event-hero/guest-full-body.jpg',
+    guest_name: 'Full Body Guest',
+    guestName: 'Full Body Guest',
+    status: 'approved',
+    created_at: '2026-09-19T20:05:00.000Z',
+    createdAt: '2026-09-19T20:05:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:05:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:05:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [fullBody],
+    faces: [
+      faceRow({
+        submission_id: 'guest-full-body',
+        submissionId: 'guest-full-body',
+        cluster_id: 'cluster-full-body',
+        clusterId: 'cluster-full-body',
+        confidence: 99.4,
+        bounding_box_json: JSON.stringify({ Left: 0.42, Top: 0.08, Width: 0.14, Height: 0.12 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.42, Top: 0.08, Width: 0.14, Height: 0.12 }),
+        quality_json: JSON.stringify({ Brightness: 82, Sharpness: 91 }),
+        qualityJson: JSON.stringify({ Brightness: 82, Sharpness: 91 })
+      })
+    ]
+  });
+  const bucket = new FakeBucket([[fullBody.object_key, 'source-full-body']]);
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
+  const calls = mockOpenAi({ normalizationBody: 'body-aware-person-reference' });
+
+  try {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://williamsonwallflowers.com',
+        Authorization: 'Bearer host-token'
+      }
+    }), env);
+
+    assert.equal(response.status, 202);
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].imageNames, ['guest-full-body-person-reference.jpg']);
+    assert.match(calls[0].prompt, /exactly one unique cartoon participant/i);
+    assert.match(calls[0].prompt, /pants, shoes/i);
+
+    const personReference = bucket.puts.find((put) => put.key.includes('/generated/person-roster/'));
+    assert.ok(personReference);
+    assert.equal(personReference.metadata.httpMetadata.contentType, 'image/jpeg');
+    assert.equal(personReference.metadata.customMetadata.mediaType, 'group-hero-person-reference');
+    assert.equal(personReference.metadata.customMetadata.sourceSubmissionId, 'guest-full-body');
+    assert.equal(personReference.metadata.customMetadata.faceClusterId, 'cluster-full-body');
+    assert.equal(personReference.metadata.customMetadata.cropMode, 'expanded-face-body');
+    assert.equal(personReference.metadata.customMetadata.visibleBody, 'full_body');
+    assert.equal(new TextDecoder().decode(personReference.body), 'body-aware-person-reference');
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('OpenAI failure stores failed group hero state without breaking approval', async () => {
   const submission = guestSubmission({
     id: 'guest-fail',

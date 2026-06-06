@@ -19,6 +19,8 @@ const AI_REFERENCE_MIME_TYPE = 'image/jpeg';
 const AI_REFERENCE_EXTENSION = 'jpg';
 const AI_REFERENCE_WIDTH = 1536;
 const AI_REFERENCE_QUALITY = 92;
+const GROUP_HERO_PERSON_REFERENCE_WIDTH = 768;
+const GROUP_HERO_PERSON_REFERENCE_HEIGHT = 1152;
 const OPENAI_IMAGE_DEFAULT_TIMEOUT_MS = 75 * 1000;
 const VIDEO_MAX_SECONDS = 30;
 const AUDIO_MAX_SECONDS = 60;
@@ -1619,7 +1621,12 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
     throw new Error('OpenAI API key is not configured.');
   }
 
-  let activeSources = sources;
+  const preparedSources = await prepareGroupHeroPersonReferences(env, request, eventId, sources)
+    .catch((error) => {
+      console.warn('AI group hero person-reference preparation failed', eventId, String(error.message || error));
+      return sources;
+    });
+  let activeSources = preparedSources;
   let activeSourceIds = sourceIds;
   let imageBytes = null;
 
@@ -1866,6 +1873,19 @@ async function tryOpenAiGroupHeroWithoutRejectedSource(env, apiKey, sources, pro
 }
 
 async function getGroupHeroSourceObject(env, source) {
+  const personReferenceObjectKey = source.personReferenceObjectKey || source.person_reference_object_key || '';
+  if (personReferenceObjectKey) {
+    const personReferenceObject = await env.MOMENTS_BUCKET.get(personReferenceObjectKey);
+    if (personReferenceObject) {
+      return {
+        object: personReferenceObject,
+        objectKey: personReferenceObjectKey,
+        mimeType: source.personReferenceMimeType || source.person_reference_mime_type || AI_REFERENCE_MIME_TYPE,
+        filename: source.personReferenceFilename || source.person_reference_filename || `${source.id}-person-reference.${AI_REFERENCE_EXTENSION}`
+      };
+    }
+  }
+
   const aiReferenceObjectKey = source.aiReferenceObjectKey || source.ai_reference_object_key || '';
   if (aiReferenceObjectKey) {
     const aiReferenceObject = await env.MOMENTS_BUCKET.get(aiReferenceObjectKey);
@@ -1936,8 +1956,149 @@ async function normalizeGroupHeroSourceImage(env, request, eventId, source) {
     ...source,
     aiReferenceObjectKey: objectKey,
     aiReferenceMimeType: AI_REFERENCE_MIME_TYPE,
-    aiReferenceWasGenerated: true
+    aiReferenceWasGenerated: true,
+    personReferenceObjectKey: '',
+    personReferenceMimeType: '',
+    personReferenceFilename: ''
   };
+}
+
+async function prepareGroupHeroPersonReferences(env, request, eventId, sources) {
+  const prepared = [];
+  for (const source of sources) {
+    const reference = await createGroupHeroPersonReference(env, request, eventId, source)
+      .catch((error) => {
+        console.warn('AI group hero person reference failed', eventId, source.id, String(error.message || error));
+        return null;
+      });
+    prepared.push(reference || source);
+  }
+  return prepared;
+}
+
+async function createGroupHeroPersonReference(env, request, eventId, source) {
+  const face = source.personReferenceFace || source.person_reference_face || null;
+  const crop = buildGroupHeroPersonReferenceCrop(face);
+  if (!crop) return null;
+
+  const objectKey = getGroupHeroPersonReferenceObjectKey(eventId, source.id, face.clusterId || face.cluster_id || '');
+  const existing = await env.MOMENTS_BUCKET.get(objectKey);
+  if (existing) {
+    return withGroupHeroPersonReference(source, objectKey, face, crop);
+  }
+
+  const sourceUrl = await buildGroupHeroSourceAccessUrl(request, env, source);
+  const response = await fetch(sourceUrl, {
+    cf: {
+      image: {
+        fit: 'cover',
+        width: GROUP_HERO_PERSON_REFERENCE_WIDTH,
+        height: GROUP_HERO_PERSON_REFERENCE_HEIGHT,
+        gravity: crop.gravity,
+        format: 'jpeg',
+        quality: AI_REFERENCE_QUALITY
+      }
+    }
+  });
+
+  if (!response.ok) return null;
+  const contentType = getBaseMimeType(response.headers.get('Content-Type') || '') || AI_REFERENCE_MIME_TYPE;
+  if (contentType !== AI_REFERENCE_MIME_TYPE) return null;
+
+  const bytes = await response.arrayBuffer();
+  if (!bytes || bytes.byteLength === 0 || bytes.byteLength > AI_REFERENCE_MAX_BYTES) return null;
+
+  await env.MOMENTS_BUCKET.put(objectKey, new Uint8Array(bytes), {
+    httpMetadata: {
+      contentType: AI_REFERENCE_MIME_TYPE,
+      contentDisposition: `inline; filename="${source.id}-person-reference.${AI_REFERENCE_EXTENSION}"`
+    },
+    customMetadata: {
+      eventId,
+      sourceSubmissionId: source.id,
+      mediaType: 'group-hero-person-reference',
+      source: 'face-body-crop',
+      faceClusterId: face.clusterId || face.cluster_id || '',
+      cropMode: crop.cropMode,
+      visibleBody: crop.visibleBody,
+      gravity: JSON.stringify(crop.gravity),
+      boundingBox: JSON.stringify(crop.boundingBox)
+    }
+  });
+
+  return withGroupHeroPersonReference(source, objectKey, face, crop);
+}
+
+function withGroupHeroPersonReference(source, objectKey, face, crop) {
+  return {
+    ...source,
+    personReferenceObjectKey: objectKey,
+    personReferenceMimeType: AI_REFERENCE_MIME_TYPE,
+    personReferenceFilename: `${source.id}-person-reference.${AI_REFERENCE_EXTENSION}`,
+    personReferenceFaceClusterId: face.clusterId || face.cluster_id || '',
+    personReferenceCropMode: crop.cropMode,
+    personReferenceVisibleBody: crop.visibleBody
+  };
+}
+
+async function buildGroupHeroSourceAccessUrl(request, env, source) {
+  const mediaType = source.mediaType || source.media_type || '';
+  if (mediaType === 'video') {
+    return buildThumbnailAccessUrl(request, env, source.id);
+  }
+  return buildMediaAccessUrl(request, env, source.id);
+}
+
+function getGroupHeroPersonReferenceObjectKey(eventId, submissionId, clusterId) {
+  const safeClusterId = cleanText(clusterId, 80).replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '') || 'face';
+  const safeSubmissionId = cleanText(submissionId, 80).replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '') || 'submission';
+  return `moments/${eventId}/generated/person-roster/${safeSubmissionId}-${safeClusterId}-v${GROUP_HERO_FACE_DEDUP_VERSION}.${AI_REFERENCE_EXTENSION}`;
+}
+
+function buildGroupHeroPersonReferenceCrop(face) {
+  if (!face) return null;
+  const boundingBox = normalizeGroupHeroFaceBoundingBox(face.boundingBox || face.bounding_box || face.boundingBoxJson || face.bounding_box_json);
+  if (!boundingBox) return null;
+  const faceCenterX = boundingBox.left + (boundingBox.width / 2);
+  const bodyAnchorY = boundingBox.top + (boundingBox.height * 3.6);
+  return {
+    cropMode: 'expanded-face-body',
+    visibleBody: estimateVisibleBodyFromFaceBox(boundingBox),
+    boundingBox,
+    gravity: {
+      x: clampUnit(faceCenterX),
+      y: clampUnit(bodyAnchorY)
+    }
+  };
+}
+
+function normalizeGroupHeroFaceBoundingBox(value) {
+  const raw = typeof value === 'string' ? parseJsonObject(value) : value || {};
+  const left = normalizeUnitValue(raw.Left ?? raw.left);
+  const top = normalizeUnitValue(raw.Top ?? raw.top);
+  const width = normalizeUnitValue(raw.Width ?? raw.width);
+  const height = normalizeUnitValue(raw.Height ?? raw.height);
+  if (left === null || top === null || width === null || height === null || width <= 0 || height <= 0) return null;
+  return { left, top, width, height };
+}
+
+function normalizeUnitValue(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return clampUnit(number);
+}
+
+function clampUnit(value) {
+  return Math.max(0, Math.min(1, Number(value)));
+}
+
+function estimateVisibleBodyFromFaceBox(box) {
+  const faceBottom = box.top + box.height;
+  const remainingBelow = Math.max(0, 1 - faceBottom);
+  if (remainingBelow >= box.height * 5) return 'full_body';
+  if (remainingBelow >= box.height * 3) return 'waist_up';
+  if (remainingBelow >= box.height * 1.5) return 'head_shoulders';
+  return 'face_only';
 }
 
 async function getEventGroupHeroClient(env, eventId, request) {
@@ -1986,10 +2147,11 @@ async function getEventGroupHero(env, eventId) {
 async function getGroupHeroSourceSubmissions(env, eventId) {
   const compatibleSources = await getGroupHeroCandidateSubmissions(env, eventId);
   await ensureGroupHeroFaceAnalyses(env, eventId, compatibleSources);
-  const clusterMap = await getGroupHeroFaceClusterMap(env, eventId, compatibleSources.map((source) => source.id));
+  const faceDetailsMap = await getGroupHeroFaceDetailsMap(env, eventId, compatibleSources.map((source) => source.id));
   const selection = selectDistinctGroupHeroSources(compatibleSources.map((source) => ({
     ...source,
-    faceClusterIds: clusterMap.get(source.id) || []
+    faceDetails: faceDetailsMap.get(source.id) || [],
+    faceClusterIds: uniqueCleanList((faceDetailsMap.get(source.id) || []).map((face) => face.clusterId))
   })));
   await storeGroupHeroSourceDecisions(env, eventId, selection.decisions);
   return selection.sources;
@@ -2124,7 +2286,11 @@ function selectDistinctGroupHeroSources(sources) {
     for (const clusterId of faceClusterIds) {
       seenFaceClusters.add(clusterId);
     }
-    selected.push(source);
+    const selectedSource = {
+      ...source,
+      personReferenceFace: selectGroupHeroPersonReferenceFace(source.faceDetails || [], newClusterIds)
+    };
+    selected.push(selectedSource);
     decisions.push(buildGroupHeroSourceDecision(source, 'selected', faceClusterIds.length ? 'adds-face-cluster' : 'fallback-name-or-unknown', {
       faceClusterIds,
       newClusterIds,
@@ -2135,6 +2301,28 @@ function selectDistinctGroupHeroSources(sources) {
   }
 
   return { sources: selected, decisions };
+}
+
+function selectGroupHeroPersonReferenceFace(faces, newClusterIds = []) {
+  const candidates = (Array.isArray(faces) ? faces : []).filter((face) => normalizeGroupHeroFaceBoundingBox(face.boundingBox || face.boundingBoxJson));
+  if (!candidates.length) return null;
+  const newClusterSet = new Set(newClusterIds || []);
+  return [...candidates].sort((left, right) => {
+    const leftNew = newClusterSet.has(left.clusterId) ? 1 : 0;
+    const rightNew = newClusterSet.has(right.clusterId) ? 1 : 0;
+    if (leftNew !== rightNew) return rightNew - leftNew;
+    return scoreGroupHeroPersonReferenceFace(right) - scoreGroupHeroPersonReferenceFace(left);
+  })[0];
+}
+
+function scoreGroupHeroPersonReferenceFace(face) {
+  const box = normalizeGroupHeroFaceBoundingBox(face.boundingBox || face.boundingBoxJson);
+  const quality = face.quality || {};
+  const brightness = Number(quality.Brightness ?? quality.brightness ?? 0);
+  const sharpness = Number(quality.Sharpness ?? quality.sharpness ?? 0);
+  const confidence = Number(face.confidence || 0);
+  const faceArea = box ? box.width * box.height : 0;
+  return confidence + (faceArea * 500) + (Number.isFinite(brightness) ? brightness * 0.05 : 0) + (Number.isFinite(sharpness) ? sharpness * 0.08 : 0);
 }
 
 function getGroupHeroGuestKey(value) {
@@ -2364,13 +2552,20 @@ async function getKnownEventFaces(env, eventId, provider) {
   })).filter((row) => row.providerFaceId && row.clusterId);
 }
 
-async function getGroupHeroFaceClusterMap(env, eventId, sourceIds) {
+async function getGroupHeroFaceDetailsMap(env, eventId, sourceIds) {
   const sourceSet = new Set(sourceIds || []);
   const map = new Map();
   if (!sourceSet.size || !isGroupHeroFaceDedupeEnabled(env)) return map;
 
   const result = await env.MOMENTS_DB.prepare(`
-    SELECT submission_id AS submissionId, cluster_id AS clusterId
+    SELECT
+      submission_id AS submissionId,
+      face_index AS faceIndex,
+      cluster_id AS clusterId,
+      confidence,
+      bounding_box_json AS boundingBoxJson,
+      quality_json AS qualityJson,
+      match_confidence AS matchConfidence
     FROM submission_faces
     WHERE event_id = ? AND face_signature_version = ? AND status = 'ready'
   `).bind(eventId, GROUP_HERO_FACE_DEDUP_VERSION).all();
@@ -2379,9 +2574,19 @@ async function getGroupHeroFaceClusterMap(env, eventId, sourceIds) {
     const submissionId = row.submissionId || row.submission_id || '';
     const clusterId = row.clusterId || row.cluster_id || '';
     if (!sourceSet.has(submissionId) || !clusterId) continue;
-    const clusters = map.get(submissionId) || [];
-    clusters.push(clusterId);
-    map.set(submissionId, uniqueCleanList(clusters));
+    const faces = map.get(submissionId) || [];
+    faces.push({
+      submissionId,
+      faceIndex: Number(row.faceIndex ?? row.face_index ?? faces.length),
+      clusterId,
+      confidence: Number(row.confidence || 0),
+      boundingBox: parseJsonObject(row.boundingBoxJson || row.bounding_box_json),
+      boundingBoxJson: row.boundingBoxJson || row.bounding_box_json || '',
+      quality: parseJsonObject(row.qualityJson || row.quality_json),
+      qualityJson: row.qualityJson || row.quality_json || '',
+      matchConfidence: Number(row.matchConfidence ?? row.match_confidence ?? 0)
+    });
+    map.set(submissionId, faces);
   }
   return map;
 }
@@ -2797,9 +3002,10 @@ function buildGroupHeroPrompt(eventName) {
   const eventLabel = cleanText(eventName, 90).replace(/["<>]/g, '').trim() || 'the event';
   return [
     `Create a warm editorial cartoon group portrait for the event "${eventLabel}".`,
-    'Use the curated uploaded photos and video thumbnails as approved real-person likeness references for the group scene.',
+    'Use each roster reference as exactly one unique cartoon participant in the group scene.',
     'If the same visible guest appears across multiple references, draw that guest once rather than repeating them; use the clearest single appearance as the likeness anchor.',
-    'Prioritize recognizable cartoon likeness over generic character design: preserve facial structure, hairstyle, age cues, skin tone, eyewear, expression, posture, and clothing color or style from each source image.',
+    'Prioritize recognizable cartoon likeness over generic character design: preserve facial structure, hairstyle, age cues, skin tone, eyewear, expression, posture, pants, shoes, dress length, accessories, and clothing color or style when visible.',
+    'If a reference only shows upper body, do not invent detailed lower-body clothing; keep the lower half plausible and visually understated.',
     'Use family-friendly, age-appropriate, respectful caricature styling without exaggerating sensitive traits.',
     'Place the people together in one cohesive celebratory portrait with premium floral wall decor and warm event lighting.',
     `If any readable sign, backdrop lettering, or wall text appears, it must say "${eventLabel}" exactly; otherwise avoid readable text entirely.`,
