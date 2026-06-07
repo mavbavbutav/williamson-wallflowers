@@ -598,7 +598,7 @@ test('group hero sends body-aware person references for unique face clusters', a
   }
 });
 
-test('group hero expands one multi-face upload into separate roster participants', async () => {
+test('group hero limits one multi-face upload to a single roster participant', async () => {
   const familyPhoto = guestSubmission({
     id: 'guest-family',
     object_key: 'moments/event-hero/guest-family.jpg',
@@ -666,15 +666,128 @@ test('group hero expands one multi-face upload into separate roster participants
     await drainWaitUntil(waitUntil);
 
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].imageCount, 2);
+    // The two-face upload must collapse to one participant so OpenAI never
+    // receives two overlapping crops of the same photo (the duplicate-person bug).
+    assert.equal(calls[0].imageCount, 1);
     assert.deepEqual(calls[0].imageNames, [
-      'guest-family-face-manabc123-person-reference.jpg',
-      'guest-family-face-baby987-person-reference.jpg'
+      'guest-family-face-manabc123-person-reference.jpg'
     ]);
     assert.match(calls[0].prompt, /Face ID F-manabc/);
-    assert.match(calls[0].prompt, /Face ID F-baby98/);
+    assert.doesNotMatch(calls[0].prompt, /Face ID F-baby98/);
+    assert.equal(db.groupHeroes[0].participant_count, 1);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-family']);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('group hero still renders a group-photo guest through their own solo photo', async () => {
+  const groupPair = guestSubmission({
+    id: 'guest-group-pair',
+    object_key: 'moments/event-hero/guest-group-pair.jpg',
+    objectKey: 'moments/event-hero/guest-group-pair.jpg',
+    guest_name: 'Group Pair',
+    guestName: 'Group Pair',
+    status: 'approved',
+    created_at: '2026-09-19T20:06:00.000Z',
+    createdAt: '2026-09-19T20:06:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:06:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:06:00.000Z'
+  });
+  const soloSecond = guestSubmission({
+    id: 'guest-p2-solo',
+    object_key: 'moments/event-hero/guest-p2-solo.jpg',
+    objectKey: 'moments/event-hero/guest-p2-solo.jpg',
+    guest_name: 'Solo Second',
+    guestName: 'Solo Second',
+    status: 'approved',
+    created_at: '2026-09-19T20:05:00.000Z',
+    createdAt: '2026-09-19T20:05:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:05:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:05:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [groupPair, soloSecond],
+    faces: [
+      faceRow({
+        submission_id: 'guest-group-pair',
+        submissionId: 'guest-group-pair',
+        cluster_id: 'face-p1aaaaa',
+        clusterId: 'face-p1aaaaa',
+        face_index: 0,
+        faceIndex: 0,
+        confidence: 99.9,
+        bounding_box_json: JSON.stringify({ Left: 0.2, Top: 0.1, Width: 0.3, Height: 0.3 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.2, Top: 0.1, Width: 0.3, Height: 0.3 }),
+        quality_json: JSON.stringify({ Brightness: 88, Sharpness: 92 }),
+        qualityJson: JSON.stringify({ Brightness: 88, Sharpness: 92 })
+      }),
+      faceRow({
+        id: 'group-pair-second',
+        submission_id: 'guest-group-pair',
+        submissionId: 'guest-group-pair',
+        cluster_id: 'face-p2bbbbb',
+        clusterId: 'face-p2bbbbb',
+        face_index: 1,
+        faceIndex: 1,
+        confidence: 99,
+        bounding_box_json: JSON.stringify({ Left: 0.6, Top: 0.4, Width: 0.18, Height: 0.18 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.6, Top: 0.4, Width: 0.18, Height: 0.18 }),
+        quality_json: JSON.stringify({ Brightness: 80, Sharpness: 70 }),
+        qualityJson: JSON.stringify({ Brightness: 80, Sharpness: 70 })
+      }),
+      faceRow({
+        id: 'solo-second-face',
+        submission_id: 'guest-p2-solo',
+        submissionId: 'guest-p2-solo',
+        cluster_id: 'face-p2bbbbb',
+        clusterId: 'face-p2bbbbb',
+        face_index: 0,
+        faceIndex: 0,
+        confidence: 99.5,
+        bounding_box_json: JSON.stringify({ Left: 0.35, Top: 0.2, Width: 0.34, Height: 0.34 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.35, Top: 0.2, Width: 0.34, Height: 0.34 }),
+        quality_json: JSON.stringify({ Brightness: 84, Sharpness: 88 }),
+        qualityJson: JSON.stringify({ Brightness: 84, Sharpness: 88 })
+      })
+    ]
+  });
+  const bucket = new FakeBucket([
+    [groupPair.object_key, 'source-group-pair'],
+    [soloSecond.object_key, 'source-p2-solo'],
+    ['moments/event-hero/generated/person-roster/guest-group-pair-face-p1aaaaa-v5.jpg', 'person-p1-reference'],
+    ['moments/event-hero/generated/person-roster/guest-p2-solo-face-p2bbbbb-v5.jpg', 'person-p2-reference']
+  ]);
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
+  const calls = mockOpenAi();
+
+  try {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://williamsonwallflowers.com',
+        Authorization: 'Bearer host-token'
+      }
+    }), env);
+
+    assert.equal(response.status, 202);
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.length, 1);
+    // The group photo contributes only its best face (P1); the second person (P2)
+    // is still rendered, but through their own solo photo - never twice, and the
+    // same submission is never sent more than once.
+    assert.equal(calls[0].imageCount, 2);
+    assert.deepEqual(calls[0].imageNames, [
+      'guest-group-pair-face-p1aaaaa-person-reference.jpg',
+      'guest-p2-solo-face-p2bbbbb-person-reference.jpg'
+    ]);
+    assert.match(calls[0].prompt, /Face ID F-p1aaaa/);
+    assert.match(calls[0].prompt, /Face ID F-p2bbbb/);
     assert.equal(db.groupHeroes[0].participant_count, 2);
-    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-family', 'guest-family']);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-group-pair', 'guest-p2-solo']);
   } finally {
     restoreFetch();
   }

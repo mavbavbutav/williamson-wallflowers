@@ -2262,7 +2262,7 @@ function buildGroupHeroPersonReferenceCrop(face, source = {}) {
   const faceCenterX = boundingBox.left + (boundingBox.width / 2);
   const duplicateFaceClusterIds = uniqueCleanList(source.duplicateFaceClusterIds || source.duplicate_face_cluster_ids || []);
   const faceClusterIds = uniqueCleanList(source.faceClusterIds || source.face_cluster_ids || []);
-  const shouldIsolate = duplicateFaceClusterIds.length > 0 || (faceClusterIds.length > 1 && boundingBox.height < 0.16);
+  const shouldIsolate = duplicateFaceClusterIds.length > 0 || faceClusterIds.length > 1;
   const bodyAnchorY = boundingBox.top + (boundingBox.height * (shouldIsolate ? 3.1 : 3.6));
   return {
     cropMode: shouldIsolate ? 'isolated-face-body' : 'expanded-face-body',
@@ -2530,27 +2530,32 @@ function selectDistinctGroupHeroSources(sources) {
         continue;
       }
 
+      // Limit each source image to a single roster participant. A rectangular
+      // crop cannot truly isolate one person from a group shot, so sending more
+      // than one crop from the same photo lets OpenAI redraw the same people
+      // multiple times. Pick the single best new face; any other people in the
+      // photo can still be rendered through their own photos because their face
+      // clusters stay un-seen here and remain eligible for later sources.
+      const primaryFace = participantFaces[0];
+      const primaryClusterId = primaryFace.clusterId || primaryFace.cluster_id || '';
+
       if (guestKey) seenGuestKeys.add(guestKey);
-      for (const face of participantFaces) {
-        const clusterId = face.clusterId || face.cluster_id || '';
-        if (!clusterId || seenFaceClusters.has(clusterId)) continue;
-        seenFaceClusters.add(clusterId);
-        selected.push({
-          ...source,
-          rosterParticipantId: `${source.id}:${clusterId}`,
-          rosterFaceClusterId: clusterId,
-          rosterFaceId: buildGroupHeroFacePublicId(clusterId),
-          duplicateFaceClusterIds: duplicateClusterIds,
-          personReferenceFace: face
-        });
-      }
+      seenFaceClusters.add(primaryClusterId);
+      selected.push({
+        ...source,
+        rosterParticipantId: `${source.id}:${primaryClusterId}`,
+        rosterFaceClusterId: primaryClusterId,
+        rosterFaceId: buildGroupHeroFacePublicId(primaryClusterId),
+        duplicateFaceClusterIds: duplicateClusterIds,
+        personReferenceFace: primaryFace
+      });
 
       decisions.push(buildGroupHeroSourceDecision(source, 'selected', 'adds-face-cluster', {
         faceClusterIds,
-        newClusterIds: participantFaces.map((face) => face.clusterId || face.cluster_id || '').filter(Boolean),
+        newClusterIds: [primaryClusterId],
         duplicateClusterIds,
         guestKey,
-        score: participantFaces.length
+        score: 1
       }));
       continue;
     }
