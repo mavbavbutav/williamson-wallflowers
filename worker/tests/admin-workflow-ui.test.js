@@ -9,6 +9,16 @@ test('admin page prioritizes event operations and setup workflow', async () => {
     readText('../../moments/styles.css')
   ]);
 
+  assert.match(adminHtml, /class="admin-nav"/);
+  assert.match(adminHtml, /data-view-target="overview"/);
+  assert.match(adminHtml, /data-view-target="events"/);
+  assert.match(adminHtml, /data-view-target="tags"/);
+  assert.match(adminHtml, /data-view-target="lighting"/);
+  assert.match(adminHtml, /data-view-target="audit"/);
+  assert.match(adminHtml, /data-view-target="maintenance"/);
+  assert.match(adminHtml, /class="admin-view" data-view="events"/);
+  assert.match(adminHtml, /class="admin-main"/);
+
   assert.match(adminHtml, /id="attentionPanel"/);
   assert.match(adminHtml, /id="eventEditPanel"/);
   assert.match(adminHtml, /id="eventEditForm"/);
@@ -24,6 +34,9 @@ test('admin page prioritizes event operations and setup workflow', async () => {
   assert.match(adminHtml, /<script type="module" src="admin\.js\?v=[^"]+"><\/script>/);
   assert.match(adminHtml, /<link rel="stylesheet" href="\.\.\/styles\.css\?v=[^"]+" \/>/);
 
+  assert.match(adminJs, /function setActiveView/);
+  assert.match(adminJs, /function bindViewNav/);
+  assert.match(adminJs, /data-view-target/);
   assert.match(adminJs, /function renderAttention/);
   assert.match(adminJs, /function renderAssignTagForm/);
   assert.match(adminJs, /function renderEventEditForm/);
@@ -47,6 +60,9 @@ test('admin page prioritizes event operations and setup workflow', async () => {
   assert.match(adminJs, /setup-guide"\)\.classList\.toggle\("is-collapsed"/);
   assert.doesNotMatch(adminJs, /<span class="muted link-preview">\$\{escapeHtml\(hostUrl\)\}<\/span>/);
 
+  assert.match(styles, /\.admin-nav/);
+  assert.match(styles, /\.admin-nav-button/);
+  assert.match(styles, /\.admin-view/);
   assert.match(styles, /\.attention-panel/);
   assert.match(styles, /\.event-card-list/);
   assert.match(styles, /\.link-action-group/);

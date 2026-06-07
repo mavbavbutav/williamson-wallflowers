@@ -8,6 +8,7 @@ import {
   getAdminToken,
   getPublishedCapsuleShareUrl,
   qs,
+  qsa,
   requestJson,
   setAdminToken,
   setNotice
@@ -19,6 +20,35 @@ let tags = [];
 let wallDevices = [];
 let mediaAuditEventId = "";
 let mediaAudit = null;
+
+const VIEW_STORAGE_KEY = "wallflowerMomentsAdminView";
+const VIEW_CONFIG = {
+  overview: {
+    title: "Overview",
+    subtitle: "Review events, copy private links, and handle setup tasks."
+  },
+  events: {
+    title: "Events",
+    subtitle: "Create events, copy host links, and edit event details."
+  },
+  tags: {
+    title: "Tags & setup",
+    subtitle: "Register reusable NTAGs, assign them to events, and copy guest scan links."
+  },
+  lighting: {
+    title: "Lighting",
+    subtitle: "Register the Butterfly Wall bridge and test WLED presets."
+  },
+  audit: {
+    title: "Media audit",
+    subtitle: "Private staff report for approved photos and video thumbnails."
+  },
+  maintenance: {
+    title: "Maintenance",
+    subtitle: "Run cleanup after confirming old, expired media can be purged."
+  }
+};
+let activeView = "overview";
 
 init();
 
@@ -47,11 +77,72 @@ function init() {
   qs("#generateTagCodeButton").addEventListener("click", generateTagCode);
   qs("#copyBridgeConfigButton").addEventListener("click", () => copyText(qs("#bridgeConfigText").textContent, qs("#copyBridgeConfigButton")));
   bindScrollActions();
+  bindViewNav();
 
   if (adminToken) {
     qs("#adminToken").value = adminToken;
     loadAdmin();
   }
+}
+
+function bindViewNav() {
+  qsa("[data-view-target]").forEach((button) => {
+    button.addEventListener("click", () => setActiveView(button.dataset.viewTarget));
+  });
+
+  qsa("[data-guide-view]").forEach((step) => {
+    step.addEventListener("click", () => setActiveView(step.dataset.guideView));
+  });
+
+  const saved = window.sessionStorage.getItem(VIEW_STORAGE_KEY);
+  const initialView = saved && VIEW_CONFIG[saved] ? saved : "overview";
+  setActiveView(initialView, { focus: false, persist: false });
+}
+
+function setActiveView(viewId, { focus = true, persist = true } = {}) {
+  const target = viewId && VIEW_CONFIG[viewId] ? viewId : "overview";
+  activeView = target;
+
+  qsa(".admin-view").forEach((view) => {
+    view.hidden = view.dataset.view !== target;
+  });
+
+  qsa("[data-view-target]").forEach((button) => {
+    const isActive = button.dataset.viewTarget === target;
+    button.classList.toggle("is-active", isActive);
+    if (isActive) {
+      button.setAttribute("aria-current", "page");
+    } else {
+      button.removeAttribute("aria-current");
+    }
+  });
+
+  const config = VIEW_CONFIG[target];
+  const titleEl = qs("#adminTitle");
+  const subtitleEl = qs("#adminSubtitle");
+  if (titleEl) titleEl.textContent = config.title;
+  if (subtitleEl) subtitleEl.textContent = config.subtitle;
+
+  if (persist) window.sessionStorage.setItem(VIEW_STORAGE_KEY, target);
+
+  if (focus) {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    focusElement(titleEl);
+  }
+}
+
+function updateNavBadges(stats) {
+  setNavBadge("#navEventsBadge", Number(stats.pending || 0));
+  setNavBadge("#navLightingBadge", Number(stats.pendingLightTriggers || 0));
+  const unassignedActiveTags = tags.filter((tag) => tag.status === "active" && !tag.activeEventId).length;
+  setNavBadge("#navTagsBadge", unassignedActiveTags);
+}
+
+function setNavBadge(selector, count) {
+  const badge = qs(selector);
+  if (!badge) return;
+  badge.textContent = count > 99 ? "99+" : String(count);
+  badge.hidden = !count;
 }
 
 async function loadAdmin() {
@@ -66,6 +157,7 @@ async function loadAdmin() {
     qs("#authPanel").hidden = true;
     qs("#adminApp").hidden = false;
     renderStats(payload.stats || {});
+    updateNavBadges(payload.stats || {});
     renderAttention();
     renderGuide();
     renderAssignTagForm();
@@ -215,20 +307,24 @@ function setButtonBusy(button, isBusy, label = "Working...") {
 
 function renderStats(stats) {
   const values = [
-    ["Events", stats.events || 0, "events"],
-    ["Tags", stats.tags || 0, "tags"],
-    ["Lights", stats.wallDevices || 0, "lights"],
-    ["Light queue", stats.pendingLightTriggers || 0, "pending"],
-    ["Pending", stats.pending || 0, "pending"],
-    ["Approved", stats.approved || 0, "approved"]
+    ["Events", stats.events || 0, "events", "events"],
+    ["Tags", stats.tags || 0, "tags", "tags"],
+    ["Lights", stats.wallDevices || 0, "lights", "lighting"],
+    ["Light queue", stats.pendingLightTriggers || 0, "pending", "lighting"],
+    ["Pending", stats.pending || 0, "pending", "events"],
+    ["Approved", stats.approved || 0, "approved", "events"]
   ];
 
-  qs("#statsGrid").innerHTML = values.map(([label, value, key]) => `
-    <div class="stat is-${key}">
+  qs("#statsGrid").innerHTML = values.map(([label, value, key, view]) => `
+    <button type="button" class="stat is-clickable is-${key}" data-view-target="${escapeAttribute(view)}">
       <strong>${value}</strong>
       <span>${label}</span>
-    </div>
+    </button>
   `).join("");
+
+  qsaWithin("#statsGrid", "[data-view-target]").forEach((button) => {
+    button.addEventListener("click", () => setActiveView(button.dataset.viewTarget));
+  });
 }
 
 function renderAttention() {
@@ -1236,6 +1332,10 @@ function bindScrollActions() {
 function scrollToTarget(selector) {
   const target = qs(selector);
   if (!target) return;
+  const view = target.closest(".admin-view");
+  if (view?.dataset.view) {
+    setActiveView(view.dataset.view, { focus: false });
+  }
   target.scrollIntoView({ behavior: "smooth", block: "start" });
   const focusTarget = target.matches("form") ? target.querySelector("input, select, button") : target;
   focusElement(focusTarget);
