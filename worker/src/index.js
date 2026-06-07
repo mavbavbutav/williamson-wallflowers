@@ -2147,14 +2147,6 @@ async function prepareGroupHeroPersonInput(env, request, eventId, apiKey, source
   return source;
 }
 
-function requiresGroupHeroPersonReference(source) {
-  const face = source.personReferenceFace || source.person_reference_face || null;
-  if (!face) return false;
-  const faceClusterIds = uniqueCleanList(source.faceClusterIds || source.face_cluster_ids || []);
-  const duplicateFaceClusterIds = uniqueCleanList(source.duplicateFaceClusterIds || source.duplicate_face_cluster_ids || []);
-  return faceClusterIds.length > 1 || duplicateFaceClusterIds.length > 0;
-}
-
 async function createGroupHeroPersonReference(env, request, eventId, source) {
   const face = source.personReferenceFace || source.person_reference_face || null;
   const crop = buildGroupHeroPersonReferenceCrop(face, source);
