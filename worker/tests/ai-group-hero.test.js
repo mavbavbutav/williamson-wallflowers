@@ -838,7 +838,7 @@ test('group hero renders every face from a multi-face upload via cutouts', async
   }
 });
 
-test('group hero still renders a group-photo guest through their own solo photo', async () => {
+test('group hero renders both faces from a group photo and skips a redundant solo of the same cluster', async () => {
   const groupPair = guestSubmission({
     id: 'guest-group-pair',
     object_key: 'moments/event-hero/guest-group-pair.jpg',
@@ -1036,6 +1036,7 @@ test('group hero isolates new participants from source images that also contain 
     await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
     await drainWaitUntil(waitUntil);
 
+    assert.equal(calls.length, 1);
     assert.equal(calls[0].imageCount, 2);
     assert.match(calls[0].prompt, /Face ID F-new609/);
     assert.ok(calls[0].imageNames.includes('guest-group-with-duplicate-face-new6096-person-cutout.png'));
