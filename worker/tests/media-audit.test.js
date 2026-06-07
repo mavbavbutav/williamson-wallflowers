@@ -45,8 +45,8 @@ test('admin frontend exposes the private media audit report controls', async () 
   assert.match(adminHtml, /Location cues/);
   assert.match(adminHtml, /id="mediaAuditFaceBoxesToggle"/);
   assert.match(adminHtml, /id="mediaAuditFaceSummary"/);
-  assert.match(adminHtml, /admin\.js\?v=20260607-face-analysis-1/);
-  assert.match(adminHtml, /styles\.css\?v=20260607-face-analysis-1/);
+  assert.match(adminHtml, /admin\.js\?v=20260607-face-orientation-1/);
+  assert.match(adminHtml, /styles\.css\?v=20260607-face-orientation-1/);
   assert.match(adminJs, /\/admin\/events\/\$\{encodeURIComponent\(eventId\)\}\/media-audit/);
   assert.match(adminJs, /previewUrl/);
   assert.match(adminJs, /EXIF and upload/);
@@ -54,6 +54,9 @@ test('admin frontend exposes the private media audit report controls', async () 
   assert.match(adminJs, /renderMediaAuditFaceBoxes/);
   assert.match(adminJs, /buildMediaAuditFaceDedupeFacts/);
   assert.match(adminJs, /getFaceDisplayId/);
+  assert.match(adminJs, /getDisplayFaceBoundingBox/);
+  assert.match(adminJs, /getMediaAuditDisplayDimensions/);
+  assert.match(adminJs, /case "6":/);
   assert.match(adminJs, /uploader IP/);
   assert.match(adminJs, /includeAi/);
   assert.match(adminJs, /exifGpsDisplayName/);

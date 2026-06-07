@@ -707,13 +707,14 @@ function renderMediaAuditFaceBoxes(insight) {
 
   return `
     <span class="media-audit-face-boxes" aria-hidden="true">
-      ${faces.map(renderMediaAuditFaceBox).join("")}
+      ${faces.map((face) => renderMediaAuditFaceBox(face, insight)).join("")}
     </span>
   `;
 }
 
-function renderMediaAuditFaceBox(face) {
-  const box = face.boundingBox || {};
+function renderMediaAuditFaceBox(face, insight) {
+  const box = getDisplayFaceBoundingBox(face.boundingBox || {}, insight);
+  if (!box) return "";
   const label = face.clusterLabel || face.clusterId || `face ${Number(face.index || 0) + 1}`;
   const faceId = getFaceDisplayId(face);
   const state = face.matched ? "match" : "unique";
@@ -731,6 +732,44 @@ function renderMediaAuditFaceBox(face) {
       <span>${escapeHtml(`${state === "match" ? "match" : "unique"} ${faceId || shortFaceClusterLabel(label)}`)}</span>
     </span>
   `;
+}
+
+function getDisplayFaceBoundingBox(box, insight = {}) {
+  const left = Number(box.left);
+  const top = Number(box.top);
+  const width = Number(box.width);
+  const height = Number(box.height);
+  if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
+
+  switch (getExifOrientationValue(insight.exifOrientation)) {
+    case "2":
+      return normalizeDisplayFaceBox(1 - left - width, top, width, height);
+    case "3":
+      return normalizeDisplayFaceBox(1 - left - width, 1 - top - height, width, height);
+    case "4":
+      return normalizeDisplayFaceBox(left, 1 - top - height, width, height);
+    case "5":
+      return normalizeDisplayFaceBox(top, left, height, width);
+    case "6":
+      return normalizeDisplayFaceBox(1 - top - height, left, height, width);
+    case "7":
+      return normalizeDisplayFaceBox(1 - top - height, 1 - left - width, height, width);
+    case "8":
+      return normalizeDisplayFaceBox(top, 1 - left - width, height, width);
+    default:
+      return normalizeDisplayFaceBox(left, top, width, height);
+  }
+}
+
+function normalizeDisplayFaceBox(left, top, width, height) {
+  const safeLeft = clampUnit(left);
+  const safeTop = clampUnit(top);
+  return {
+    left: safeLeft,
+    top: safeTop,
+    width: Math.max(0, Math.min(1 - safeLeft, width)),
+    height: Math.max(0, Math.min(1 - safeTop, height))
+  };
 }
 
 function renderMediaAuditIdentity(insight) {
@@ -861,6 +900,12 @@ function toPercent(value) {
   return `${Math.max(0, Math.min(100, number * 100)).toFixed(2)}%`;
 }
 
+function clampUnit(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(0, Math.min(1, number));
+}
+
 function buildMediaAuditStyleTags(insight) {
   return [
     ...(insight.sceneTags || []),
@@ -895,13 +940,27 @@ function getMediaAuditTitle(insight) {
 }
 
 function getMediaAuditAspectRatio(insight) {
-  const width = Number(insight.width || 0);
-  const height = Number(insight.height || 0);
+  const { width, height } = getMediaAuditDisplayDimensions(insight);
   const ratio = Number(insight.displayAspectRatio || 0) || (width && height ? width / height : 0);
   if (Number.isFinite(ratio) && ratio > 0) return String(Math.max(0.45, Math.min(2.4, ratio)).toFixed(4));
   if (insight.orientation === "portrait") return "0.8000";
   if (insight.orientation === "landscape") return "1.3333";
   return "1.0000";
+}
+
+function getMediaAuditDisplayDimensions(insight = {}) {
+  const width = Number(insight.width || 0);
+  const height = Number(insight.height || 0);
+  if (!width || !height) return { width: 0, height: 0 };
+  if (["5", "6", "7", "8"].includes(getExifOrientationValue(insight.exifOrientation))) {
+    return { width: height, height: width };
+  }
+  return { width, height };
+}
+
+function getExifOrientationValue(value) {
+  const orientation = String(value || "").trim();
+  return /^[1-8]$/.test(orientation) ? orientation : "1";
 }
 
 function formatBytes(bytes) {
