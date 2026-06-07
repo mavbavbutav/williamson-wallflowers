@@ -2168,6 +2168,109 @@ test('Worker source query supports video thumbnail inputs for group heroes', asy
   assert.doesNotMatch(source, /thumbnail_mime_type IN \('image\/jpeg', 'image\/png', 'image\/webp'\)/);
 });
 
+test('group hero merges two clusters that CompareFaces says are the same person', async () => {
+  // photoA is newer (DESC order puts it first) so it becomes the kept participant.
+  const photoA = guestSubmission({
+    id: 'guest-dupe-a', object_key: 'moments/event-hero/guest-dupe-a.jpg', objectKey: 'moments/event-hero/guest-dupe-a.jpg',
+    guest_name: '', guestName: '', status: 'approved',
+    created_at: '2026-09-19T20:06:00.000Z', createdAt: '2026-09-19T20:06:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:06:00.000Z', aiArtworkConsentAt: '2026-09-19T20:06:00.000Z'
+  });
+  const photoB = guestSubmission({
+    id: 'guest-dupe-b', object_key: 'moments/event-hero/guest-dupe-b.jpg', objectKey: 'moments/event-hero/guest-dupe-b.jpg',
+    guest_name: '', guestName: '', status: 'approved',
+    created_at: '2026-09-19T20:05:00.000Z', createdAt: '2026-09-19T20:05:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:05:00.000Z', aiArtworkConsentAt: '2026-09-19T20:05:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [photoA, photoB],
+    faces: [
+      faceRow({ submission_id: 'guest-dupe-a', submissionId: 'guest-dupe-a', cluster_id: 'face-dupA', clusterId: 'face-dupA',
+        bounding_box_json: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.18, Height: 0.18 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.18, Height: 0.18 }) }),
+      faceRow({ id: 'face-b', submission_id: 'guest-dupe-b', submissionId: 'guest-dupe-b', cluster_id: 'face-dupB', clusterId: 'face-dupB',
+        bounding_box_json: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.18, Height: 0.18 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.18, Height: 0.18 }) })
+    ]
+  });
+  // Single-face sources use reference crops (not cutouts). Pre-store them so the
+  // cache-hit path fires and getGroupHeroDedupeImageBytes can read the bytes.
+  const bucket = new FakeBucket([
+    [photoA.object_key, 'src-a'], [photoB.object_key, 'src-b'],
+    ['moments/event-hero/generated/person-roster/guest-dupe-a-face-dupA-v5.jpg', 'ref-crop-a'],
+    ['moments/event-hero/generated/person-roster/guest-dupe-b-face-dupB-v5.jpg', 'ref-crop-b']
+  ]);
+  const env = envWithDb(db, bucket, { AWS_REGION: 'us-east-1', AWS_ACCESS_KEY_ID: 'k', AWS_SECRET_ACCESS_KEY: 's' });
+  const waitUntil = [];
+  const calls = mockOpenAiWithCompareFaces({ similarity: 98 });
+
+  try {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: { Origin: 'https://williamsonwallflowers.com', Authorization: 'Bearer host-token' }
+    }), env);
+    assert.equal(response.status, 202);
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.openAi.length, 1);
+    assert.equal(calls.openAi[0].imageCount, 1); // duplicate merged out
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-dupe-a']);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('group hero keeps both participants when CompareFaces is below the merge threshold', async () => {
+  // photoA is newer (DESC order puts it first) so both appear in A-then-B order.
+  const photoA = guestSubmission({
+    id: 'guest-keep-a', object_key: 'moments/event-hero/guest-keep-a.jpg', objectKey: 'moments/event-hero/guest-keep-a.jpg',
+    guest_name: '', guestName: '', status: 'approved',
+    created_at: '2026-09-19T20:06:00.000Z', createdAt: '2026-09-19T20:06:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:06:00.000Z', aiArtworkConsentAt: '2026-09-19T20:06:00.000Z'
+  });
+  const photoB = guestSubmission({
+    id: 'guest-keep-b', object_key: 'moments/event-hero/guest-keep-b.jpg', objectKey: 'moments/event-hero/guest-keep-b.jpg',
+    guest_name: '', guestName: '', status: 'approved',
+    created_at: '2026-09-19T20:05:00.000Z', createdAt: '2026-09-19T20:05:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:05:00.000Z', aiArtworkConsentAt: '2026-09-19T20:05:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [photoA, photoB],
+    faces: [
+      faceRow({ submission_id: 'guest-keep-a', submissionId: 'guest-keep-a', cluster_id: 'face-keepA', clusterId: 'face-keepA',
+        bounding_box_json: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.18, Height: 0.18 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.18, Height: 0.18 }) }),
+      faceRow({ id: 'face-kb', submission_id: 'guest-keep-b', submissionId: 'guest-keep-b', cluster_id: 'face-keepB', clusterId: 'face-keepB',
+        bounding_box_json: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.18, Height: 0.18 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.18, Height: 0.18 }) })
+    ]
+  });
+  // Pre-store reference crops for both single-face sources.
+  const bucket = new FakeBucket([
+    [photoA.object_key, 'src-a'], [photoB.object_key, 'src-b'],
+    ['moments/event-hero/generated/person-roster/guest-keep-a-face-keepA-v5.jpg', 'ref-crop-a'],
+    ['moments/event-hero/generated/person-roster/guest-keep-b-face-keepB-v5.jpg', 'ref-crop-b']
+  ]);
+  const env = envWithDb(db, bucket, { AWS_REGION: 'us-east-1', AWS_ACCESS_KEY_ID: 'k', AWS_SECRET_ACCESS_KEY: 's' });
+  const waitUntil = [];
+  const calls = mockOpenAiWithCompareFaces({ similarity: 60 });
+
+  try {
+    await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: { Origin: 'https://williamsonwallflowers.com', Authorization: 'Bearer host-token' }
+    }), env);
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.openAi[0].imageCount, 2);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-keep-a', 'guest-keep-b']);
+  } finally {
+    restoreFetch();
+  }
+});
+
 async function readText(path) {
   return readFile(new URL(path, import.meta.url), 'utf8');
 }
@@ -2344,6 +2447,41 @@ function mockOpenAiAndAwsRekognition() {
       return new Response(JSON.stringify({ data: [{ b64_json: btoa('generated-png') }] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    return originalFetch(url, init);
+  };
+  return calls;
+}
+
+function mockOpenAiWithCompareFaces({ similarity = 0 } = {}) {
+  originalFetch = globalThis.fetch;
+  const calls = { openAi: [], compareFaces: [] };
+  globalThis.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.includes('rekognition.')) {
+      const target = init.headers?.['x-amz-target'] || init.headers?.['X-Amz-Target'] || '';
+      if (target === 'RekognitionService.CompareFaces') {
+        calls.compareFaces.push(target);
+        return new Response(JSON.stringify({ FaceMatches: similarity > 0 ? [{ Similarity: similarity }] : [] }), {
+          status: 200, headers: { 'Content-Type': 'application/x-amz-json-1.1' }
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/x-amz-json-1.1' } });
+    }
+    if (urlText.includes('/moments-api/media/') || urlText.includes('/moments-api/thumbnails/')) {
+      return new Response('', { status: 502 });
+    }
+    if (urlText.includes('api.openai.com/v1/images/edits')) {
+      const entries = Array.from(init.body.entries());
+      const images = entries.filter(([key]) => key === 'image[]');
+      calls.openAi.push({
+        prompt: entries.find(([key]) => key === 'prompt')?.[1],
+        imageCount: images.length,
+        imageNames: images.map(([, image]) => image?.name || '')
+      });
+      return new Response(JSON.stringify({ data: [{ b64_json: btoa('generated-png') }] }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
       });
     }
     return originalFetch(url, init);

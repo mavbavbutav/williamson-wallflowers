@@ -1675,7 +1675,12 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
       return sources;
     });
   addGroupHeroAttemptTiming(generationContext, 'faceReferenceMs', Date.now() - faceReferenceStartedAtMs);
-  let activeSources = preparedSources;
+  const dedupedSources = await mergeDuplicateGroupHeroParticipants(env, preparedSources)
+    .catch((error) => {
+      console.warn('AI group hero duplicate merge failed', eventId, String(error.message || error));
+      return preparedSources;
+    });
+  let activeSources = dedupedSources;
   let activeSourceIds = activeSources.map((source) => source.id);
   let imageBytes = null;
 
@@ -2162,6 +2167,40 @@ async function prepareGroupHeroPersonInput(env, request, eventId, apiKey, source
   // No cutout and no crop: drop multi-face (unsafe), send the raw single-person source otherwise.
   if (isMultiFace) return null;
   return source;
+}
+
+async function getGroupHeroDedupeImageBytes(env, source) {
+  try {
+    const sourceObject = await getGroupHeroSourceObject(env, source);
+    return await r2ObjectToArrayBuffer(sourceObject.object);
+  } catch (error) {
+    console.warn('Group hero dedupe image unavailable', source.id, String(error.message || error));
+    return null;
+  }
+}
+
+async function mergeDuplicateGroupHeroParticipants(env, sources) {
+  if (!Array.isArray(sources) || sources.length < 2) return sources;
+  if (!hasGroupHeroFaceProviderConfig(env) || getGroupHeroFaceProvider(env) !== 'aws-rekognition') return sources;
+
+  const threshold = getGroupHeroDupMergeThreshold(env);
+  const kept = [];
+  for (const candidate of sources) {
+    const candidateBytes = await getGroupHeroDedupeImageBytes(env, candidate);
+    if (!candidateBytes) { kept.push({ source: candidate, bytes: null }); continue; }
+    let duplicateOf = null;
+    for (const existing of kept) {
+      if (!existing.bytes) continue;
+      const similarity = await awsRekognitionCompareFaces(env, candidateBytes, existing.bytes).catch(() => 0);
+      if (similarity >= threshold) { duplicateOf = existing.source; break; }
+    }
+    if (duplicateOf) {
+      console.warn('Merged duplicate group hero participant', candidate.id, '->', duplicateOf.id);
+      continue;
+    }
+    kept.push({ source: candidate, bytes: candidateBytes });
+  }
+  return kept.map((entry) => entry.source);
 }
 
 async function createGroupHeroPersonReference(env, request, eventId, source) {
@@ -3239,6 +3278,11 @@ function getGroupHeroFaceMatchThreshold(env) {
   return Number.isFinite(value) ? Math.max(80, Math.min(value, 99.9)) : GROUP_HERO_FACE_MATCH_THRESHOLD;
 }
 
+function getGroupHeroDupMergeThreshold(env) {
+  const value = Number(env.GROUP_HERO_DUP_MERGE_THRESHOLD || GROUP_HERO_DUP_MERGE_THRESHOLD);
+  return Number.isFinite(value) ? Math.max(85, Math.min(value, 99.9)) : GROUP_HERO_DUP_MERGE_THRESHOLD;
+}
+
 function hasGroupHeroFaceProviderConfig(env) {
   if (getGroupHeroFaceProvider(env) !== 'aws-rekognition') return false;
   return Boolean(getAwsRekognitionRegion(env) && getAwsAccessKeyId(env) && getAwsSecretAccessKey(env));
@@ -3309,6 +3353,22 @@ async function searchAwsRekognitionFaces(env, collectionId, providerFaceId) {
     MaxFaces: 10
   });
   return Array.isArray(payload.FaceMatches) ? payload.FaceMatches : [];
+}
+
+async function awsRekognitionCompareFaces(env, sourceBytes, targetBytes) {
+  const payload = await callAwsRekognition(env, 'RekognitionService.CompareFaces', {
+    SourceImage: { Bytes: base64EncodeBytes(new Uint8Array(sourceBytes)) },
+    TargetImage: { Bytes: base64EncodeBytes(new Uint8Array(targetBytes)) },
+    SimilarityThreshold: getGroupHeroDupMergeThreshold(env),
+    QualityFilter: 'AUTO'
+  });
+  const matches = Array.isArray(payload.FaceMatches) ? payload.FaceMatches : [];
+  let best = 0;
+  for (const match of matches) {
+    const similarity = Number(match?.Similarity || 0);
+    if (similarity > best) best = similarity;
+  }
+  return best;
 }
 
 async function callAwsRekognition(env, target, payload) {
