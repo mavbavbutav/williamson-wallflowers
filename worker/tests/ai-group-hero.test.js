@@ -649,6 +649,135 @@ test('group hero sends a cached person cutout when one already exists', async ()
   }
 });
 
+test('group hero generates and stores a person cutout on cache miss', async () => {
+  const solo = guestSubmission({
+    id: 'guest-cutout-miss',
+    object_key: 'moments/event-hero/guest-cutout-miss.jpg',
+    objectKey: 'moments/event-hero/guest-cutout-miss.jpg',
+    guest_name: 'Cutout Miss',
+    guestName: 'Cutout Miss',
+    status: 'approved',
+    created_at: '2026-09-19T20:05:00.000Z',
+    createdAt: '2026-09-19T20:05:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:05:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:05:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [solo],
+    faces: [
+      faceRow({
+        submission_id: 'guest-cutout-miss',
+        submissionId: 'guest-cutout-miss',
+        cluster_id: 'face-miss22',
+        clusterId: 'face-miss22',
+        bounding_box_json: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.16, Height: 0.16 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.16, Height: 0.16 })
+      })
+    ]
+  });
+  const bucket = new FakeBucket([[solo.object_key, 'source-cutout-miss']]);
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
+  const calls = mockOpenAi({ normalizationBody: 'crop-bytes-for-cutout' });
+
+  try {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: { Origin: 'https://williamsonwallflowers.com', Authorization: 'Bearer host-token' }
+    }), env);
+    assert.equal(response.status, 202);
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    // Two OpenAI calls: [0] cutout, [1] composition.
+    assert.equal(calls.length, 2);
+    assert.match(calls[0].prompt, /Remove every other person/);
+    assert.equal(calls[1].imageNames.length, 1);
+    assert.match(calls[1].imageNames[0], /guest-cutout-miss-face-miss22-person-cutout\.png$/);
+    const cutoutPut = bucket.puts.find((put) => put.key.includes('/generated/person-cutout/'));
+    assert.ok(cutoutPut);
+    assert.equal(cutoutPut.metadata.customMetadata.mediaType, 'group-hero-person-cutout');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('group hero drops a multi-face participant when its cutout cannot be produced', async () => {
+  const groupPhoto = guestSubmission({
+    id: 'guest-nocutout-group',
+    object_key: 'moments/event-hero/guest-nocutout-group.jpg',
+    objectKey: 'moments/event-hero/guest-nocutout-group.jpg',
+    guest_name: '',
+    guestName: '',
+    status: 'approved',
+    created_at: '2026-09-19T20:05:00.000Z',
+    createdAt: '2026-09-19T20:05:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:05:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:05:00.000Z'
+  });
+  const soloPhoto = guestSubmission({
+    id: 'guest-nocutout-solo',
+    object_key: 'moments/event-hero/guest-nocutout-solo.jpg',
+    objectKey: 'moments/event-hero/guest-nocutout-solo.jpg',
+    guest_name: 'Solo Ok',
+    guestName: 'Solo Ok',
+    status: 'approved',
+    created_at: '2026-09-19T20:06:00.000Z',
+    createdAt: '2026-09-19T20:06:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:06:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:06:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [groupPhoto, soloPhoto],
+    faces: [
+      faceRow({
+        submission_id: 'guest-nocutout-group', submissionId: 'guest-nocutout-group',
+        cluster_id: 'face-gA', clusterId: 'face-gA', face_index: 0, faceIndex: 0,
+        bounding_box_json: JSON.stringify({ Left: 0.30, Top: 0.2, Width: 0.12, Height: 0.12 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.30, Top: 0.2, Width: 0.12, Height: 0.12 })
+      }),
+      faceRow({
+        id: 'face-gB', submission_id: 'guest-nocutout-group', submissionId: 'guest-nocutout-group',
+        cluster_id: 'face-gB', clusterId: 'face-gB', face_index: 1, faceIndex: 1,
+        bounding_box_json: JSON.stringify({ Left: 0.40, Top: 0.2, Width: 0.12, Height: 0.12 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.40, Top: 0.2, Width: 0.12, Height: 0.12 })
+      }),
+      faceRow({
+        id: 'face-solo', submission_id: 'guest-nocutout-solo', submissionId: 'guest-nocutout-solo',
+        cluster_id: 'face-solo', clusterId: 'face-solo',
+        bounding_box_json: JSON.stringify({ Left: 0.40, Top: 0.2, Width: 0.18, Height: 0.18 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.40, Top: 0.2, Width: 0.18, Height: 0.18 })
+      })
+    ]
+  });
+  // Pre-store ONLY the solo cutout; group faces overlap (centers 0.36 vs 0.46) so neither is
+  // sole-in-column, and with no media bytes their cutouts/crops cannot be produced -> dropped.
+  const bucket = new FakeBucket([
+    [groupPhoto.object_key, 'src-group'],
+    [soloPhoto.object_key, 'src-solo'],
+    ['moments/event-hero/generated/person-cutout/guest-nocutout-solo-face-solo-v1.png', 'solo-cutout']
+  ]);
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
+  const calls = mockOpenAi(); // media fetches 502 -> group cutouts and crops fail
+
+  try {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: { Origin: 'https://williamsonwallflowers.com', Authorization: 'Bearer host-token' }
+    }), env);
+    assert.equal(response.status, 202);
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].imageNames, ['guest-nocutout-solo-face-solo-person-cutout.png']);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-nocutout-solo']);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('group hero limits one multi-face upload to a single roster participant', async () => {
   const familyPhoto = guestSubmission({
     id: 'guest-family',

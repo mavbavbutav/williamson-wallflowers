@@ -1665,9 +1665,9 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
   }
 
   const faceReferenceStartedAtMs = Date.now();
-  const preparedSources = await prepareGroupHeroPersonReferences(env, request, eventId, sources)
+  const preparedSources = await prepareGroupHeroPersonInputs(env, request, eventId, apiKey, sources)
     .catch((error) => {
-      console.warn('AI group hero person-reference preparation failed', eventId, String(error.message || error));
+      console.warn('AI group hero person-input preparation failed', eventId, String(error.message || error));
       return sources;
     });
   addGroupHeroAttemptTiming(generationContext, 'faceReferenceMs', Date.now() - faceReferenceStartedAtMs);
@@ -2110,35 +2110,41 @@ async function normalizeGroupHeroSourceImage(env, request, eventId, source) {
   };
 }
 
-async function prepareGroupHeroPersonReferences(env, request, eventId, sources) {
-  const prepared = [];
-  for (const source of sources) {
-    const cutout = await createGroupHeroPersonCutout(env, getOpenAiApiKey(env), request, eventId, source)
-      .catch((error) => {
-        console.warn('AI group hero cutout failed', eventId, source.id, String(error.message || error));
-        return null;
-      });
-    if (cutout) {
-      prepared.push(cutout);
-      continue;
-    }
-    const requiresPersonReference = requiresGroupHeroPersonReference(source);
-    const reference = await createGroupHeroPersonReference(env, request, eventId, source)
-      .catch((error) => {
-        console.warn('AI group hero person reference failed', eventId, source.id, String(error.message || error));
-        return null;
-      });
-    if (reference) {
-      prepared.push(reference);
-      continue;
-    }
-    if (requiresPersonReference) {
-      console.warn('Skipped AI group hero participant without isolated person reference', eventId, source.id, source.rosterParticipantId || '');
-      continue;
-    }
-    prepared.push(source);
+async function prepareGroupHeroPersonInputs(env, request, eventId, apiKey, sources) {
+  const prepared = await Promise.all((Array.isArray(sources) ? sources : []).map((source) =>
+    prepareGroupHeroPersonInput(env, request, eventId, apiKey, source)
+  ));
+  return prepared.filter(Boolean);
+}
+
+async function prepareGroupHeroPersonInput(env, request, eventId, apiKey, source) {
+  const cutout = await createGroupHeroPersonCutout(env, apiKey, request, eventId, source)
+    .catch((error) => {
+      console.warn('AI group hero cutout failed', eventId, source.id, String(error.message || error));
+      return null;
+    });
+  if (cutout) return cutout;
+
+  const faceClusterIds = uniqueCleanList(source.faceClusterIds || source.face_cluster_ids || []);
+  const duplicateFaceClusterIds = uniqueCleanList(source.duplicateFaceClusterIds || source.duplicate_face_cluster_ids || []);
+  const isMultiFace = faceClusterIds.length > 1 || duplicateFaceClusterIds.length > 0;
+
+  // A multi-face source is only safe without a cutout if the chosen face is alone in its column.
+  if (isMultiFace && !isGroupHeroFaceSoleInColumn(source.personReferenceFace, source.faceDetails)) {
+    console.warn('Dropped group hero participant without a clean cutout', eventId, source.id, source.rosterParticipantId || '');
+    return null;
   }
-  return prepared;
+
+  const reference = await createGroupHeroPersonReference(env, request, eventId, source)
+    .catch((error) => {
+      console.warn('AI group hero person reference failed', eventId, source.id, String(error.message || error));
+      return null;
+    });
+  if (reference) return reference;
+
+  // No cutout and no crop: drop multi-face (unsafe), send the raw single-person source otherwise.
+  if (isMultiFace) return null;
+  return source;
 }
 
 function requiresGroupHeroPersonReference(source) {
@@ -2399,6 +2405,25 @@ function buildGroupHeroPersonReferenceCrop(face, source = {}) {
       y: clampUnit(bodyAnchorY)
     }
   };
+}
+
+function isGroupHeroFaceSoleInColumn(face, allFaces) {
+  if (!face) return false;
+  const target = normalizeGroupHeroFaceBoundingBox(face.boundingBox || face.boundingBoxJson || face.bounding_box_json);
+  if (!target) return false;
+  const targetCenterX = target.left + (target.width / 2);
+  const targetClusterId = face.clusterId || face.cluster_id || '';
+  for (const other of Array.isArray(allFaces) ? allFaces : []) {
+    const otherClusterId = other.clusterId || other.cluster_id || '';
+    if (otherClusterId && otherClusterId === targetClusterId) continue;
+    const box = normalizeGroupHeroFaceBoundingBox(other.boundingBox || other.boundingBoxJson || other.bounding_box_json);
+    if (!box) continue;
+    const otherCenterX = box.left + (box.width / 2);
+    if (Math.abs(otherCenterX - targetCenterX) < GROUP_HERO_ISOLATED_COLUMN_HALF_WIDTH + (box.width / 2)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function normalizeGroupHeroFaceBoundingBox(value) {
