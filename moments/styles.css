@@ -1799,7 +1799,7 @@ textarea:focus-visible {
   .host-page #mediaGrid .media-thumb {
     height: auto;
     min-height: 0;
-    aspect-ratio: 4 / 3;
+    aspect-ratio: var(--media-aspect, 4 / 3);
   }
 
   .host-page #mediaGrid .media-thumb.is-video {
