@@ -112,6 +112,7 @@ const PUBLIC_SITE_URL = 'https://williamsonwallflowers.com';
 const STREAM_API_BASE_URL = 'https://api.cloudflare.com/client/v4';
 const STREAM_DELIVERY_BASE_URL = 'https://videodelivery.net';
 const streamPlaybackTokenCache = new Map();
+let groupHeroAttemptTableEnsured = false;
 
 export default {
   async fetch(request, env, ctx) {
@@ -1497,7 +1498,9 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
   const processNow = Boolean(options.processNow);
   const event = await getEventById(env, eventId);
   const prompt = buildGroupHeroPrompt(event?.name || event?.eventName || 'the event');
+  const sourceSelectionStartedAtMs = Date.now();
   const sources = await getGroupHeroSourceSubmissions(env, eventId);
+  const sourceSelectionMs = Date.now() - sourceSelectionStartedAtMs;
   const sourceIds = sources.map((source) => source.id);
   const existing = await getEventGroupHero(env, eventId);
   const existingStatus = existing?.status || '';
@@ -1553,16 +1556,43 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
 
   const generationContext = {
     updatedAt: queuedUpdatedAt,
-    sourceIds
+    sourceIds,
+    attemptId: '',
+    attemptStartedAtMs: sourceSelectionStartedAtMs,
+    attemptPhase: 'queued',
+    attemptTimings: {
+      sourceSelectionMs,
+      faceReferenceMs: 0,
+      openaiMs: 0,
+      r2WriteMs: 0
+    }
   };
 
   if (!processNow) {
     return;
   }
 
+  generationContext.attemptId = await safeStartEventGroupHeroGenerationAttempt(env, {
+    eventId,
+    triggerType: force ? 'manual' : (staleGeneration ? 'stale-retry' : 'scheduled'),
+    sourceIds,
+    participantCount: sources.length,
+    model: getOpenAiImageModel(env),
+    sourceSelectionMs,
+    startedAt: new Date(sourceSelectionStartedAtMs).toISOString()
+  });
+
   const work = generateEventGroupHero(env, request, eventId, sources, sourceIds, prompt, existingObjectKey, existing, generationContext).catch(async (error) => {
     console.error('AI group hero generation failed', eventId, String(error.message || error));
     const failureSourceIds = generationContext.sourceIds || sourceIds;
+    await safeUpdateEventGroupHeroGenerationAttempt(env, generationContext, {
+      status: 'failed',
+      phase: generationContext.attemptPhase || 'failed',
+      sourceIds: failureSourceIds,
+      participantCount: failureSourceIds.length,
+      errorMessage: cleanText(error.message || 'AI group hero generation failed.', 500),
+      completed: true
+    });
     const failedUpdatedAt = await updateEventGroupHeroStateIfCurrent(env, {
       eventId,
       status: 'failed',
@@ -1616,24 +1646,45 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
   }
   generationContext.updatedAt = generationUpdatedAt;
   generationContext.sourceIds = currentSourceIds;
+  generationContext.attemptPhase = 'face_reference_prep';
+  await safeUpdateEventGroupHeroGenerationAttempt(env, generationContext, {
+    status: 'generating',
+    phase: 'face_reference_prep',
+    sourceIds: currentSourceIds,
+    participantCount: sources.length
+  });
 
   const apiKey = getOpenAiApiKey(env);
   if (!apiKey) {
     throw new Error('OpenAI API key is not configured.');
   }
 
+  const faceReferenceStartedAtMs = Date.now();
   const preparedSources = await prepareGroupHeroPersonReferences(env, request, eventId, sources)
     .catch((error) => {
       console.warn('AI group hero person-reference preparation failed', eventId, String(error.message || error));
       return sources;
     });
+  addGroupHeroAttemptTiming(generationContext, 'faceReferenceMs', Date.now() - faceReferenceStartedAtMs);
   let activeSources = preparedSources;
   let activeSourceIds = sourceIds;
   let imageBytes = null;
 
   while (activeSources.length > 0) {
     try {
-      imageBytes = await requestOpenAiGroupHeroImage(env, apiKey, activeSources, prompt);
+      generationContext.attemptPhase = 'openai_request';
+      await safeUpdateEventGroupHeroGenerationAttempt(env, generationContext, {
+        status: 'generating',
+        phase: 'openai_request',
+        sourceIds: activeSourceIds,
+        participantCount: activeSources.length
+      });
+      const openAiStartedAtMs = Date.now();
+      try {
+        imageBytes = await requestOpenAiGroupHeroImage(env, apiKey, activeSources, prompt);
+      } finally {
+        addGroupHeroAttemptTiming(generationContext, 'openaiMs', Date.now() - openAiStartedAtMs);
+      }
       break;
     } catch (error) {
       const errorMessage = error.message || '';
@@ -1641,7 +1692,9 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
       const rejectedSource = invalidImageIndex === null ? null : activeSources[invalidImageIndex];
 
       if (!rejectedSource) {
+        const isolationStartedAtMs = Date.now();
         const isolatedResult = await tryOpenAiGroupHeroWithoutRejectedSource(env, apiKey, activeSources, prompt, errorMessage);
+        addGroupHeroAttemptTiming(generationContext, 'openaiMs', Date.now() - isolationStartedAtMs);
         if (isolatedResult) {
           console.warn('AI group hero source isolated after unindexed OpenAI rejection', eventId, isolatedResult.rejectedSource.id);
           activeSources = isolatedResult.sources;
@@ -1662,6 +1715,13 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
           }, generationUpdatedAt, currentSourceIds);
           if (!nextUpdatedAt) {
             console.warn('Skipped superseded AI group hero generation after source isolation', eventId);
+            await safeUpdateEventGroupHeroGenerationAttempt(env, generationContext, {
+              status: 'superseded',
+              phase: 'superseded',
+              sourceIds: currentSourceIds,
+              participantCount: currentSourceIds.length,
+              completed: true
+            });
             return;
           }
           currentSourceIds = activeSourceIds;
@@ -1708,6 +1768,13 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
         }, generationUpdatedAt, currentSourceIds);
         if (!nextUpdatedAt) {
           console.warn('Skipped superseded AI group hero generation after source normalization', eventId);
+          await safeUpdateEventGroupHeroGenerationAttempt(env, generationContext, {
+            status: 'superseded',
+            phase: 'superseded',
+            sourceIds: currentSourceIds,
+            participantCount: currentSourceIds.length,
+            completed: true
+          });
           return;
         }
         currentSourceIds = activeSourceIds;
@@ -1740,6 +1807,13 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
       }, generationUpdatedAt, currentSourceIds);
       if (!nextUpdatedAt) {
         console.warn('Skipped superseded AI group hero generation after source rejection', eventId);
+        await safeUpdateEventGroupHeroGenerationAttempt(env, generationContext, {
+          status: 'superseded',
+          phase: 'superseded',
+          sourceIds: currentSourceIds,
+          participantCount: currentSourceIds.length,
+          completed: true
+        });
         return;
       }
       currentSourceIds = activeSourceIds;
@@ -1754,6 +1828,8 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
   }
 
   const objectKey = `moments/${eventId}/generated/group-hero-${Date.now()}.png`;
+  generationContext.attemptPhase = 'r2_write';
+  const r2WriteStartedAtMs = Date.now();
   await env.MOMENTS_BUCKET.put(objectKey, imageBytes, {
     httpMetadata: {
       contentType: 'image/png',
@@ -1765,6 +1841,7 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
       sourceSubmissionIds: JSON.stringify(activeSourceIds)
     }
   });
+  addGroupHeroAttemptTiming(generationContext, 'r2WriteMs', Date.now() - r2WriteStartedAtMs);
 
   const readyUpdatedAt = await updateEventGroupHeroStateIfCurrent(env, {
     eventId,
@@ -1781,6 +1858,14 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
   }, generationUpdatedAt, currentSourceIds);
   if (!readyUpdatedAt) {
     console.warn('Discarding superseded AI group hero image', eventId, objectKey);
+    await safeUpdateEventGroupHeroGenerationAttempt(env, generationContext, {
+      status: 'superseded',
+      phase: 'superseded',
+      objectKey,
+      sourceIds: activeSourceIds,
+      participantCount: activeSources.length,
+      completed: true
+    });
     try {
       await env.MOMENTS_BUCKET.delete(objectKey);
     } catch (error) {
@@ -1790,6 +1875,14 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
   }
   generationContext.updatedAt = readyUpdatedAt;
   generationContext.sourceIds = activeSourceIds;
+  await safeUpdateEventGroupHeroGenerationAttempt(env, generationContext, {
+    status: 'ready',
+    phase: 'complete',
+    objectKey,
+    sourceIds: activeSourceIds,
+    participantCount: activeSources.length,
+    completed: true
+  });
 
   if (previousObjectKey && previousObjectKey !== objectKey) {
     try {
@@ -2983,6 +3076,154 @@ function bytesToHex(bytes) {
 
 function toAwsAmzDate(date) {
   return date.toISOString().replace(/[:-]|\.\d{3}/g, '');
+}
+
+async function ensureEventGroupHeroGenerationAttemptTable(env) {
+  if (groupHeroAttemptTableEnsured || !env?.MOMENTS_DB) {
+    return;
+  }
+
+  await env.MOMENTS_DB.prepare(`
+    CREATE TABLE IF NOT EXISTS event_group_hero_generation_attempts (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'started',
+      phase TEXT NOT NULL DEFAULT 'queued',
+      trigger_type TEXT NOT NULL DEFAULT '',
+      source_submission_ids TEXT NOT NULL DEFAULT '[]',
+      participant_count INTEGER NOT NULL DEFAULT 0,
+      model TEXT NOT NULL DEFAULT '',
+      error_message TEXT NOT NULL DEFAULT '',
+      object_key TEXT,
+      source_selection_ms INTEGER NOT NULL DEFAULT 0,
+      face_reference_ms INTEGER NOT NULL DEFAULT 0,
+      openai_ms INTEGER NOT NULL DEFAULT 0,
+      r2_write_ms INTEGER NOT NULL DEFAULT 0,
+      total_ms INTEGER NOT NULL DEFAULT 0,
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `).run();
+  await env.MOMENTS_DB.prepare(`
+    CREATE INDEX IF NOT EXISTS idx_event_group_hero_attempts_event
+    ON event_group_hero_generation_attempts(event_id, created_at DESC)
+  `).run();
+  await env.MOMENTS_DB.prepare(`
+    CREATE INDEX IF NOT EXISTS idx_event_group_hero_attempts_status
+    ON event_group_hero_generation_attempts(status, updated_at DESC)
+  `).run();
+
+  groupHeroAttemptTableEnsured = true;
+}
+
+async function safeStartEventGroupHeroGenerationAttempt(env, attempt = {}) {
+  if (!env?.MOMENTS_DB || !attempt.eventId) {
+    return "";
+  }
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const startedAt = attempt.startedAt || now;
+  try {
+    await ensureEventGroupHeroGenerationAttemptTable(env);
+    await env.MOMENTS_DB.prepare(`
+      INSERT INTO event_group_hero_generation_attempts (
+        id,
+        event_id,
+        status,
+        phase,
+        trigger_type,
+        source_submission_ids,
+        participant_count,
+        model,
+        source_selection_ms,
+        started_at,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, 'started', 'queued', ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      id,
+      attempt.eventId,
+      attempt.triggerType || "",
+      JSON.stringify(attempt.sourceIds || []),
+      Number(attempt.participantCount || 0),
+      attempt.model || "",
+      Math.round(Number(attempt.sourceSelectionMs || 0)),
+      startedAt,
+      now,
+      now
+    ).run();
+    return id;
+  } catch (error) {
+    console.warn("AI group hero attempt logging unavailable", attempt.eventId, error?.message || error);
+    return "";
+  }
+}
+
+function addGroupHeroAttemptTiming(context, key, ms) {
+  if (!context || !key) {
+    return;
+  }
+  if (!context.attemptTimings) {
+    context.attemptTimings = {};
+  }
+  const current = Number(context.attemptTimings[key] || 0);
+  context.attemptTimings[key] = current + Math.max(0, Number(ms || 0));
+}
+
+async function safeUpdateEventGroupHeroGenerationAttempt(env, context = {}, update = {}) {
+  if (!env?.MOMENTS_DB || !context.attemptId) {
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const timings = context.attemptTimings || {};
+  const sourceIds = update.sourceIds || context.sourceIds || [];
+  const participantCount = Number(
+    update.participantCount ?? context.participantCount ?? sourceIds.length ?? 0
+  );
+  const completedAt = update.completed ? now : null;
+  const totalMs = Math.max(0, Date.now() - Number(context.attemptStartedAtMs || Date.now()));
+
+  try {
+    await ensureEventGroupHeroGenerationAttemptTable(env);
+    await env.MOMENTS_DB.prepare(`
+      UPDATE event_group_hero_generation_attempts
+      SET
+        status = ?,
+        phase = ?,
+        source_submission_ids = ?,
+        participant_count = ?,
+        error_message = ?,
+        object_key = ?,
+        face_reference_ms = ?,
+        openai_ms = ?,
+        r2_write_ms = ?,
+        total_ms = ?,
+        completed_at = COALESCE(?, completed_at),
+        updated_at = ?
+      WHERE id = ?
+    `).bind(
+      update.status || "generating",
+      update.phase || context.attemptPhase || "generating",
+      JSON.stringify(sourceIds),
+      participantCount,
+      update.errorMessage || "",
+      update.objectKey || null,
+      Math.round(Number(timings.faceReferenceMs || 0)),
+      Math.round(Number(timings.openaiMs || 0)),
+      Math.round(Number(timings.r2WriteMs || 0)),
+      Math.round(totalMs),
+      completedAt,
+      now,
+      context.attemptId
+    ).run();
+  } catch (error) {
+    console.warn("AI group hero attempt update unavailable", context.eventId || "", error?.message || error);
+  }
 }
 
 async function storeEventGroupHeroState(env, state) {

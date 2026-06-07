@@ -765,6 +765,70 @@ test('OpenAI failure stores failed group hero state without breaking approval', 
   }
 });
 
+test('group hero attempt history preserves failed and successful retries', async () => {
+  const submission = guestSubmission({
+    id: 'guest-attempt-history',
+    object_key: 'moments/event-hero/guest-attempt-history.jpg',
+    objectKey: 'moments/event-hero/guest-attempt-history.jpg',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({ submissions: [submission] });
+  const bucket = new FakeBucket([[submission.object_key, 'source-photo']]);
+  const env = envWithDb(db, bucket);
+  let waitUntil = [];
+  let calls = mockOpenAi({ status: 500, body: { error: { message: 'provider failed with diagnostic detail' } } });
+
+  try {
+    const firstResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://williamsonwallflowers.com',
+        Authorization: 'Bearer host-token'
+      }
+    }), env);
+
+    assert.equal(firstResponse.status, 202);
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+    assert.equal(calls.length, 1);
+  } finally {
+    restoreFetch();
+  }
+
+  waitUntil = [];
+  calls = mockOpenAi();
+  try {
+    const retryResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://williamsonwallflowers.com',
+        Authorization: 'Bearer host-token'
+      }
+    }), env);
+
+    assert.equal(retryResponse.status, 202);
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+    assert.equal(calls.length, 1);
+  } finally {
+    restoreFetch();
+  }
+
+  assert.equal(db.groupHeroes[0].status, 'ready');
+  assert.equal(db.heroAttempts.length, 2);
+  assert.equal(db.heroAttempts[0].status, 'failed');
+  assert.equal(db.heroAttempts[0].phase, 'openai_request');
+  assert.match(db.heroAttempts[0].error_message, /provider failed/);
+  assert.equal(db.heroAttempts[1].status, 'ready');
+  assert.equal(db.heroAttempts[1].phase, 'complete');
+  assert.match(db.heroAttempts[1].object_key, /generated\/group-hero-/);
+  assert.ok(Number(db.heroAttempts[1].openai_ms) >= 0);
+  assert.ok(db.heroAttempts[0].completed_at);
+  assert.ok(db.heroAttempts[1].completed_at);
+});
+
 test('OpenAI timeout stores failed group hero state without leaving generation stuck', async () => {
   const submission = guestSubmission({
     id: 'guest-timeout',
@@ -2033,6 +2097,7 @@ class GroupHeroFakeDb {
     this.faces = seed.faces ? seed.faces.map((face) => ({ ...face })) : [];
     this.faceClusters = seed.faceClusters ? seed.faceClusters.map((cluster) => ({ ...cluster })) : [];
     this.sourceDecisions = seed.sourceDecisions ? seed.sourceDecisions.map((decision) => ({ ...decision })) : [];
+    this.heroAttempts = seed.heroAttempts ? seed.heroAttempts.map((attempt) => ({ ...attempt })) : [];
   }
 
   prepare(sql) {
@@ -2443,6 +2508,108 @@ class GroupHeroFakeStatement {
       };
       if (existing) Object.assign(existing, next);
       else this.db.groupHeroes.push(next);
+    }
+
+    if (this.sql.includes('CREATE TABLE IF NOT EXISTS event_group_hero_generation_attempts')) {
+      return { success: true };
+    }
+
+    if (this.sql.includes('INSERT INTO event_group_hero_generation_attempts')) {
+      const [
+        id,
+        eventId,
+        status,
+        phase,
+        triggerType,
+        sourceSubmissionIds,
+        participantCount,
+        model,
+        sourceSelectionMs,
+        startedAt,
+        createdAt,
+        updatedAt
+      ] = this.params;
+      this.db.heroAttempts.push({
+        id,
+        event_id: eventId,
+        eventId,
+        status,
+        phase,
+        trigger_type: triggerType,
+        triggerType,
+        source_submission_ids: sourceSubmissionIds,
+        sourceSubmissionIds,
+        participant_count: participantCount,
+        participantCount,
+        model,
+        error_message: '',
+        errorMessage: '',
+        object_key: null,
+        objectKey: null,
+        source_selection_ms: sourceSelectionMs,
+        sourceSelectionMs,
+        face_reference_ms: 0,
+        faceReferenceMs: 0,
+        openai_ms: 0,
+        openaiMs: 0,
+        r2_write_ms: 0,
+        r2WriteMs: 0,
+        total_ms: 0,
+        totalMs: 0,
+        started_at: startedAt,
+        startedAt,
+        completed_at: null,
+        completedAt: null,
+        created_at: createdAt,
+        createdAt,
+        updated_at: updatedAt,
+        updatedAt
+      });
+    }
+
+    if (this.sql.includes('UPDATE event_group_hero_generation_attempts')) {
+      const [
+        status,
+        phase,
+        sourceSubmissionIds,
+        participantCount,
+        errorMessage,
+        objectKey,
+        faceReferenceMs,
+        openaiMs,
+        r2WriteMs,
+        totalMs,
+        completedAt,
+        updatedAt,
+        id
+      ] = this.params;
+      const attempt = this.db.heroAttempts.find((item) => item.id === id);
+      if (attempt) {
+        Object.assign(attempt, {
+          status,
+          phase,
+          source_submission_ids: sourceSubmissionIds,
+          sourceSubmissionIds,
+          participant_count: participantCount,
+          participantCount,
+          error_message: errorMessage,
+          errorMessage,
+          object_key: objectKey,
+          objectKey,
+          face_reference_ms: faceReferenceMs,
+          faceReferenceMs,
+          openai_ms: openaiMs,
+          openaiMs,
+          r2_write_ms: r2WriteMs,
+          r2WriteMs,
+          total_ms: totalMs,
+          totalMs,
+          completed_at: completedAt,
+          completedAt,
+          updated_at: updatedAt,
+          updatedAt
+        });
+      }
     }
 
     return { success: true };
