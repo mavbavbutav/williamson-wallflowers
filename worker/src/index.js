@@ -57,6 +57,10 @@ const GROUP_HERO_FAILED_RETRY_LIMIT = 3;
 const GROUP_HERO_DEFAULT_MODEL = 'gpt-image-1.5';
 const GROUP_HERO_FACE_DEDUP_VERSION = 4;
 const GROUP_HERO_PERSON_REFERENCE_VERSION = 5;
+const GROUP_HERO_PERSON_CUTOUT_VERSION = 1;
+const GROUP_HERO_DUP_MERGE_THRESHOLD = 93; // similarity %, between soft (90) and strict cluster (97)
+const GROUP_HERO_ISOLATED_COLUMN_HALF_WIDTH = 0.13; // normalized half-width of the isolated crop column
+const GROUP_HERO_PERSON_CUTOUT_PROMPT = 'Output only the single person at the center of this image as a clean, realistic portrait on a plain neutral light-gray background. Remove every other person and all background clutter. Preserve their exact likeness, age, skin tone, hairstyle, facial hair, glasses, and clothing colors. Do not add any text, captions, or labels.';
 const GROUP_HERO_FACE_PROVIDER_DEFAULT = 'aws-rekognition';
 const GROUP_HERO_FACE_MATCH_THRESHOLD = 97;
 const GROUP_HERO_FACE_SOFT_MATCH_THRESHOLD = 90;
@@ -2206,6 +2210,12 @@ function getGroupHeroPersonReferenceObjectKey(eventId, submissionId, clusterId) 
   const safeClusterId = safeGroupHeroObjectSegment(clusterId) || 'face';
   const safeSubmissionId = safeGroupHeroObjectSegment(submissionId) || 'submission';
   return `moments/${eventId}/generated/person-roster/${safeSubmissionId}-${safeClusterId}-v${GROUP_HERO_PERSON_REFERENCE_VERSION}.${AI_REFERENCE_EXTENSION}`;
+}
+
+function getGroupHeroPersonCutoutObjectKey(eventId, submissionId, clusterId) {
+  const safeClusterId = safeGroupHeroObjectSegment(clusterId) || 'face';
+  const safeSubmissionId = safeGroupHeroObjectSegment(submissionId) || 'submission';
+  return `moments/${eventId}/generated/person-cutout/${safeSubmissionId}-${safeClusterId}-v${GROUP_HERO_PERSON_CUTOUT_VERSION}.png`;
 }
 
 function safeGroupHeroObjectSegment(value) {
