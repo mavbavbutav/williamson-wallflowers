@@ -45,8 +45,13 @@ test('admin frontend exposes the private media audit report controls', async () 
   assert.match(adminHtml, /Location cues/);
   assert.match(adminHtml, /id="mediaAuditFaceBoxesToggle"/);
   assert.match(adminHtml, /id="mediaAuditFaceSummary"/);
-  assert.match(adminHtml, /admin\.js\?v=20260607-admin-nav-1/);
-  assert.match(adminHtml, /styles\.css\?v=20260607-admin-nav-1/);
+  assert.match(adminHtml, /admin\.js\?v=20260607-hero-audit-1/);
+  assert.match(adminHtml, /styles\.css\?v=20260607-hero-audit-1/);
+  assert.match(adminHtml, /id="mediaAuditHero"/);
+  assert.match(adminJs, /function renderMediaAuditHero/);
+  assert.match(adminJs, /function regenerateGroupHero/);
+  assert.match(adminJs, /\/admin\/events\/\$\{encodeURIComponent\(eventId\)\}\/group-hero\/regenerate/);
+  assert.match(adminJs, /\/admin\/events\/\$\{encodeURIComponent\(eventId\)\}\/group-hero`/);
   assert.match(adminJs, /\/admin\/events\/\$\{encodeURIComponent\(eventId\)\}\/media-audit/);
   assert.match(adminJs, /previewUrl/);
   assert.match(adminJs, /EXIF and upload/);
@@ -253,6 +258,9 @@ test('admin media audit can return stored profile and insight rows', async () =>
   const payload = await response.json();
 
   assert.equal(response.status, 200);
+  assert.ok(payload.audit.groupHero, 'audit response includes groupHero');
+  assert.equal(payload.audit.groupHero.status, 'empty');
+  assert.equal(payload.audit.groupHero.imageUrl, '');
   assert.equal(payload.audit.profile.analyzedCount, 1);
   assert.equal(payload.audit.faceDedupe.detectedFaces, 2);
   assert.equal(payload.audit.faceDedupe.uniqueFaceClusters, 1);
