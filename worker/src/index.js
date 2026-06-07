@@ -21,7 +21,7 @@ const AI_REFERENCE_WIDTH = 1536;
 const AI_REFERENCE_QUALITY = 92;
 const GROUP_HERO_PERSON_REFERENCE_WIDTH = 768;
 const GROUP_HERO_PERSON_REFERENCE_HEIGHT = 1152;
-const GROUP_HERO_ISOLATED_PERSON_REFERENCE_WIDTH = 384;
+const GROUP_HERO_ISOLATED_PERSON_REFERENCE_WIDTH = 256;
 const OPENAI_IMAGE_DEFAULT_TIMEOUT_MS = 75 * 1000;
 const VIDEO_MAX_SECONDS = 30;
 const AUDIO_MAX_SECONDS = 60;
@@ -56,6 +56,7 @@ const GROUP_HERO_GENERATION_STALE_SECONDS = 5 * 60;
 const GROUP_HERO_FAILED_RETRY_LIMIT = 3;
 const GROUP_HERO_DEFAULT_MODEL = 'gpt-image-1.5';
 const GROUP_HERO_FACE_DEDUP_VERSION = 4;
+const GROUP_HERO_PERSON_REFERENCE_VERSION = 5;
 const GROUP_HERO_FACE_PROVIDER_DEFAULT = 'aws-rekognition';
 const GROUP_HERO_FACE_MATCH_THRESHOLD = 97;
 const GROUP_HERO_FACE_SOFT_MATCH_THRESHOLD = 90;
@@ -1667,8 +1668,43 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
     });
   addGroupHeroAttemptTiming(generationContext, 'faceReferenceMs', Date.now() - faceReferenceStartedAtMs);
   let activeSources = preparedSources;
-  let activeSourceIds = sourceIds;
+  let activeSourceIds = activeSources.map((source) => source.id);
   let imageBytes = null;
+
+  if (activeSources.length === 0) {
+    throw new Error('No usable group hero participant references remained after face isolation.');
+  }
+
+  if (!sourceIdsMatch(currentSourceIds, activeSourceIds)) {
+    const nextUpdatedAt = await updateEventGroupHeroStateIfCurrent(env, {
+      eventId,
+      status: 'generating',
+      objectKey: previousObjectKey || null,
+      mimeType: previousMimeType || 'image/png',
+      size: previousSize,
+      participantCount: activeSources.length,
+      sourceIds: activeSourceIds,
+      model: getOpenAiImageModel(env),
+      prompt,
+      errorMessage: '',
+      generatedAt: previousGeneratedAt
+    }, generationUpdatedAt, currentSourceIds);
+    if (!nextUpdatedAt) {
+      console.warn('Skipped superseded AI group hero generation after person-reference preparation', eventId);
+      await safeUpdateEventGroupHeroGenerationAttempt(env, generationContext, {
+        status: 'superseded',
+        phase: 'superseded',
+        sourceIds: currentSourceIds,
+        participantCount: currentSourceIds.length,
+        completed: true
+      });
+      return;
+    }
+    currentSourceIds = activeSourceIds;
+    generationUpdatedAt = nextUpdatedAt;
+    generationContext.updatedAt = generationUpdatedAt;
+    generationContext.sourceIds = currentSourceIds;
+  }
 
   while (activeSources.length > 0) {
     try {
@@ -2060,14 +2096,31 @@ async function normalizeGroupHeroSourceImage(env, request, eventId, source) {
 async function prepareGroupHeroPersonReferences(env, request, eventId, sources) {
   const prepared = [];
   for (const source of sources) {
+    const requiresPersonReference = requiresGroupHeroPersonReference(source);
     const reference = await createGroupHeroPersonReference(env, request, eventId, source)
       .catch((error) => {
         console.warn('AI group hero person reference failed', eventId, source.id, String(error.message || error));
         return null;
       });
-    prepared.push(reference || source);
+    if (reference) {
+      prepared.push(reference);
+      continue;
+    }
+    if (requiresPersonReference) {
+      console.warn('Skipped AI group hero participant without isolated person reference', eventId, source.id, source.rosterParticipantId || '');
+      continue;
+    }
+    prepared.push(source);
   }
   return prepared;
+}
+
+function requiresGroupHeroPersonReference(source) {
+  const face = source.personReferenceFace || source.person_reference_face || null;
+  if (!face) return false;
+  const faceClusterIds = uniqueCleanList(source.faceClusterIds || source.face_cluster_ids || []);
+  const duplicateFaceClusterIds = uniqueCleanList(source.duplicateFaceClusterIds || source.duplicate_face_cluster_ids || []);
+  return faceClusterIds.length > 1 || duplicateFaceClusterIds.length > 0;
 }
 
 async function createGroupHeroPersonReference(env, request, eventId, source) {
@@ -2152,7 +2205,7 @@ async function buildGroupHeroSourceAccessUrl(request, env, source) {
 function getGroupHeroPersonReferenceObjectKey(eventId, submissionId, clusterId) {
   const safeClusterId = safeGroupHeroObjectSegment(clusterId) || 'face';
   const safeSubmissionId = safeGroupHeroObjectSegment(submissionId) || 'submission';
-  return `moments/${eventId}/generated/person-roster/${safeSubmissionId}-${safeClusterId}-v${GROUP_HERO_FACE_DEDUP_VERSION}.${AI_REFERENCE_EXTENSION}`;
+  return `moments/${eventId}/generated/person-roster/${safeSubmissionId}-${safeClusterId}-v${GROUP_HERO_PERSON_REFERENCE_VERSION}.${AI_REFERENCE_EXTENSION}`;
 }
 
 function safeGroupHeroObjectSegment(value) {
@@ -2170,6 +2223,7 @@ function buildGroupHeroRosterPrompt(prompt, sources) {
 Roster requirements:
 - Treat each input image as one roster participant reference.
 - If an input image includes multiple people, use the person centered by the face/body crop as that roster participant.
+- If another person appears near an edge or in the background of a crop, treat them as context only and do not render them as a roster participant.
 - Render every roster participant exactly once unless the source is unusable.
 - Preserve age-appropriate likeness cues, hairstyle, facial hair, glasses, clothing, and visible body/clothing details from each participant reference.
 - Do not draw Face IDs, labels, names, captions, or debug text in the artwork.
@@ -2188,7 +2242,7 @@ function buildGroupHeroRosterPromptLine(source, index) {
   const referenceHint = faceId ? ` Face ID ${faceId}.` : '';
   const bodyHint = visibleBody ? ` Visible crop: ${visibleBody.replace(/_/g, ' ')}.` : '';
   const cropHint = cropMode === 'isolated-face-body' ? ' Use only the centered roster participant from this tighter crop.' : '';
-  const duplicateHint = duplicateFaceIds.length ? ` Ignore duplicate faces already represented elsewhere: ${duplicateFaceIds.join(', ')}.` : '';
+  const duplicateHint = duplicateFaceIds.length ? ` Do not render duplicate faces already represented elsewhere, even if visible near an edge: ${duplicateFaceIds.join(', ')}.` : '';
   return `- Participant ${index + 1}.${referenceHint} Source: ${sourceKind}.${bodyHint}${cropHint}${duplicateHint}`;
 }
 
