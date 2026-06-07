@@ -2213,6 +2213,7 @@ test('group hero merges two clusters that CompareFaces says are the same person'
     await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
     await drainWaitUntil(waitUntil);
 
+    assert.equal(calls.compareFaces.length, 1); // both sources reached the merge and were compared
     assert.equal(calls.openAi.length, 1);
     assert.equal(calls.openAi[0].imageCount, 1); // duplicate merged out
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-dupe-a']);
@@ -2264,6 +2265,7 @@ test('group hero keeps both participants when CompareFaces is below the merge th
     await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
     await drainWaitUntil(waitUntil);
 
+    assert.equal(calls.compareFaces.length, 1); // compared once, similarity below threshold -> kept
     assert.equal(calls.openAi[0].imageCount, 2);
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-keep-a', 'guest-keep-b']);
   } finally {
