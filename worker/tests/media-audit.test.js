@@ -45,8 +45,8 @@ test('admin frontend exposes the private media audit report controls', async () 
   assert.match(adminHtml, /Location cues/);
   assert.match(adminHtml, /id="mediaAuditFaceBoxesToggle"/);
   assert.match(adminHtml, /id="mediaAuditFaceSummary"/);
-  assert.match(adminHtml, /admin\.js\?v=20260607-face-toggle-1/);
-  assert.match(adminHtml, /styles\.css\?v=20260607-face-toggle-1/);
+  assert.match(adminHtml, /admin\.js\?v=20260607-ai-orientation-1/);
+  assert.match(adminHtml, /styles\.css\?v=20260607-ai-orientation-1/);
   assert.match(adminJs, /\/admin\/events\/\$\{encodeURIComponent\(eventId\)\}\/media-audit/);
   assert.match(adminJs, /previewUrl/);
   assert.match(adminJs, /EXIF and upload/);
@@ -56,6 +56,8 @@ test('admin frontend exposes the private media audit report controls', async () 
   assert.match(adminJs, /getFaceDisplayId/);
   assert.match(adminJs, /getDisplayFaceBoundingBox/);
   assert.match(adminJs, /getMediaAuditDisplayDimensions/);
+  assert.match(adminJs, /displayWidth/);
+  assert.match(adminJs, /getMediaAuditVisualOrientation/);
   assert.match(adminJs, /isExifOrientationSwapped/);
   assert.doesNotMatch(adminJs, /case "6":/);
   assert.match(adminJs, /uploader IP/);
@@ -273,6 +275,44 @@ test('admin media audit can return stored profile and insight rows', async () =>
   });
 });
 
+test('admin media audit returns EXIF-oriented display dimensions', async () => {
+  const photo = submission({
+    id: 'rotated-photo',
+    source: 'host',
+    object_key: 'moments/event-audit/rotated-photo.jpg',
+    original_filename: 'IMG_5350.jpeg',
+    mime_type: 'image/jpeg'
+  });
+  const db = new MediaAuditFakeDb({
+    submissions: [photo],
+    insights: [insight({
+      submission_id: 'rotated-photo',
+      width: 5712,
+      height: 4284,
+      orientation: 'landscape',
+      exif_orientation: '6'
+    })],
+    profiles: [profile({ analyzed_count: 1 })]
+  });
+  const env = envWithDb(db, new FakeBucket());
+
+  const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/admin/events/event-audit/media-audit', {
+    headers: {
+      Origin: 'https://williamsonwallflowers.com',
+      'X-Admin-Token': 'admin-token'
+    }
+  }), env);
+  const payload = await response.json();
+  const result = payload.audit.insights[0];
+
+  assert.equal(result.width, 5712);
+  assert.equal(result.height, 4284);
+  assert.equal(result.displayWidth, 4284);
+  assert.equal(result.displayHeight, 5712);
+  assert.equal(result.displayAspectRatio, 0.75);
+  assert.equal(result.orientation, 'portrait');
+});
+
 test('admin media audit backfill extracts JPEG EXIF capture, camera, and GPS metadata', async () => {
   const bytes = jpegWithExifBytes(640, 480);
   const photo = submission({
@@ -485,6 +525,51 @@ test('optional media audit vision only sends AI-eligible guest media and host me
     assert.equal(db.insights.find((row) => row.submission_id === 'private-guest').vision_status, 'not_allowed');
     assert.equal(db.profiles[0].ai_analyzed_count, 2);
     assert.deepEqual(JSON.parse(db.profiles[0].scene_tags), ['floral wall', 'group portrait']);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('AI media audit backfill upgrades existing not_requested host insights', async () => {
+  const host = submission({
+    id: 'existing-host',
+    source: 'host',
+    object_key: 'moments/event-audit/existing-host.jpg',
+    mime_type: 'image/jpeg',
+    ai_artwork_consent_at: null
+  });
+  const db = new MediaAuditFakeDb({
+    submissions: [host],
+    insights: [insight({
+      submission_id: 'existing-host',
+      event_id: 'event-audit',
+      vision_status: 'not_requested',
+      exif_metadata_version: 1,
+      reverse_geocoding_version: 1
+    })]
+  });
+  const env = envWithDb(db, new FakeBucket([[host.object_key, jpegBytes(640, 480)]]));
+  const waitUntil = [];
+  const calls = mockOpenAiMediaAudit();
+
+  try {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/admin/events/event-audit/media-audit/backfill', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://williamsonwallflowers.com',
+        'X-Admin-Token': 'admin-token',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ limit: 5, includeAi: true, retryFailed: true })
+    }), env, { waitUntil: (work) => waitUntil.push(work) });
+    const payload = await response.json();
+
+    assert.equal(response.status, 202);
+    assert.equal(payload.queued, 1);
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.length, 1);
+    assert.equal(db.insights.find((row) => row.submission_id === 'existing-host').vision_status, 'ready');
   } finally {
     restoreFetch();
   }
@@ -808,7 +893,7 @@ class MediaAuditFakeStatement {
 
   async all() {
     if (this.sql.includes('FROM submissions s') && this.sql.includes('LEFT JOIN submission_media_insights')) {
-      return { results: this.mediaAuditCandidates().slice(0, Number(this.params[4] || 10)) };
+      return { results: this.mediaAuditCandidates().slice(0, Number(this.params[this.params.length - 1] || 10)) };
     }
 
     if (this.sql.includes('FROM submission_media_insights i') && this.sql.includes('INNER JOIN submissions s')) {
@@ -1069,6 +1154,8 @@ class MediaAuditFakeStatement {
   mediaAuditCandidates() {
     const eventId = this.params[0];
     const retryFailed = Number(this.params[1] || 0) === 1;
+    const includeAi = Number(this.params[4] || 0) === 1;
+    const retryVision = Number(this.params[5] || 0) === 1;
     return this.db.submissions
       .filter((item) => (item.event_id || item.eventId) === eventId)
       .filter((item) => item.status === 'approved')
@@ -1085,7 +1172,14 @@ class MediaAuditFakeStatement {
           && Number.isFinite(Number(existing.exif_gps_longitude ?? existing.exifGpsLongitude));
         const needsExif = Number(existing.exif_metadata_version || existing.exifMetadataVersion || 0) < 1;
         const needsReverseGeocode = hasGps && Number(existing.reverse_geocoding_version || existing.reverseGeocodingVersion || 0) < 1;
-        return existing.status === 'pending' || (retryFailed && existing.status === 'failed') || needsExif || needsReverseGeocode;
+        const source = item.source || 'guest';
+        const aiAllowed = source === 'host' || Boolean(item.ai_artwork_consent_at || item.aiArtworkConsentAt);
+        const visionStatus = existing.vision_status || existing.visionStatus || 'not_requested';
+        const needsAi = includeAi && aiAllowed && (
+          ['not_requested', 'not_allowed', 'unavailable'].includes(visionStatus)
+          || (retryVision && visionStatus === 'failed')
+        );
+        return existing.status === 'pending' || (retryFailed && existing.status === 'failed') || needsExif || needsReverseGeocode || needsAi;
       })
       .sort((left, right) => new Date(left.created_at || left.createdAt || 0) - new Date(right.created_at || right.createdAt || 0))
       .map((item) => ({

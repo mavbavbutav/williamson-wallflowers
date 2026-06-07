@@ -4390,8 +4390,8 @@ async function runAdminMediaAuditBackfill(request, env, corsHeaders, eventId, ct
     : MEDIA_AUDIT_BACKFILL_DEFAULT_LIMIT;
   const retryFailed = normalizeBoolean(body.retryFailed);
   const includeAi = normalizeBoolean(body.includeAi || body.includeVision);
-  const candidates = await getMediaAuditCandidates(env, event.id, limit, retryFailed);
-  const pending = await countMediaAuditCandidates(env, event.id, retryFailed);
+  const candidates = await getMediaAuditCandidates(env, event.id, limit, retryFailed, includeAi);
+  const pending = await countMediaAuditCandidates(env, event.id, retryFailed, includeAi);
 
   const work = (async () => {
     if (candidates.length) {
@@ -4419,7 +4419,7 @@ async function runAdminMediaAuditBackfill(request, env, corsHeaders, eventId, ct
   }, candidates.length ? 202 : 200, corsHeaders);
 }
 
-async function getMediaAuditCandidates(env, eventId, limit, retryFailed = false) {
+async function getMediaAuditCandidates(env, eventId, limit, retryFailed = false, includeAi = false) {
   const result = await env.MOMENTS_DB.prepare(`
     SELECT
       s.id,
@@ -4457,15 +4457,26 @@ async function getMediaAuditCandidates(env, eventId, limit, retryFailed = false)
           AND i.exif_gps_longitude IS NOT NULL
           AND COALESCE(i.reverse_geocoding_version, 0) < ?
         )
+        OR (
+          ? = 1
+          AND (
+            s.source = 'host'
+            OR s.ai_artwork_consent_at IS NOT NULL
+          )
+          AND (
+            COALESCE(i.vision_status, 'not_requested') IN ('not_requested', 'not_allowed', 'unavailable')
+            OR (? = 1 AND i.vision_status = 'failed')
+          )
+        )
       )
     ORDER BY s.created_at ASC
     LIMIT ?
-  `).bind(eventId, retryFailed ? 1 : 0, EXIF_METADATA_VERSION, REVERSE_GEOCODING_VERSION, limit).all();
+  `).bind(eventId, retryFailed ? 1 : 0, EXIF_METADATA_VERSION, REVERSE_GEOCODING_VERSION, includeAi ? 1 : 0, retryFailed ? 1 : 0, limit).all();
 
   return result.results || [];
 }
 
-async function countMediaAuditCandidates(env, eventId, retryFailed = false) {
+async function countMediaAuditCandidates(env, eventId, retryFailed = false, includeAi = false) {
   const row = await env.MOMENTS_DB.prepare(`
     SELECT COUNT(*) AS count
     FROM submissions s
@@ -4487,8 +4498,19 @@ async function countMediaAuditCandidates(env, eventId, retryFailed = false) {
           AND i.exif_gps_longitude IS NOT NULL
           AND COALESCE(i.reverse_geocoding_version, 0) < ?
         )
+        OR (
+          ? = 1
+          AND (
+            s.source = 'host'
+            OR s.ai_artwork_consent_at IS NOT NULL
+          )
+          AND (
+            COALESCE(i.vision_status, 'not_requested') IN ('not_requested', 'not_allowed', 'unavailable')
+            OR (? = 1 AND i.vision_status = 'failed')
+          )
+        )
       )
-  `).bind(eventId, retryFailed ? 1 : 0, EXIF_METADATA_VERSION, REVERSE_GEOCODING_VERSION).first();
+  `).bind(eventId, retryFailed ? 1 : 0, EXIF_METADATA_VERSION, REVERSE_GEOCODING_VERSION, includeAi ? 1 : 0, retryFailed ? 1 : 0).first();
 
   return Number(row?.count || 0);
 }
@@ -5928,6 +5950,24 @@ function emptyMediaAuditFaceDedupeClient(env) {
   };
 }
 
+function getExifOrientedImageDimensions(width, height, exifOrientation) {
+  const rawWidth = Number(width || 0);
+  const rawHeight = Number(height || 0);
+  if (!rawWidth || !rawHeight) {
+    return { width: 0, height: 0, aspectRatio: 0, orientation: '' };
+  }
+
+  const isSwapped = ['5', '6', '7', '8'].includes(String(exifOrientation || '').trim());
+  const displayWidth = isSwapped ? rawHeight : rawWidth;
+  const displayHeight = isSwapped ? rawWidth : rawHeight;
+  return {
+    width: displayWidth,
+    height: displayHeight,
+    aspectRatio: Number((displayWidth / displayHeight).toFixed(4)),
+    orientation: getMediaOrientation(displayWidth, displayHeight)
+  };
+}
+
 function isMissingFaceDedupeTableError(error) {
   return /no such table|no such column/i.test(String(error?.message || error || ''));
 }
@@ -6007,6 +6047,8 @@ async function toMediaInsightClient(row, request, env, faceData = null) {
   const preview = await buildMediaAuditPreviewClient(row, request, env);
   const width = Number(row.width || 0);
   const height = Number(row.height || 0);
+  const exifOrientation = row.exifOrientation || row.exif_orientation || '';
+  const display = getExifOrientedImageDimensions(width, height, exifOrientation);
   return {
     submissionId: row.submissionId || row.submission_id,
     eventId: row.eventId || row.event_id,
@@ -6021,8 +6063,10 @@ async function toMediaInsightClient(row, request, env, faceData = null) {
     size: Number(row.size || 0),
     width,
     height,
-    displayAspectRatio: width && height ? Number((width / height).toFixed(4)) : 0,
-    orientation: row.orientation || '',
+    displayWidth: display.width,
+    displayHeight: display.height,
+    displayAspectRatio: display.aspectRatio,
+    orientation: display.orientation || row.orientation || '',
     qualityScore: Number(row.qualityScore || row.quality_score || 0),
     visionStatus: row.visionStatus || row.vision_status || 'not_requested',
     peopleCount: normalizeOptionalInteger(row.peopleCount ?? row.people_count),
@@ -6056,7 +6100,7 @@ async function toMediaInsightClient(row, request, env, faceData = null) {
     exifCameraModel: row.exifCameraModel || row.exif_camera_model || '',
     exifLensModel: row.exifLensModel || row.exif_lens_model || '',
     exifSoftware: row.exifSoftware || row.exif_software || '',
-    exifOrientation: row.exifOrientation || row.exif_orientation || '',
+    exifOrientation,
     exifMetadataVersion: Number(row.exifMetadataVersion || row.exif_metadata_version || 0),
     uploaderIpAddress: row.uploaderIpAddress || row.uploader_ip_address || '',
     analyzedAt: row.analyzedAt || row.analyzed_at || '',

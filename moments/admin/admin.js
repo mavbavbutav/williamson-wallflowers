@@ -792,13 +792,19 @@ function renderMediaAuditLocation(insight) {
 }
 
 function buildMediaAuditDisplayFacts(insight) {
-  const dimensions = `${Number(insight.width || 0)}x${Number(insight.height || 0)}`;
+  const display = getMediaAuditDisplayDimensions(insight);
+  const dimensions = display.width && display.height
+    ? `${display.width}x${display.height}`
+    : `${Number(insight.width || 0)}x${Number(insight.height || 0)}`;
+  const aspectRatio = display.width && display.height
+    ? display.width / display.height
+    : Number(insight.displayAspectRatio || 0);
   const facts = [
     insight.format || "unknown format",
     dimensions,
-    insight.orientation || "unknown orientation"
+    getMediaAuditVisualOrientation(insight)
   ];
-  if (insight.displayAspectRatio) facts.push(`aspect ${Number(insight.displayAspectRatio).toFixed(2)}:1`);
+  if (Number.isFinite(aspectRatio) && aspectRatio > 0) facts.push(`aspect ${aspectRatio.toFixed(2)}:1`);
   if (Number(insight.qualityScore || 0)) facts.push(`quality ${Math.round(Number(insight.qualityScore) * 100)}%`);
   if (Number(insight.size || 0)) facts.push(formatBytes(insight.size));
   return facts;
@@ -934,6 +940,10 @@ function getMediaAuditAspectRatio(insight) {
 }
 
 function getMediaAuditDisplayDimensions(insight = {}) {
+  const displayWidth = Number(insight.displayWidth || 0);
+  const displayHeight = Number(insight.displayHeight || 0);
+  if (displayWidth && displayHeight) return { width: displayWidth, height: displayHeight };
+
   const width = Number(insight.width || 0);
   const height = Number(insight.height || 0);
   if (!width || !height) return { width: 0, height: 0 };
@@ -941,6 +951,16 @@ function getMediaAuditDisplayDimensions(insight = {}) {
     return { width: height, height: width };
   }
   return { width, height };
+}
+
+function getMediaAuditVisualOrientation(insight = {}) {
+  const { width, height } = getMediaAuditDisplayDimensions(insight);
+  if (width && height) {
+    if (width > height) return "landscape";
+    if (height > width) return "portrait";
+    return "square";
+  }
+  return insight.orientation || "unknown orientation";
 }
 
 function isExifOrientationSwapped(value) {
