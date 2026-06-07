@@ -40,7 +40,7 @@ function init() {
   qs("#mediaAuditRefreshButton").addEventListener("click", () => loadMediaAudit(qs("#mediaAuditEventSelect").value));
   qs("#mediaAuditBackfillButton").addEventListener("click", () => runMediaAuditBackfill(false));
   qs("#mediaAuditAiBackfillButton").addEventListener("click", () => runMediaAuditBackfill(true));
-  qs("#mediaAuditFaceBoxesToggle").addEventListener("change", renderMediaAudit);
+  qs("#mediaAuditFaceBoxesToggle").addEventListener("change", () => renderMediaAudit());
   qs("#tagForm").addEventListener("submit", createTag);
   qs("#assignTagForm").addEventListener("submit", assignTag);
   qs("#wallDeviceForm").addEventListener("submit", createWallDevice);
