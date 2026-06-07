@@ -741,24 +741,7 @@ function getDisplayFaceBoundingBox(box, insight = {}) {
   const height = Number(box.height);
   if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return null;
 
-  switch (getExifOrientationValue(insight.exifOrientation)) {
-    case "2":
-      return normalizeDisplayFaceBox(1 - left - width, top, width, height);
-    case "3":
-      return normalizeDisplayFaceBox(1 - left - width, 1 - top - height, width, height);
-    case "4":
-      return normalizeDisplayFaceBox(left, 1 - top - height, width, height);
-    case "5":
-      return normalizeDisplayFaceBox(top, left, height, width);
-    case "6":
-      return normalizeDisplayFaceBox(1 - top - height, left, height, width);
-    case "7":
-      return normalizeDisplayFaceBox(1 - top - height, 1 - left - width, height, width);
-    case "8":
-      return normalizeDisplayFaceBox(top, 1 - left - width, height, width);
-    default:
-      return normalizeDisplayFaceBox(left, top, width, height);
-  }
+  return normalizeDisplayFaceBox(left, top, width, height);
 }
 
 function normalizeDisplayFaceBox(left, top, width, height) {
@@ -941,7 +924,9 @@ function getMediaAuditTitle(insight) {
 
 function getMediaAuditAspectRatio(insight) {
   const { width, height } = getMediaAuditDisplayDimensions(insight);
-  const ratio = Number(insight.displayAspectRatio || 0) || (width && height ? width / height : 0);
+  const ratio = width && height
+    ? width / height
+    : Number(insight.displayAspectRatio || 0);
   if (Number.isFinite(ratio) && ratio > 0) return String(Math.max(0.45, Math.min(2.4, ratio)).toFixed(4));
   if (insight.orientation === "portrait") return "0.8000";
   if (insight.orientation === "landscape") return "1.3333";
@@ -952,10 +937,14 @@ function getMediaAuditDisplayDimensions(insight = {}) {
   const width = Number(insight.width || 0);
   const height = Number(insight.height || 0);
   if (!width || !height) return { width: 0, height: 0 };
-  if (["5", "6", "7", "8"].includes(getExifOrientationValue(insight.exifOrientation))) {
+  if (isExifOrientationSwapped(insight.exifOrientation)) {
     return { width: height, height: width };
   }
   return { width, height };
+}
+
+function isExifOrientationSwapped(value) {
+  return ["5", "6", "7", "8"].includes(getExifOrientationValue(value));
 }
 
 function getExifOrientationValue(value) {
