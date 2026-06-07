@@ -124,6 +124,53 @@ test('host post creation queues group hero generation for eligible host media', 
   assert.match(createHostPost, /queueEventGroupHeroGenerationForSubmission\(env, request, hostSubmission, ctx\);/);
 });
 
+test('group hero analyzes the actual source image with Rekognition before OpenAI', async () => {
+  const hostPhoto = guestSubmission({
+    id: 'host-new',
+    source: 'host',
+    object_key: 'moments/event-hero/host-new.jpg',
+    objectKey: 'moments/event-hero/host-new.jpg',
+    guest_name: 'Host',
+    guestName: 'Host',
+    status: 'approved',
+    ai_artwork_consent_at: null,
+    aiArtworkConsentAt: null,
+    created_at: '2026-09-19T20:04:00.000Z',
+    createdAt: '2026-09-19T20:04:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [hostPhoto],
+    groupHeroes: [readyHero({
+      status: 'queued',
+      source_submission_ids: JSON.stringify(['host-new']),
+      sourceSubmissionIds: JSON.stringify(['host-new'])
+    })]
+  });
+  const bucket = new FakeBucket([
+    [hostPhoto.object_key, 'host-photo-source-bytes']
+  ]);
+  const env = envWithDb(db, bucket, {
+    AWS_REGION: 'us-east-1',
+    AWS_ACCESS_KEY_ID: 'aws-key',
+    AWS_SECRET_ACCESS_KEY: 'aws-secret'
+  });
+  const calls = mockOpenAiAndAwsRekognition();
+
+  try {
+    await runScheduled(env);
+
+    assert.ok(calls.awsTargets.includes('RekognitionService.IndexFaces'));
+    assert.equal(calls.openAi.length, 1);
+    assert.equal(db.faceAnalyses.length, 1);
+    assert.equal(db.faceAnalyses[0].source_object_key, 'moments/event-hero/host-new.jpg');
+    assert.equal(db.faces.length, 1);
+    assert.equal(db.faces[0].submission_id, 'host-new');
+    assert.match(calls.openAi[0].prompt, /Face ID F-/);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('scheduled task generates a ready group hero from a queued approval using the latest 16 sources', async () => {
   const submissions = Array.from({ length: 18 }, (_, index) => guestSubmission({
     id: `guest-${String(index + 1).padStart(2, '0')}`,
@@ -598,8 +645,8 @@ test('group hero expands one multi-face upload into separate roster participants
   });
   const bucket = new FakeBucket([
     [familyPhoto.object_key, 'source-family'],
-    ['moments/event-hero/generated/person-roster/guest-family-face-manabc123-v3.jpg', 'person-man-reference'],
-    ['moments/event-hero/generated/person-roster/guest-family-face-baby987-v3.jpg', 'person-baby-reference']
+    ['moments/event-hero/generated/person-roster/guest-family-face-manabc123-v4.jpg', 'person-man-reference'],
+    ['moments/event-hero/generated/person-roster/guest-family-face-baby987-v4.jpg', 'person-baby-reference']
   ]);
   const env = envWithDb(db, bucket);
   const waitUntil = [];
@@ -1814,6 +1861,70 @@ function mockOpenAi({
   return calls;
 }
 
+function mockOpenAiAndAwsRekognition() {
+  originalFetch = globalThis.fetch;
+  const calls = {
+    awsTargets: [],
+    openAi: []
+  };
+  globalThis.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.includes('rekognition.')) {
+      const target = init.headers?.get?.('X-Amz-Target')
+        || init.headers?.get?.('x-amz-target')
+        || init.headers?.['X-Amz-Target']
+        || init.headers?.['x-amz-target']
+        || '';
+      calls.awsTargets.push(target);
+      if (target === 'RekognitionService.CreateCollection') {
+        return new Response(JSON.stringify({ StatusCode: 200 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/x-amz-json-1.1' }
+        });
+      }
+      if (target === 'RekognitionService.IndexFaces') {
+        return new Response(JSON.stringify({
+          FaceRecords: [{
+            Face: {
+              FaceId: 'aws-face-new',
+              Confidence: 99.8,
+              BoundingBox: { Left: 0.25, Top: 0.2, Width: 0.3, Height: 0.32 }
+            },
+            FaceDetail: {
+              Quality: { Brightness: 82, Sharpness: 91 }
+            }
+          }]
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/x-amz-json-1.1' }
+        });
+      }
+      if (target === 'RekognitionService.SearchFaces') {
+        return new Response(JSON.stringify({ FaceMatches: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/x-amz-json-1.1' }
+        });
+      }
+    }
+    if (urlText.includes('api.openai.com/v1/images/edits')) {
+      const entries = Array.from(init.body.entries());
+      const images = entries.filter(([key]) => key === 'image[]');
+      calls.openAi.push({
+        url,
+        prompt: entries.find(([key]) => key === 'prompt')?.[1],
+        imageCount: images.length,
+        imageNames: images.map(([, image]) => image?.name || '')
+      });
+      return new Response(JSON.stringify({ data: [{ b64_json: btoa('generated-png') }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    return originalFetch(url, init);
+  };
+  return calls;
+}
+
 function mockOpenAiDeferred() {
   originalFetch = globalThis.fetch;
   const calls = [];
@@ -2146,6 +2257,10 @@ class GroupHeroFakeStatement {
       return this.db.groupHeroes.find((hero) => (hero.event_id || hero.eventId) === this.params[0]) || null;
     }
 
+    if (this.sql.includes('FROM submission_face_analyses')) {
+      return this.db.faceAnalyses.find((analysis) => (analysis.submission_id || analysis.submissionId) === this.params[0]) || null;
+    }
+
     if (this.sql.includes('FROM rate_limits')) {
       return this.db.rateLimits.get(this.params[0]) || null;
     }
@@ -2175,6 +2290,22 @@ class GroupHeroFakeStatement {
           .map((hero) => ({
             eventId: hero.event_id || hero.eventId,
             event_id: hero.event_id || hero.eventId
+          }))
+      };
+    }
+
+    if (this.sql.includes('FROM submission_face_analyses')) {
+      const eventId = this.params[0];
+      const version = Number(this.params[1] || 0);
+      return {
+        results: this.db.faceAnalyses
+          .filter((analysis) => (analysis.event_id || analysis.eventId) === eventId)
+          .filter((analysis) => Number(analysis.face_signature_version || analysis.faceSignatureVersion || 0) === version)
+          .map((analysis) => ({
+            ...analysis,
+            submissionId: analysis.submission_id || analysis.submissionId,
+            sourceObjectKey: analysis.source_object_key || analysis.sourceObjectKey,
+            faceSignatureVersion: analysis.face_signature_version || analysis.faceSignatureVersion
           }))
       };
     }
@@ -2271,6 +2402,148 @@ class GroupHeroFakeStatement {
 
     if (this.sql.includes('DELETE FROM event_group_hero_source_decisions')) {
       this.db.sourceDecisions = this.db.sourceDecisions.filter((decision) => (decision.event_id || decision.eventId) !== this.params[0]);
+    }
+
+    if (this.sql.includes('DELETE FROM submission_faces')) {
+      const submissionId = this.params[0];
+      this.db.faces = this.db.faces.filter((face) => (face.submission_id || face.submissionId) !== submissionId);
+    }
+
+    if (this.sql.includes('DELETE FROM event_face_clusters')) {
+      const eventId = this.params[0];
+      this.db.faceClusters = this.db.faceClusters.filter((cluster) => (cluster.event_id || cluster.eventId) !== eventId);
+    }
+
+    if (this.sql.includes('INSERT INTO submission_face_analyses')) {
+      const [
+        submissionId,
+        eventId,
+        sourceObjectKey,
+        provider,
+        status,
+        faceCount,
+        errorMessage,
+        faceSignatureVersion,
+        analyzedAt,
+        createdAt,
+        updatedAt
+      ] = this.params;
+      const row = {
+        submission_id: submissionId,
+        submissionId,
+        event_id: eventId,
+        eventId,
+        source_object_key: sourceObjectKey,
+        sourceObjectKey,
+        provider,
+        status,
+        face_count: faceCount,
+        faceCount,
+        error_message: errorMessage,
+        errorMessage,
+        face_signature_version: faceSignatureVersion,
+        faceSignatureVersion,
+        analyzed_at: analyzedAt,
+        analyzedAt,
+        created_at: createdAt,
+        createdAt,
+        updated_at: updatedAt,
+        updatedAt
+      };
+      const index = this.db.faceAnalyses.findIndex((item) => (item.submission_id || item.submissionId) === submissionId);
+      if (index >= 0) this.db.faceAnalyses[index] = row;
+      else this.db.faceAnalyses.push(row);
+    }
+
+    if (this.sql.includes('INSERT INTO submission_faces')) {
+      const [
+        id,
+        eventId,
+        submissionId,
+        faceIndex,
+        provider,
+        providerFaceId,
+        clusterId,
+        confidence,
+        boundingBoxJson,
+        qualityJson,
+        matchConfidence,
+        status,
+        faceSignatureVersion,
+        createdAt,
+        updatedAt
+      ] = this.params;
+      const row = {
+        id,
+        event_id: eventId,
+        eventId,
+        submission_id: submissionId,
+        submissionId,
+        face_index: faceIndex,
+        faceIndex,
+        provider,
+        provider_face_id: providerFaceId,
+        providerFaceId,
+        cluster_id: clusterId,
+        clusterId,
+        confidence,
+        bounding_box_json: boundingBoxJson,
+        boundingBoxJson,
+        quality_json: qualityJson,
+        qualityJson,
+        match_confidence: matchConfidence,
+        matchConfidence,
+        status,
+        face_signature_version: faceSignatureVersion,
+        faceSignatureVersion,
+        created_at: createdAt,
+        createdAt,
+        updated_at: updatedAt,
+        updatedAt
+      };
+      const index = this.db.faces.findIndex((item) =>
+        (item.submission_id || item.submissionId) === submissionId
+        && Number(item.face_index ?? item.faceIndex ?? 0) === Number(faceIndex)
+        && Number(item.face_signature_version || item.faceSignatureVersion || 0) === Number(faceSignatureVersion)
+      );
+      if (index >= 0) this.db.faces[index] = row;
+      else this.db.faces.push(row);
+    }
+
+    if (this.sql.includes('INSERT INTO event_face_clusters')) {
+      const [
+        id,
+        eventId,
+        provider,
+        representativeFaceId,
+        representativeSubmissionId,
+        sourceSubmissionIds,
+        faceCount,
+        faceSignatureVersion,
+        createdAt,
+        updatedAt
+      ] = this.params;
+      this.db.faceClusters.push({
+        id,
+        event_id: eventId,
+        eventId,
+        provider,
+        representative_face_id: representativeFaceId,
+        representativeFaceId,
+        representative_submission_id: representativeSubmissionId,
+        representativeSubmissionId,
+        source_submission_ids: sourceSubmissionIds,
+        sourceSubmissionIds,
+        face_count: faceCount,
+        faceCount,
+        status: 'ready',
+        face_signature_version: faceSignatureVersion,
+        faceSignatureVersion,
+        created_at: createdAt,
+        createdAt,
+        updated_at: updatedAt,
+        updatedAt
+      });
     }
 
     if (this.sql.includes('INSERT INTO event_group_hero_source_decisions')) {

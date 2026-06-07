@@ -45,8 +45,8 @@ test('admin frontend exposes the private media audit report controls', async () 
   assert.match(adminHtml, /Location cues/);
   assert.match(adminHtml, /id="mediaAuditFaceBoxesToggle"/);
   assert.match(adminHtml, /id="mediaAuditFaceSummary"/);
-  assert.match(adminHtml, /admin\.js\?v=20260606-face-roster-1/);
-  assert.match(adminHtml, /styles\.css\?v=20260606-face-roster-1/);
+  assert.match(adminHtml, /admin\.js\?v=20260607-face-analysis-1/);
+  assert.match(adminHtml, /styles\.css\?v=20260607-face-analysis-1/);
   assert.match(adminJs, /\/admin\/events\/\$\{encodeURIComponent\(eventId\)\}\/media-audit/);
   assert.match(adminJs, /previewUrl/);
   assert.match(adminJs, /EXIF and upload/);
@@ -61,6 +61,8 @@ test('admin frontend exposes the private media audit report controls', async () 
   assert.match(styles, /\.media-audit-panel/);
   assert.match(styles, /\.media-audit-preview/);
   assert.match(styles, /\.media-audit-face-box/);
+  assert.match(styles, /object-fit:\s*fill/);
+  assert.doesNotMatch(styles, /\.media-audit-preview img\s*\{[^}]*object-fit:\s*cover/s);
 });
 
 test('media audit backfill is admin-only and rejects host tokens', async () => {

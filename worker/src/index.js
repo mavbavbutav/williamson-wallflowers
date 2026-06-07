@@ -55,7 +55,7 @@ const GROUP_HERO_FORCE_RATE_WINDOW_SECONDS = 60 * 60;
 const GROUP_HERO_GENERATION_STALE_SECONDS = 5 * 60;
 const GROUP_HERO_FAILED_RETRY_LIMIT = 3;
 const GROUP_HERO_DEFAULT_MODEL = 'gpt-image-1.5';
-const GROUP_HERO_FACE_DEDUP_VERSION = 3;
+const GROUP_HERO_FACE_DEDUP_VERSION = 4;
 const GROUP_HERO_FACE_PROVIDER_DEFAULT = 'aws-rekognition';
 const GROUP_HERO_FACE_MATCH_THRESHOLD = 97;
 const GROUP_HERO_FACE_SOFT_MATCH_THRESHOLD = 90;
@@ -2298,13 +2298,31 @@ async function getEventGroupHero(env, eventId) {
 async function getGroupHeroSourceSubmissions(env, eventId) {
   const compatibleSources = await getGroupHeroCandidateSubmissions(env, eventId);
   await ensureGroupHeroFaceAnalyses(env, eventId, compatibleSources);
-  const faceDetailsMap = await getGroupHeroFaceDetailsMap(env, eventId, compatibleSources.map((source) => source.id));
-  const selection = selectDistinctGroupHeroSources(compatibleSources.map((source) => ({
+  const faceAnalysisMap = await getGroupHeroFaceAnalysisMap(env, eventId, compatibleSources.map((source) => source.id));
+  const requireFaceAnalysis = isGroupHeroFaceDedupeEnabled(env) && hasGroupHeroFaceProviderConfig(env);
+  const analysisDecisions = [];
+  const analysisReadySources = compatibleSources.filter((source) => {
+    if (!requireFaceAnalysis) return true;
+    const analysis = faceAnalysisMap.get(source.id);
+    const status = analysis?.status || '';
+    if (['ready', 'no_faces', 'skipped'].includes(status)) return true;
+    analysisDecisions.push(buildGroupHeroSourceDecision(source, 'skipped', 'face-analysis-unavailable', {
+      guestKey: getGroupHeroGuestKey(source.guestName || source.guest_name || '')
+    }));
+    return false;
+  });
+
+  if (requireFaceAnalysis && compatibleSources.length > 0 && analysisReadySources.length === 0) {
+    throw new Error('Rekognition face analysis is not ready for the selected group hero sources.');
+  }
+
+  const faceDetailsMap = await getGroupHeroFaceDetailsMap(env, eventId, analysisReadySources.map((source) => source.id));
+  const selection = selectDistinctGroupHeroSources(analysisReadySources.map((source) => ({
     ...source,
     faceDetails: faceDetailsMap.get(source.id) || [],
     faceClusterIds: uniqueCleanList((faceDetailsMap.get(source.id) || []).map((face) => face.clusterId))
   })));
-  await storeGroupHeroSourceDecisions(env, eventId, selection.decisions);
+  await storeGroupHeroSourceDecisions(env, eventId, [...analysisDecisions, ...selection.decisions]);
   return selection.sources;
 }
 
@@ -2589,7 +2607,24 @@ async function ensureGroupHeroFaceAnalyses(env, eventId, sources) {
   await ensureAwsRekognitionFaceCollection(env, collectionId);
 
   for (const source of sources) {
-    const sourceObjectKey = source.aiReferenceObjectKey || source.objectKey || source.object_key || '';
+    let sourceObject;
+    try {
+      sourceObject = await getGroupHeroFaceAnalysisSourceObject(env, source);
+    } catch (error) {
+      await storeSubmissionFaceAnalysis(env, {
+        submissionId: source.id,
+        eventId,
+        sourceObjectKey: source.objectKey || source.object_key || '',
+        provider,
+        status: 'failed',
+        faceCount: 0,
+        errorMessage: cleanText(error.message || error, 500),
+        analyzedAt: new Date().toISOString()
+      });
+      continue;
+    }
+
+    const sourceObjectKey = sourceObject.objectKey || '';
     const existing = await getSubmissionFaceAnalysis(env, source.id);
     if (
       existing
@@ -2600,17 +2635,55 @@ async function ensureGroupHeroFaceAnalyses(env, eventId, sources) {
       continue;
     }
 
-    await analyzeAndStoreGroupHeroFaces(env, eventId, source, provider, collectionId);
+    await analyzeAndStoreGroupHeroFaces(env, eventId, source, provider, collectionId, sourceObject);
   }
 
   await rebuildEventFaceClusters(env, eventId, provider);
 }
 
-async function analyzeAndStoreGroupHeroFaces(env, eventId, source, provider, collectionId) {
+async function getGroupHeroFaceAnalysisSourceObject(env, source) {
+  const objectKey = source.objectKey || source.object_key;
+  const object = await env.MOMENTS_BUCKET.get(objectKey);
+  if (!object) {
+    throw new Error(`Source image is missing from storage: ${source.id}`);
+  }
+
+  const mimeType = source.mimeType || source.mime_type || 'image/jpeg';
+  if (['image/jpeg', 'image/png'].includes(mimeType)) {
+    return {
+      object,
+      objectKey,
+      mimeType,
+      filename: `${source.id}.${extensionFor(mimeType, source.originalFilename || source.original_filename || '')}`
+    };
+  }
+
+  const aiReferenceObjectKey = source.aiReferenceObjectKey || source.ai_reference_object_key || '';
+  if (aiReferenceObjectKey) {
+    const aiReferenceObject = await env.MOMENTS_BUCKET.get(aiReferenceObjectKey);
+    if (aiReferenceObject) {
+      return {
+        object: aiReferenceObject,
+        objectKey: aiReferenceObjectKey,
+        mimeType: source.aiReferenceMimeType || source.ai_reference_mime_type || AI_REFERENCE_MIME_TYPE,
+        filename: `${source.id}-ai-reference.${AI_REFERENCE_EXTENSION}`
+      };
+    }
+  }
+
+  return {
+    object,
+    objectKey,
+    mimeType,
+    filename: `${source.id}.${extensionFor(mimeType, source.originalFilename || source.original_filename || '')}`
+  };
+}
+
+async function analyzeAndStoreGroupHeroFaces(env, eventId, source, provider, collectionId, resolvedSourceObject = null) {
   const now = new Date().toISOString();
-  const sourceObjectKey = source.aiReferenceObjectKey || source.objectKey || source.object_key || '';
+  const sourceObject = resolvedSourceObject || await getGroupHeroFaceAnalysisSourceObject(env, source);
+  const sourceObjectKey = sourceObject.objectKey || source.objectKey || source.object_key || '';
   try {
-    const sourceObject = await getGroupHeroSourceObject(env, source);
     if (!['image/jpeg', 'image/png'].includes(sourceObject.mimeType)) {
       await storeSubmissionFaceAnalysis(env, {
         submissionId: source.id,
@@ -2688,6 +2761,39 @@ async function getSubmissionFaceAnalysis(env, submissionId) {
     FROM submission_face_analyses
     WHERE submission_id = ?
   `).bind(submissionId).first();
+}
+
+async function getGroupHeroFaceAnalysisMap(env, eventId, sourceIds) {
+  const sourceSet = new Set(sourceIds || []);
+  const map = new Map();
+  if (!sourceSet.size || !isGroupHeroFaceDedupeEnabled(env)) return map;
+
+  const result = await env.MOMENTS_DB.prepare(`
+    SELECT
+      submission_id AS submissionId,
+      status,
+      face_count AS faceCount,
+      error_message AS errorMessage,
+      source_object_key AS sourceObjectKey,
+      face_signature_version AS faceSignatureVersion
+    FROM submission_face_analyses
+    WHERE event_id = ?
+      AND face_signature_version = ?
+  `).bind(eventId, GROUP_HERO_FACE_DEDUP_VERSION).all();
+
+  for (const row of result.results || []) {
+    const submissionId = row.submissionId || row.submission_id || '';
+    if (!sourceSet.has(submissionId)) continue;
+    map.set(submissionId, {
+      status: row.status || '',
+      faceCount: Number(row.faceCount ?? row.face_count ?? 0),
+      errorMessage: row.errorMessage || row.error_message || '',
+      sourceObjectKey: row.sourceObjectKey || row.source_object_key || '',
+      faceSignatureVersion: Number(row.faceSignatureVersion || row.face_signature_version || 0)
+    });
+  }
+
+  return map;
 }
 
 async function storeSubmissionFaceAnalysis(env, analysis) {
