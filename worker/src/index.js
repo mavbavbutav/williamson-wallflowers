@@ -2007,6 +2007,19 @@ async function tryOpenAiGroupHeroWithoutRejectedSource(env, apiKey, sources, pro
 }
 
 async function getGroupHeroSourceObject(env, source) {
+  const personCutoutObjectKey = source.personCutoutObjectKey || source.person_cutout_object_key || '';
+  if (personCutoutObjectKey) {
+    const personCutoutObject = await env.MOMENTS_BUCKET.get(personCutoutObjectKey);
+    if (personCutoutObject) {
+      return {
+        object: personCutoutObject,
+        objectKey: personCutoutObjectKey,
+        mimeType: source.personCutoutMimeType || source.person_cutout_mime_type || 'image/png',
+        filename: source.personCutoutFilename || source.person_cutout_filename || `${source.id}-person-cutout.png`
+      };
+    }
+  }
+
   const personReferenceObjectKey = source.personReferenceObjectKey || source.person_reference_object_key || '';
   if (personReferenceObjectKey) {
     const personReferenceObject = await env.MOMENTS_BUCKET.get(personReferenceObjectKey);
@@ -2100,6 +2113,15 @@ async function normalizeGroupHeroSourceImage(env, request, eventId, source) {
 async function prepareGroupHeroPersonReferences(env, request, eventId, sources) {
   const prepared = [];
   for (const source of sources) {
+    const cutout = await createGroupHeroPersonCutout(env, getOpenAiApiKey(env), request, eventId, source)
+      .catch((error) => {
+        console.warn('AI group hero cutout failed', eventId, source.id, String(error.message || error));
+        return null;
+      });
+    if (cutout) {
+      prepared.push(cutout);
+      continue;
+    }
     const requiresPersonReference = requiresGroupHeroPersonReference(source);
     const reference = await createGroupHeroPersonReference(env, request, eventId, source)
       .catch((error) => {
@@ -2196,6 +2218,98 @@ function withGroupHeroPersonReference(source, objectKey, face, crop) {
     personReferenceVisibleBody: crop.visibleBody,
     personReferenceDuplicateFaceIds: duplicateFaceClusterIds.map(buildGroupHeroFacePublicId).filter(Boolean)
   };
+}
+
+async function requestOpenAiPersonCutout(env, apiKey, imageBytes) {
+  const formData = new FormData();
+  formData.append('model', getOpenAiImageModel(env));
+  formData.append('prompt', GROUP_HERO_PERSON_CUTOUT_PROMPT);
+  formData.append('size', '1024x1536');
+  formData.append('quality', 'medium');
+  formData.append('output_format', 'png');
+  formData.append('n', '1');
+  formData.append('image[]', new Blob([imageBytes], { type: 'image/jpeg' }), 'person-crop.jpg');
+
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), getOpenAiImageTimeoutMs(env));
+  let response;
+  try {
+    response = await fetch('https://api.openai.com/v1/images/edits', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: formData,
+      signal: abortController.signal
+    });
+  } catch (error) {
+    if (error && error.name === 'AbortError') throw new Error('OpenAI cutout request timed out.');
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(getOpenAiErrorMessage(payload, response.status));
+  return getOpenAiImageBytes(payload);
+}
+
+function withGroupHeroPersonCutout(source, objectKey, face) {
+  const faceClusterId = face.clusterId || face.cluster_id || '';
+  return {
+    ...source,
+    personCutoutObjectKey: objectKey,
+    personCutoutMimeType: 'image/png',
+    personCutoutFilename: `${source.id}-${safeGroupHeroObjectSegment(faceClusterId || 'face')}-person-cutout.png`,
+    personReferenceFaceClusterId: faceClusterId,
+    personReferenceFaceId: buildGroupHeroFacePublicId(faceClusterId),
+    personReferenceCropMode: 'ai-cutout'
+  };
+}
+
+async function createGroupHeroPersonCutout(env, apiKey, request, eventId, source) {
+  if (!apiKey) return null;
+  const face = source.personReferenceFace || source.person_reference_face || null;
+  if (!face) return null;
+  const clusterId = face.clusterId || face.cluster_id || '';
+  const objectKey = getGroupHeroPersonCutoutObjectKey(eventId, source.id, clusterId);
+
+  const existing = await env.MOMENTS_BUCKET.get(objectKey);
+  if (existing) return withGroupHeroPersonCutout(source, objectKey, face);
+
+  const crop = buildGroupHeroPersonReferenceCrop(face, source);
+  if (!crop) return null;
+  const sourceUrl = await buildGroupHeroSourceAccessUrl(request, env, source);
+  const cropResponse = await fetch(sourceUrl, {
+    cf: {
+      image: {
+        fit: 'cover',
+        width: GROUP_HERO_ISOLATED_PERSON_REFERENCE_WIDTH,
+        height: GROUP_HERO_PERSON_REFERENCE_HEIGHT,
+        gravity: crop.gravity,
+        format: 'jpeg',
+        quality: AI_REFERENCE_QUALITY
+      }
+    }
+  });
+  if (!cropResponse.ok) return null;
+  const cropBytes = await cropResponse.arrayBuffer();
+  if (!cropBytes || cropBytes.byteLength === 0) return null;
+
+  const cutoutBytes = await requestOpenAiPersonCutout(env, apiKey, new Uint8Array(cropBytes));
+  if (!cutoutBytes || !cutoutBytes.byteLength) return null;
+
+  await env.MOMENTS_BUCKET.put(objectKey, cutoutBytes, {
+    httpMetadata: {
+      contentType: 'image/png',
+      contentDisposition: `inline; filename="${source.id}-person-cutout.png"`
+    },
+    customMetadata: {
+      eventId,
+      sourceSubmissionId: source.id,
+      mediaType: 'group-hero-person-cutout',
+      faceClusterId: clusterId
+    }
+  });
+  return withGroupHeroPersonCutout(source, objectKey, face);
 }
 
 async function buildGroupHeroSourceAccessUrl(request, env, source) {

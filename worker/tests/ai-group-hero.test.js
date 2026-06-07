@@ -598,6 +598,57 @@ test('group hero sends body-aware person references for unique face clusters', a
   }
 });
 
+test('group hero sends a cached person cutout when one already exists', async () => {
+  const solo = guestSubmission({
+    id: 'guest-cutout-cached',
+    object_key: 'moments/event-hero/guest-cutout-cached.jpg',
+    objectKey: 'moments/event-hero/guest-cutout-cached.jpg',
+    guest_name: 'Cutout Guest',
+    guestName: 'Cutout Guest',
+    status: 'approved',
+    created_at: '2026-09-19T20:05:00.000Z',
+    createdAt: '2026-09-19T20:05:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:05:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:05:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [solo],
+    faces: [
+      faceRow({
+        submission_id: 'guest-cutout-cached',
+        submissionId: 'guest-cutout-cached',
+        cluster_id: 'face-cut111',
+        clusterId: 'face-cut111',
+        bounding_box_json: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.16, Height: 0.16 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.16, Height: 0.16 })
+      })
+    ]
+  });
+  const bucket = new FakeBucket([
+    [solo.object_key, 'source-cutout-cached'],
+    ['moments/event-hero/generated/person-cutout/guest-cutout-cached-face-cut111-v1.png', 'cached-cutout-bytes']
+  ]);
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
+  const calls = mockOpenAi();
+
+  try {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: { Origin: 'https://williamsonwallflowers.com', Authorization: 'Bearer host-token' }
+    }), env);
+    assert.equal(response.status, 202);
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    // Only the final composition call — the cutout was a cache hit, no extra OpenAI call.
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].imageNames, ['guest-cutout-cached-face-cut111-person-cutout.png']);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('group hero limits one multi-face upload to a single roster participant', async () => {
   const familyPhoto = guestSubmission({
     id: 'guest-family',
