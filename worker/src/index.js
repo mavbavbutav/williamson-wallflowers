@@ -2292,10 +2292,10 @@ async function createGroupHeroPersonCutout(env, apiKey, request, eventId, source
   });
   if (!cropResponse.ok) return null;
   const cropBytes = await cropResponse.arrayBuffer();
-  if (!cropBytes || cropBytes.byteLength === 0) return null;
+  if (!cropBytes || cropBytes.byteLength === 0 || cropBytes.byteLength > AI_REFERENCE_MAX_BYTES) return null;
 
   const cutoutBytes = await requestOpenAiPersonCutout(env, apiKey, new Uint8Array(cropBytes));
-  if (!cutoutBytes || !cutoutBytes.byteLength) return null;
+  if (!cutoutBytes || !cutoutBytes.byteLength || cutoutBytes.byteLength > AI_REFERENCE_MAX_BYTES) return null;
 
   await env.MOMENTS_BUCKET.put(objectKey, cutoutBytes, {
     httpMetadata: {
