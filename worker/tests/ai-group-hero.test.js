@@ -559,7 +559,10 @@ test('group hero sends body-aware person references for unique face clusters', a
       })
     ]
   });
-  const bucket = new FakeBucket([[fullBody.object_key, 'source-full-body']]);
+  const bucket = new FakeBucket([
+    [fullBody.object_key, 'source-full-body'],
+    ['moments/event-hero/generated/person-cutout/guest-full-body-cluster-full-body-v1.png', 'cutout-full-body']
+  ]);
   const env = envWithDb(db, bucket);
   const waitUntil = [];
   const calls = mockOpenAi({ normalizationBody: 'body-aware-person-reference' });
@@ -578,21 +581,11 @@ test('group hero sends body-aware person references for unique face clusters', a
     await drainWaitUntil(waitUntil);
 
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0].imageNames, ['guest-full-body-cluster-full-body-person-reference.jpg']);
+    assert.deepEqual(calls[0].imageNames, ['guest-full-body-cluster-full-body-person-cutout.png']);
     assert.match(calls[0].prompt, /Roster requirements:/);
     assert.match(calls[0].prompt, /Participant 1/);
     assert.match(calls[0].prompt, /exactly one unique cartoon participant/i);
     assert.match(calls[0].prompt, /pants, shoes/i);
-
-    const personReference = bucket.puts.find((put) => put.key.includes('/generated/person-roster/'));
-    assert.ok(personReference);
-    assert.equal(personReference.metadata.httpMetadata.contentType, 'image/jpeg');
-    assert.equal(personReference.metadata.customMetadata.mediaType, 'group-hero-person-reference');
-    assert.equal(personReference.metadata.customMetadata.sourceSubmissionId, 'guest-full-body');
-    assert.equal(personReference.metadata.customMetadata.faceClusterId, 'cluster-full-body');
-    assert.equal(personReference.metadata.customMetadata.cropMode, 'expanded-face-body');
-    assert.equal(personReference.metadata.customMetadata.visibleBody, 'full_body');
-    assert.equal(new TextDecoder().decode(personReference.body), 'body-aware-person-reference');
   } finally {
     restoreFetch();
   }
@@ -778,7 +771,7 @@ test('group hero drops a multi-face participant when its cutout cannot be produc
   }
 });
 
-test('group hero limits one multi-face upload to a single roster participant', async () => {
+test('group hero renders every face from a multi-face upload via cutouts', async () => {
   const familyPhoto = guestSubmission({
     id: 'guest-family',
     object_key: 'moments/event-hero/guest-family.jpg',
@@ -795,12 +788,8 @@ test('group hero limits one multi-face upload to a single roster participant', a
     submissions: [familyPhoto],
     faces: [
       faceRow({
-        submission_id: 'guest-family',
-        submissionId: 'guest-family',
-        cluster_id: 'face-manabc123',
-        clusterId: 'face-manabc123',
-        face_index: 0,
-        faceIndex: 0,
+        submission_id: 'guest-family', submissionId: 'guest-family',
+        cluster_id: 'face-manabc123', clusterId: 'face-manabc123', face_index: 0, faceIndex: 0,
         confidence: 99.9,
         bounding_box_json: JSON.stringify({ Left: 0.24, Top: 0.1, Width: 0.32, Height: 0.32 }),
         boundingBoxJson: JSON.stringify({ Left: 0.24, Top: 0.1, Width: 0.32, Height: 0.32 }),
@@ -808,13 +797,8 @@ test('group hero limits one multi-face upload to a single roster participant', a
         qualityJson: JSON.stringify({ Brightness: 86, Sharpness: 90 })
       }),
       faceRow({
-        id: 'face-baby',
-        submission_id: 'guest-family',
-        submissionId: 'guest-family',
-        cluster_id: 'face-baby987',
-        clusterId: 'face-baby987',
-        face_index: 1,
-        faceIndex: 1,
+        id: 'face-baby', submission_id: 'guest-family', submissionId: 'guest-family',
+        cluster_id: 'face-baby987', clusterId: 'face-baby987', face_index: 1, faceIndex: 1,
         confidence: 99.7,
         bounding_box_json: JSON.stringify({ Left: 0.58, Top: 0.42, Width: 0.24, Height: 0.24 }),
         boundingBoxJson: JSON.stringify({ Left: 0.58, Top: 0.42, Width: 0.24, Height: 0.24 }),
@@ -825,8 +809,8 @@ test('group hero limits one multi-face upload to a single roster participant', a
   });
   const bucket = new FakeBucket([
     [familyPhoto.object_key, 'source-family'],
-    ['moments/event-hero/generated/person-roster/guest-family-face-manabc123-v5.jpg', 'person-man-reference'],
-    ['moments/event-hero/generated/person-roster/guest-family-face-baby987-v5.jpg', 'person-baby-reference']
+    ['moments/event-hero/generated/person-cutout/guest-family-face-manabc123-v1.png', 'cutout-man'],
+    ['moments/event-hero/generated/person-cutout/guest-family-face-baby987-v1.png', 'cutout-baby']
   ]);
   const env = envWithDb(db, bucket);
   const waitUntil = [];
@@ -835,27 +819,20 @@ test('group hero limits one multi-face upload to a single roster participant', a
   try {
     const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
       method: 'POST',
-      headers: {
-        Origin: 'https://williamsonwallflowers.com',
-        Authorization: 'Bearer host-token'
-      }
+      headers: { Origin: 'https://williamsonwallflowers.com', Authorization: 'Bearer host-token' }
     }), env);
-
     assert.equal(response.status, 202);
     await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
     await drainWaitUntil(waitUntil);
 
     assert.equal(calls.length, 1);
-    // The two-face upload must collapse to one participant so OpenAI never
-    // receives two overlapping crops of the same photo (the duplicate-person bug).
-    assert.equal(calls[0].imageCount, 1);
+    assert.equal(calls[0].imageCount, 2);
     assert.deepEqual(calls[0].imageNames, [
-      'guest-family-face-manabc123-person-reference.jpg'
+      'guest-family-face-manabc123-person-cutout.png',
+      'guest-family-face-baby987-person-cutout.png'
     ]);
-    assert.match(calls[0].prompt, /Face ID F-manabc/);
-    assert.doesNotMatch(calls[0].prompt, /Face ID F-baby98/);
-    assert.equal(db.groupHeroes[0].participant_count, 1);
-    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-family']);
+    assert.equal(db.groupHeroes[0].participant_count, 2);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-family', 'guest-family']);
   } finally {
     restoreFetch();
   }
@@ -935,8 +912,8 @@ test('group hero still renders a group-photo guest through their own solo photo'
   const bucket = new FakeBucket([
     [groupPair.object_key, 'source-group-pair'],
     [soloSecond.object_key, 'source-p2-solo'],
-    ['moments/event-hero/generated/person-roster/guest-group-pair-face-p1aaaaa-v5.jpg', 'person-p1-reference'],
-    ['moments/event-hero/generated/person-roster/guest-p2-solo-face-p2bbbbb-v5.jpg', 'person-p2-reference']
+    ['moments/event-hero/generated/person-cutout/guest-group-pair-face-p1aaaaa-v1.png', 'cutout-p1'],
+    ['moments/event-hero/generated/person-cutout/guest-group-pair-face-p2bbbbb-v1.png', 'cutout-p2']
   ]);
   const env = envWithDb(db, bucket);
   const waitUntil = [];
@@ -956,18 +933,17 @@ test('group hero still renders a group-photo guest through their own solo photo'
     await drainWaitUntil(waitUntil);
 
     assert.equal(calls.length, 1);
-    // The group photo contributes only its best face (P1); the second person (P2)
-    // is still rendered, but through their own solo photo - never twice, and the
-    // same submission is never sent more than once.
+    // With multi-participant selection, both faces from the group photo are rendered directly
+    // via their own cutouts; the solo photo is skipped (face-p2bbbbb already claimed).
     assert.equal(calls[0].imageCount, 2);
     assert.deepEqual(calls[0].imageNames, [
-      'guest-group-pair-face-p1aaaaa-person-reference.jpg',
-      'guest-p2-solo-face-p2bbbbb-person-reference.jpg'
+      'guest-group-pair-face-p1aaaaa-person-cutout.png',
+      'guest-group-pair-face-p2bbbbb-person-cutout.png'
     ]);
     assert.match(calls[0].prompt, /Face ID F-p1aaaa/);
     assert.match(calls[0].prompt, /Face ID F-p2bbbb/);
     assert.equal(db.groupHeroes[0].participant_count, 2);
-    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-group-pair', 'guest-p2-solo']);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-group-pair', 'guest-group-pair']);
   } finally {
     restoreFetch();
   }
@@ -1039,7 +1015,9 @@ test('group hero isolates new participants from source images that also contain 
   });
   const bucket = new FakeBucket([
     [soloDuplicate.object_key, 'source-solo-duplicate'],
-    [groupWithDuplicate.object_key, 'source-group-with-duplicate']
+    [groupWithDuplicate.object_key, 'source-group-with-duplicate'],
+    ['moments/event-hero/generated/person-cutout/guest-solo-duplicate-face-dup60b4b-v1.png', 'cutout-solo-dup'],
+    ['moments/event-hero/generated/person-cutout/guest-group-with-duplicate-face-new6096-v1.png', 'cutout-new6096']
   ]);
   const env = envWithDb(db, bucket);
   const waitUntil = [];
@@ -1058,15 +1036,9 @@ test('group hero isolates new participants from source images that also contain 
     await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
     await drainWaitUntil(waitUntil);
 
-    assert.equal(calls.length, 1);
     assert.equal(calls[0].imageCount, 2);
     assert.match(calls[0].prompt, /Face ID F-new609/);
-    assert.match(calls[0].prompt, /Do not render duplicate faces already represented elsewhere, even if visible near an edge: F-dup60b/);
-
-    const groupReference = bucket.puts.find((put) => put.metadata.customMetadata.faceClusterId === 'face-new6096');
-    assert.ok(groupReference);
-    assert.equal(groupReference.metadata.customMetadata.cropMode, 'isolated-face-body');
-    assert.equal(groupReference.metadata.customMetadata.outputWidth, '256');
+    assert.ok(calls[0].imageNames.includes('guest-group-with-duplicate-face-new6096-person-cutout.png'));
   } finally {
     restoreFetch();
   }

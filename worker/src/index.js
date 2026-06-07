@@ -2671,32 +2671,27 @@ function selectDistinctGroupHeroSources(sources) {
         continue;
       }
 
-      // Limit each source image to a single roster participant. A rectangular
-      // crop cannot truly isolate one person from a group shot, so sending more
-      // than one crop from the same photo lets OpenAI redraw the same people
-      // multiple times. Pick the single best new face; any other people in the
-      // photo can still be rendered through their own photos because their face
-      // clusters stay un-seen here and remain eligible for later sources.
-      const primaryFace = participantFaces[0];
-      const primaryClusterId = primaryFace.clusterId || primaryFace.cluster_id || '';
-
       if (guestKey) seenGuestKeys.add(guestKey);
-      seenFaceClusters.add(primaryClusterId);
-      selected.push({
-        ...source,
-        rosterParticipantId: `${source.id}:${primaryClusterId}`,
-        rosterFaceClusterId: primaryClusterId,
-        rosterFaceId: buildGroupHeroFacePublicId(primaryClusterId),
-        duplicateFaceClusterIds: duplicateClusterIds,
-        personReferenceFace: primaryFace
-      });
+      for (const face of participantFaces) {
+        const clusterId = face.clusterId || face.cluster_id || '';
+        if (!clusterId || seenFaceClusters.has(clusterId)) continue;
+        seenFaceClusters.add(clusterId);
+        selected.push({
+          ...source,
+          rosterParticipantId: `${source.id}:${clusterId}`,
+          rosterFaceClusterId: clusterId,
+          rosterFaceId: buildGroupHeroFacePublicId(clusterId),
+          duplicateFaceClusterIds: duplicateClusterIds,
+          personReferenceFace: face
+        });
+      }
 
       decisions.push(buildGroupHeroSourceDecision(source, 'selected', 'adds-face-cluster', {
         faceClusterIds,
-        newClusterIds: [primaryClusterId],
+        newClusterIds: participantFaces.map((face) => face.clusterId || face.cluster_id || '').filter(Boolean),
         duplicateClusterIds,
         guestKey,
-        score: 1
+        score: participantFaces.length
       }));
       continue;
     }
