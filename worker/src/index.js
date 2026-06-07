@@ -4293,6 +4293,14 @@ async function handleAdminApi(request, env, url, corsHeaders, parts, ctx) {
     return runAdminMediaAuditBackfill(request, env, corsHeaders, parts[1], ctx);
   }
 
+  if (request.method === 'GET' && parts[0] === 'events' && parts[1] && parts[2] === 'group-hero' && parts.length === 3) {
+    return getAdminGroupHero(request, env, corsHeaders, parts[1]);
+  }
+
+  if (request.method === 'POST' && parts[0] === 'events' && parts[1] && parts[2] === 'group-hero' && parts[3] === 'regenerate') {
+    return runAdminGroupHeroRegenerate(request, env, corsHeaders, parts[1], ctx);
+  }
+
   if (request.method === 'POST' && parts[0] === 'events') {
     return createAdminEvent(request, env, corsHeaders);
   }
@@ -4583,9 +4591,60 @@ async function getAdminMediaAudit(request, env, corsHeaders, eventId) {
       profile,
       pending,
       faceDedupe,
+      groupHero: await getAdminGroupHeroClient(env, event.id, request),
       insights: insightClients
     }
   }, 200, corsHeaders);
+}
+
+async function getAdminGroupHeroClient(env, eventId, request) {
+  try {
+    return await getEventGroupHeroClient(env, eventId, request);
+  } catch (error) {
+    console.error('Admin group hero lookup failed', eventId, String(error?.message || error));
+    return { status: 'empty', imageUrl: '', participantCount: 0, updatedAt: '', errorMessage: '' };
+  }
+}
+
+async function getAdminGroupHero(request, env, corsHeaders, eventId) {
+  const event = await getEventById(env, eventId);
+
+  if (!event) {
+    return json({ ok: false, message: 'Event not found.' }, 404, corsHeaders);
+  }
+
+  return json({
+    ok: true,
+    eventId: event.id,
+    groupHero: await getAdminGroupHeroClient(env, event.id, request)
+  }, 200, corsHeaders);
+}
+
+async function runAdminGroupHeroRegenerate(request, env, corsHeaders, eventId, ctx) {
+  const event = await getEventById(env, eventId);
+
+  if (!event) {
+    return json({ ok: false, message: 'Event not found.' }, 404, corsHeaders);
+  }
+
+  const rate = await consumeRateLimit(
+    env,
+    `group-hero:force:${eventId}`,
+    GROUP_HERO_FORCE_RATE_LIMIT,
+    GROUP_HERO_FORCE_RATE_WINDOW_SECONDS
+  );
+
+  if (!rate.ok) {
+    return json({ ok: false, message: 'Too many AI artwork refreshes. Please wait before trying again.' }, 429, corsHeaders);
+  }
+
+  await queueEventGroupHeroGeneration(env, request, eventId, { force: true }, ctx);
+
+  return json({
+    ok: true,
+    status: 'queued',
+    groupHero: await getAdminGroupHeroClient(env, event.id, request)
+  }, 202, corsHeaders);
 }
 
 async function runAdminMediaAuditBackfill(request, env, corsHeaders, eventId, ctx) {

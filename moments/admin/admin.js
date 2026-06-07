@@ -8,6 +8,7 @@ import {
   getAdminToken,
   getPublishedCapsuleShareUrl,
   qs,
+  qsa,
   requestJson,
   setAdminToken,
   setNotice
@@ -19,6 +20,36 @@ let tags = [];
 let wallDevices = [];
 let mediaAuditEventId = "";
 let mediaAudit = null;
+let groupHeroPollTimer = null;
+
+const VIEW_STORAGE_KEY = "wallflowerMomentsAdminView";
+const VIEW_CONFIG = {
+  overview: {
+    title: "Overview",
+    subtitle: "Review events, copy private links, and handle setup tasks."
+  },
+  events: {
+    title: "Events",
+    subtitle: "Create events, copy host links, and edit event details."
+  },
+  tags: {
+    title: "Tags & setup",
+    subtitle: "Register reusable NTAGs, assign them to events, and copy guest scan links."
+  },
+  lighting: {
+    title: "Lighting",
+    subtitle: "Register the Butterfly Wall bridge and test WLED presets."
+  },
+  audit: {
+    title: "Media audit",
+    subtitle: "Private staff report for approved photos and video thumbnails."
+  },
+  maintenance: {
+    title: "Maintenance",
+    subtitle: "Run cleanup after confirming old, expired media can be purged."
+  }
+};
+let activeView = "overview";
 
 init();
 
@@ -47,11 +78,72 @@ function init() {
   qs("#generateTagCodeButton").addEventListener("click", generateTagCode);
   qs("#copyBridgeConfigButton").addEventListener("click", () => copyText(qs("#bridgeConfigText").textContent, qs("#copyBridgeConfigButton")));
   bindScrollActions();
+  bindViewNav();
 
   if (adminToken) {
     qs("#adminToken").value = adminToken;
     loadAdmin();
   }
+}
+
+function bindViewNav() {
+  qsa("[data-view-target]").forEach((button) => {
+    button.addEventListener("click", () => setActiveView(button.dataset.viewTarget));
+  });
+
+  qsa("[data-guide-view]").forEach((step) => {
+    step.addEventListener("click", () => setActiveView(step.dataset.guideView));
+  });
+
+  const saved = window.sessionStorage.getItem(VIEW_STORAGE_KEY);
+  const initialView = saved && VIEW_CONFIG[saved] ? saved : "overview";
+  setActiveView(initialView, { focus: false, persist: false });
+}
+
+function setActiveView(viewId, { focus = true, persist = true } = {}) {
+  const target = viewId && VIEW_CONFIG[viewId] ? viewId : "overview";
+  activeView = target;
+
+  qsa(".admin-view").forEach((view) => {
+    view.hidden = view.dataset.view !== target;
+  });
+
+  qsa("[data-view-target]").forEach((button) => {
+    const isActive = button.dataset.viewTarget === target;
+    button.classList.toggle("is-active", isActive);
+    if (isActive) {
+      button.setAttribute("aria-current", "page");
+    } else {
+      button.removeAttribute("aria-current");
+    }
+  });
+
+  const config = VIEW_CONFIG[target];
+  const titleEl = qs("#adminTitle");
+  const subtitleEl = qs("#adminSubtitle");
+  if (titleEl) titleEl.textContent = config.title;
+  if (subtitleEl) subtitleEl.textContent = config.subtitle;
+
+  if (persist) window.sessionStorage.setItem(VIEW_STORAGE_KEY, target);
+
+  if (focus) {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    focusElement(titleEl);
+  }
+}
+
+function updateNavBadges(stats) {
+  setNavBadge("#navEventsBadge", Number(stats.pending || 0));
+  setNavBadge("#navLightingBadge", Number(stats.pendingLightTriggers || 0));
+  const unassignedActiveTags = tags.filter((tag) => tag.status === "active" && !tag.activeEventId).length;
+  setNavBadge("#navTagsBadge", unassignedActiveTags);
+}
+
+function setNavBadge(selector, count) {
+  const badge = qs(selector);
+  if (!badge) return;
+  badge.textContent = count > 99 ? "99+" : String(count);
+  badge.hidden = !count;
 }
 
 async function loadAdmin() {
@@ -66,6 +158,7 @@ async function loadAdmin() {
     qs("#authPanel").hidden = true;
     qs("#adminApp").hidden = false;
     renderStats(payload.stats || {});
+    updateNavBadges(payload.stats || {});
     renderAttention();
     renderGuide();
     renderAssignTagForm();
@@ -215,20 +308,24 @@ function setButtonBusy(button, isBusy, label = "Working...") {
 
 function renderStats(stats) {
   const values = [
-    ["Events", stats.events || 0, "events"],
-    ["Tags", stats.tags || 0, "tags"],
-    ["Lights", stats.wallDevices || 0, "lights"],
-    ["Light queue", stats.pendingLightTriggers || 0, "pending"],
-    ["Pending", stats.pending || 0, "pending"],
-    ["Approved", stats.approved || 0, "approved"]
+    ["Events", stats.events || 0, "events", "events"],
+    ["Tags", stats.tags || 0, "tags", "tags"],
+    ["Lights", stats.wallDevices || 0, "lights", "lighting"],
+    ["Light queue", stats.pendingLightTriggers || 0, "pending", "lighting"],
+    ["Pending", stats.pending || 0, "pending", "events"],
+    ["Approved", stats.approved || 0, "approved", "events"]
   ];
 
-  qs("#statsGrid").innerHTML = values.map(([label, value, key]) => `
-    <div class="stat is-${key}">
+  qs("#statsGrid").innerHTML = values.map(([label, value, key, view]) => `
+    <button type="button" class="stat is-clickable is-${key}" data-view-target="${escapeAttribute(view)}">
       <strong>${value}</strong>
       <span>${label}</span>
-    </div>
+    </button>
   `).join("");
+
+  qsaWithin("#statsGrid", "[data-view-target]").forEach((button) => {
+    button.addEventListener("click", () => setActiveView(button.dataset.viewTarget));
+  });
 }
 
 function renderAttention() {
@@ -565,6 +662,8 @@ function renderMediaAudit(errorMessage = "") {
     ? `<div class="empty-state is-compact"><strong>Report unavailable.</strong><span>${escapeHtml(errorMessage)}</span></div>`
     : `<div class="empty-state is-compact"><strong>${escapeHtml(profile.profileSummary || "No approved visual media has been audited yet.")}</strong><span>${escapeHtml(buildMediaAuditSubtext(profile, pending))}</span></div>`;
 
+  renderMediaAuditHero(errorMessage ? null : mediaAudit?.groupHero);
+
   qs("#mediaAuditStats").innerHTML = renderMediaAuditStats(profile, pending);
   qs("#mediaAuditFaceSummary").innerHTML = errorMessage ? "" : renderMediaAuditFaceSummary(faceDedupe);
   qs("#mediaAuditTags").innerHTML = renderMediaAuditTagGroups(profile);
@@ -574,6 +673,138 @@ function renderMediaAudit(errorMessage = "") {
   qs("#mediaAuditCards").innerHTML = insights.length
     ? insights.map(renderMediaAuditCard).join("")
     : `<div class="empty-state">No audited media yet. Run the audit for this event.</div>`;
+}
+
+function renderMediaAuditHero(groupHero) {
+  const container = qs("#mediaAuditHero");
+  if (!container) return;
+
+  if (!groupHero && groupHero !== undefined && groupHero !== null) {
+    container.innerHTML = "";
+  }
+
+  const hero = groupHero || {};
+  const eventSelected = Boolean(mediaAuditEventId || qs("#mediaAuditEventSelect")?.value);
+
+  if (!eventSelected) {
+    container.innerHTML = "";
+    return;
+  }
+
+  const status = hero.status || "empty";
+  const hasImage = status === "ready" && Boolean(hero.imageUrl);
+  const busy = ["queued", "pending", "generating"].includes(status);
+  const statusLabels = {
+    ready: "Ready",
+    generating: "Generating",
+    queued: "Queued",
+    pending: "Queued",
+    failed: "Failed",
+    empty: "Not generated"
+  };
+  const statusLabel = statusLabels[status] || status;
+
+  const cacheBustedUrl = hasImage
+    ? `${hero.imageUrl}${hero.imageUrl.includes("?") ? "&" : "?"}cb=${encodeURIComponent(hero.updatedAt || String(Date.now()))}`
+    : "";
+
+  const figure = hasImage
+    ? `<a class="media-audit-hero-thumb" href="${escapeAttribute(cacheBustedUrl)}" target="_blank" rel="noopener">
+         <img src="${escapeAttribute(cacheBustedUrl)}" alt="AI generated group hero artwork" loading="lazy" />
+       </a>`
+    : `<div class="media-audit-hero-thumb is-empty">${busy ? "Generating…" : "No artwork yet"}</div>`;
+
+  const meta = [];
+  if (Number(hero.participantCount)) {
+    meta.push(`${hero.participantCount} participant${Number(hero.participantCount) === 1 ? "" : "s"}`);
+  }
+  if (hero.updatedAt) {
+    meta.push(`Updated ${escapeHtml(formatDateTime(hero.updatedAt))}`);
+  }
+  if (status === "failed" && hero.errorMessage) {
+    meta.push(escapeHtml(hero.errorMessage));
+  }
+
+  container.innerHTML = `
+    ${figure}
+    <div class="media-audit-hero-body">
+      <div class="media-audit-hero-headline">
+        <strong>AI group hero artwork</strong>
+        <span class="status-pill">${escapeHtml(statusLabel)}</span>
+      </div>
+      <p class="muted">${meta.length ? meta.join(" · ") : "Generate a cartoon group portrait from this event's approved guest photos."}</p>
+      <div class="row-actions">
+        ${hasImage ? `<a class="small-button" href="${escapeAttribute(cacheBustedUrl)}" target="_blank" rel="noopener">Open full size</a>` : ""}
+        <button class="small-button is-primary" type="button" id="mediaAuditHeroGenerateButton">${hasImage ? "Generate new artwork" : "Generate artwork"}</button>
+      </div>
+    </div>
+  `;
+
+  const generateButton = qs("#mediaAuditHeroGenerateButton");
+  if (generateButton) {
+    generateButton.disabled = busy;
+    generateButton.addEventListener("click", regenerateGroupHero);
+  }
+}
+
+async function regenerateGroupHero() {
+  const eventId = mediaAuditEventId || qs("#mediaAuditEventSelect")?.value;
+  if (!eventId) {
+    showAdminNotice("Choose an event before generating hero artwork.", "error");
+    return;
+  }
+
+  const button = qs("#mediaAuditHeroGenerateButton");
+  try {
+    setButtonBusy(button, true, "Queuing…");
+    const result = await adminRequest(`/admin/events/${encodeURIComponent(eventId)}/group-hero/regenerate`, {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+    if (mediaAudit) {
+      mediaAudit.groupHero = result.groupHero || { status: "queued" };
+    }
+    renderMediaAudit();
+    showAdminNotice("AI group hero generation queued. This can take a minute.", "success");
+    pollGroupHero(eventId);
+  } catch (error) {
+    showAdminNotice(error.message || "Could not generate hero artwork.", "error");
+  } finally {
+    setButtonBusy(button, false);
+  }
+}
+
+function pollGroupHero(eventId, attempt = 0) {
+  if (groupHeroPollTimer) {
+    window.clearTimeout(groupHeroPollTimer);
+    groupHeroPollTimer = null;
+  }
+  if (attempt >= 12) return;
+
+  groupHeroPollTimer = window.setTimeout(async () => {
+    const activeEventId = mediaAuditEventId || qs("#mediaAuditEventSelect")?.value;
+    if (activeEventId !== eventId) return;
+
+    try {
+      const result = await adminRequest(`/admin/events/${encodeURIComponent(eventId)}/group-hero`);
+      const hero = result.groupHero || {};
+      if (mediaAudit) {
+        mediaAudit.groupHero = hero;
+      }
+      renderMediaAudit();
+      if (hero.status === "ready") {
+        showAdminNotice("AI group hero artwork is ready.", "success");
+        return;
+      }
+      if (hero.status === "failed") {
+        showAdminNotice(hero.errorMessage || "AI group hero generation failed.", "error");
+        return;
+      }
+    } catch (error) {
+      return;
+    }
+    pollGroupHero(eventId, attempt + 1);
+  }, 5000);
 }
 
 function buildMediaAuditSubtext(profile, pending) {
@@ -1236,6 +1467,10 @@ function bindScrollActions() {
 function scrollToTarget(selector) {
   const target = qs(selector);
   if (!target) return;
+  const view = target.closest(".admin-view");
+  if (view?.dataset.view) {
+    setActiveView(view.dataset.view, { focus: false });
+  }
   target.scrollIntoView({ behavior: "smooth", block: "start" });
   const focusTarget = target.matches("form") ? target.querySelector("input, select, button") : target;
   focusElement(focusTarget);
