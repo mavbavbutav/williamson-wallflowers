@@ -560,8 +560,7 @@ test('group hero sends body-aware person references for unique face clusters', a
     ]
   });
   const bucket = new FakeBucket([
-    [fullBody.object_key, 'source-full-body'],
-    ['moments/event-hero/generated/person-cutout/guest-full-body-cluster-full-body-v1.png', 'cutout-full-body']
+    [fullBody.object_key, 'source-full-body']
   ]);
   const env = envWithDb(db, bucket);
   const waitUntil = [];
@@ -580,8 +579,9 @@ test('group hero sends body-aware person references for unique face clusters', a
     await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
     await drainWaitUntil(waitUntil);
 
+    // Single-face photo: no AI cutout needed, just the body-aware reference crop.
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0].imageNames, ['guest-full-body-cluster-full-body-person-cutout.png']);
+    assert.deepEqual(calls[0].imageNames, ['guest-full-body-cluster-full-body-person-reference.jpg']);
     assert.match(calls[0].prompt, /Roster requirements:/);
     assert.match(calls[0].prompt, /Participant 1/);
     assert.match(calls[0].prompt, /exactly one unique cartoon participant/i);
@@ -591,7 +591,7 @@ test('group hero sends body-aware person references for unique face clusters', a
   }
 });
 
-test('group hero sends a cached person cutout when one already exists', async () => {
+test('group hero uses a plain reference, not a cutout, for a single-face photo', async () => {
   const solo = guestSubmission({
     id: 'guest-cutout-cached',
     object_key: 'moments/event-hero/guest-cutout-cached.jpg',
@@ -617,9 +617,13 @@ test('group hero sends a cached person cutout when one already exists', async ()
       })
     ]
   });
+  // Both a cutout AND a reference crop are pre-stored. A single-face photo must
+  // use the plain reference and ignore the cutout (cutouts are only for stripping
+  // bystanders out of multi-face photos, and they cost scarce OpenAI rate budget).
   const bucket = new FakeBucket([
     [solo.object_key, 'source-cutout-cached'],
-    ['moments/event-hero/generated/person-cutout/guest-cutout-cached-face-cut111-v1.png', 'cached-cutout-bytes']
+    ['moments/event-hero/generated/person-cutout/guest-cutout-cached-face-cut111-v1.png', 'cached-cutout-bytes'],
+    ['moments/event-hero/generated/person-roster/guest-cutout-cached-face-cut111-v5.jpg', 'cached-reference-bytes']
   ]);
   const env = envWithDb(db, bucket);
   const waitUntil = [];
@@ -634,21 +638,20 @@ test('group hero sends a cached person cutout when one already exists', async ()
     await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
     await drainWaitUntil(waitUntil);
 
-    // Only the final composition call — the cutout was a cache hit, no extra OpenAI call.
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0].imageNames, ['guest-cutout-cached-face-cut111-person-cutout.png']);
+    assert.deepEqual(calls[0].imageNames, ['guest-cutout-cached-face-cut111-person-reference.jpg']);
   } finally {
     restoreFetch();
   }
 });
 
-test('group hero generates and stores a person cutout on cache miss', async () => {
-  const solo = guestSubmission({
+test('group hero generates a missing cutout for a multi-face photo and reuses a cached one', async () => {
+  const groupPhoto = guestSubmission({
     id: 'guest-cutout-miss',
     object_key: 'moments/event-hero/guest-cutout-miss.jpg',
     objectKey: 'moments/event-hero/guest-cutout-miss.jpg',
-    guest_name: 'Cutout Miss',
-    guestName: 'Cutout Miss',
+    guest_name: '',
+    guestName: '',
     status: 'approved',
     created_at: '2026-09-19T20:05:00.000Z',
     createdAt: '2026-09-19T20:05:00.000Z',
@@ -656,19 +659,27 @@ test('group hero generates and stores a person cutout on cache miss', async () =
     aiArtworkConsentAt: '2026-09-19T20:05:00.000Z'
   });
   const db = new GroupHeroFakeDb({
-    submissions: [solo],
+    submissions: [groupPhoto],
     faces: [
       faceRow({
-        submission_id: 'guest-cutout-miss',
-        submissionId: 'guest-cutout-miss',
-        cluster_id: 'face-miss22',
-        clusterId: 'face-miss22',
-        bounding_box_json: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.16, Height: 0.16 }),
-        boundingBoxJson: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.16, Height: 0.16 })
+        submission_id: 'guest-cutout-miss', submissionId: 'guest-cutout-miss',
+        cluster_id: 'face-missAA', clusterId: 'face-missAA', face_index: 0, faceIndex: 0,
+        bounding_box_json: JSON.stringify({ Left: 0.2, Top: 0.1, Width: 0.16, Height: 0.16 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.2, Top: 0.1, Width: 0.16, Height: 0.16 })
+      }),
+      faceRow({
+        id: 'face-missBB', submission_id: 'guest-cutout-miss', submissionId: 'guest-cutout-miss',
+        cluster_id: 'face-missBB', clusterId: 'face-missBB', face_index: 1, faceIndex: 1,
+        bounding_box_json: JSON.stringify({ Left: 0.6, Top: 0.1, Width: 0.16, Height: 0.16 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.6, Top: 0.1, Width: 0.16, Height: 0.16 })
       })
     ]
   });
-  const bucket = new FakeBucket([[solo.object_key, 'source-cutout-miss']]);
+  // Face AA's cutout is cached (cache hit, no OpenAI call); face BB's must be generated.
+  const bucket = new FakeBucket([
+    [groupPhoto.object_key, 'source-cutout-miss'],
+    ['moments/event-hero/generated/person-cutout/guest-cutout-miss-face-missAA-v1.png', 'cached-cutout-AA']
+  ]);
   const env = envWithDb(db, bucket);
   const waitUntil = [];
   const calls = mockOpenAi({ normalizationBody: 'crop-bytes-for-cutout' });
@@ -682,14 +693,67 @@ test('group hero generates and stores a person cutout on cache miss', async () =
     await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
     await drainWaitUntil(waitUntil);
 
-    // Two OpenAI calls: [0] cutout, [1] composition.
+    // One cutout generation (face BB) + one composition. Face AA was a cache hit.
     assert.equal(calls.length, 2);
-    assert.match(calls[0].prompt, /Remove every other person/);
-    assert.equal(calls[1].imageNames.length, 1);
-    assert.match(calls[1].imageNames[0], /guest-cutout-miss-face-miss22-person-cutout\.png$/);
-    const cutoutPut = bucket.puts.find((put) => put.key.includes('/generated/person-cutout/'));
+    const cutoutCalls = calls.filter((call) => /Remove every other person/.test(call.prompt));
+    assert.equal(cutoutCalls.length, 1);
+    const composition = calls.find((call) => /Roster requirements:/.test(call.prompt));
+    assert.equal(composition.imageCount, 2);
+    assert.ok(composition.imageNames.includes('guest-cutout-miss-face-missAA-person-cutout.png'));
+    assert.ok(composition.imageNames.includes('guest-cutout-miss-face-missBB-person-cutout.png'));
+    const cutoutPut = bucket.puts.find((put) => put.key.includes('/generated/person-cutout/guest-cutout-miss-face-missBB'));
     assert.ok(cutoutPut);
     assert.equal(cutoutPut.metadata.customMetadata.mediaType, 'group-hero-person-cutout');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('group hero caps new cutout generations per run to stay under the OpenAI rate limit', async () => {
+  const crowd = guestSubmission({
+    id: 'guest-crowd',
+    object_key: 'moments/event-hero/guest-crowd.jpg',
+    objectKey: 'moments/event-hero/guest-crowd.jpg',
+    guest_name: '',
+    guestName: '',
+    status: 'approved',
+    created_at: '2026-09-19T20:05:00.000Z',
+    createdAt: '2026-09-19T20:05:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:05:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:05:00.000Z'
+  });
+  // Five faces in one photo, all new, all clustered close together so a face without a
+  // cutout is never sole-in-column. With the per-run cap of 4, only 4 cutouts are generated
+  // (the 5th is dropped), keeping total OpenAI image-edit calls at 5 (4 cutouts + 1 compose).
+  const faces = [0, 1, 2, 3, 4].map((index) => faceRow({
+    id: `face-crowd${index}`,
+    submission_id: 'guest-crowd', submissionId: 'guest-crowd',
+    cluster_id: `face-crowd${index}`, clusterId: `face-crowd${index}`,
+    face_index: index, faceIndex: index,
+    bounding_box_json: JSON.stringify({ Left: 0.30 + index * 0.02, Top: 0.2, Width: 0.10, Height: 0.10 }),
+    boundingBoxJson: JSON.stringify({ Left: 0.30 + index * 0.02, Top: 0.2, Width: 0.10, Height: 0.10 })
+  }));
+  const db = new GroupHeroFakeDb({ submissions: [crowd], faces });
+  const bucket = new FakeBucket([[crowd.object_key, 'source-crowd']]);
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
+  const calls = mockOpenAi({ normalizationBody: 'crop-bytes-for-cutout' });
+
+  try {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: { Origin: 'https://williamsonwallflowers.com', Authorization: 'Bearer host-token' }
+    }), env);
+    assert.equal(response.status, 202);
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    const cutoutCalls = calls.filter((call) => /Remove every other person/.test(call.prompt));
+    assert.equal(cutoutCalls.length, 4);
+    assert.equal(calls.length, 5); // 4 cutouts + 1 composition
+    const composition = calls.find((call) => /Roster requirements:/.test(call.prompt));
+    assert.equal(composition.imageCount, 4);
+    assert.equal(db.groupHeroes[0].participant_count, 4);
   } finally {
     restoreFetch();
   }
@@ -743,12 +807,13 @@ test('group hero drops a multi-face participant when its cutout cannot be produc
       })
     ]
   });
-  // Pre-store ONLY the solo cutout; group faces overlap (centers 0.36 vs 0.46) so neither is
-  // sole-in-column, and with no media bytes their cutouts/crops cannot be produced -> dropped.
+  // Group faces overlap (centers 0.36 vs 0.46) so neither is sole-in-column, and with no
+  // media bytes their cutouts/crops cannot be produced -> the group photo is dropped. The
+  // single-face solo skips cutouts entirely and uses its pre-stored reference crop.
   const bucket = new FakeBucket([
     [groupPhoto.object_key, 'src-group'],
     [soloPhoto.object_key, 'src-solo'],
-    ['moments/event-hero/generated/person-cutout/guest-nocutout-solo-face-solo-v1.png', 'solo-cutout']
+    ['moments/event-hero/generated/person-roster/guest-nocutout-solo-face-solo-v5.jpg', 'solo-reference']
   ]);
   const env = envWithDb(db, bucket);
   const waitUntil = [];
@@ -764,7 +829,7 @@ test('group hero drops a multi-face participant when its cutout cannot be produc
     await drainWaitUntil(waitUntil);
 
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0].imageNames, ['guest-nocutout-solo-face-solo-person-cutout.png']);
+    assert.deepEqual(calls[0].imageNames, ['guest-nocutout-solo-face-solo-person-reference.jpg']);
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-nocutout-solo']);
   } finally {
     restoreFetch();

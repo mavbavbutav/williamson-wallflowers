@@ -22,7 +22,8 @@ const AI_REFERENCE_QUALITY = 92;
 const GROUP_HERO_PERSON_REFERENCE_WIDTH = 768;
 const GROUP_HERO_PERSON_REFERENCE_HEIGHT = 1152;
 const GROUP_HERO_ISOLATED_PERSON_REFERENCE_WIDTH = 256;
-const OPENAI_IMAGE_DEFAULT_TIMEOUT_MS = 75 * 1000;
+const OPENAI_IMAGE_DEFAULT_TIMEOUT_MS = 110 * 1000;
+const GROUP_HERO_CUTOUT_TIMEOUT_MS = 60 * 1000;
 const VIDEO_MAX_SECONDS = 30;
 const AUDIO_MAX_SECONDS = 60;
 const UPLOAD_TOKEN_TTL_SECONDS = 12 * 60 * 60;
@@ -58,6 +59,9 @@ const GROUP_HERO_DEFAULT_MODEL = 'gpt-image-1.5';
 const GROUP_HERO_FACE_DEDUP_VERSION = 4;
 const GROUP_HERO_PERSON_REFERENCE_VERSION = 5;
 const GROUP_HERO_PERSON_CUTOUT_VERSION = 1;
+// Cap NEW cutout image-edits per generation so total OpenAI image calls
+// (cutouts + 1 composition) stays within the org's 5 image-edits/minute limit.
+const GROUP_HERO_MAX_CUTOUTS_PER_GENERATION = 4;
 const GROUP_HERO_DUP_MERGE_THRESHOLD = 93; // similarity %, between soft (90) and strict cluster (97)
 const GROUP_HERO_ISOLATED_COLUMN_HALF_WIDTH = 0.13; // normalized half-width of the isolated crop column
 const GROUP_HERO_PERSON_CUTOUT_PROMPT = 'Output only the single person at the center of this image as a clean, realistic portrait on a plain neutral light-gray background. Remove every other person and all background clutter. Preserve their exact likeness, age, skin tone, hairstyle, facial hair, glasses, and clothing colors. Do not add any text, captions, or labels.';
@@ -2111,28 +2115,41 @@ async function normalizeGroupHeroSourceImage(env, request, eventId, source) {
 }
 
 async function prepareGroupHeroPersonInputs(env, request, eventId, apiKey, sources) {
-  const prepared = await Promise.all((Array.isArray(sources) ? sources : []).map((source) =>
-    prepareGroupHeroPersonInput(env, request, eventId, apiKey, source)
-  ));
-  return prepared.filter(Boolean);
+  // Process sequentially with a shared cutout budget. Sequential (not parallel)
+  // generation plus the per-run cap keeps OpenAI image-edit calls under the
+  // org rate limit; bursting them in parallel previously triggered 429s.
+  const budget = { remaining: GROUP_HERO_MAX_CUTOUTS_PER_GENERATION };
+  const prepared = [];
+  for (const source of Array.isArray(sources) ? sources : []) {
+    const input = await prepareGroupHeroPersonInput(env, request, eventId, apiKey, source, budget);
+    if (input) prepared.push(input);
+  }
+  return prepared;
 }
 
-async function prepareGroupHeroPersonInput(env, request, eventId, apiKey, source) {
-  const cutout = await createGroupHeroPersonCutout(env, apiKey, request, eventId, source)
-    .catch((error) => {
-      console.warn('AI group hero cutout failed', eventId, source.id, String(error.message || error));
-      return null;
-    });
-  if (cutout) return cutout;
-
+async function prepareGroupHeroPersonInput(env, request, eventId, apiKey, source, budget) {
   const faceClusterIds = uniqueCleanList(source.faceClusterIds || source.face_cluster_ids || []);
   const duplicateFaceClusterIds = uniqueCleanList(source.duplicateFaceClusterIds || source.duplicate_face_cluster_ids || []);
   const isMultiFace = faceClusterIds.length > 1 || duplicateFaceClusterIds.length > 0;
 
-  // A multi-face source is only safe without a cutout if the chosen face is alone in its column.
-  if (isMultiFace && !isGroupHeroFaceSoleInColumn(source.personReferenceFace, source.faceDetails)) {
-    console.warn('Dropped group hero participant without a clean cutout', eventId, source.id, source.rosterParticipantId || '');
-    return null;
+  // Only photos with more than one detected face need an AI cutout to strip
+  // bystanders. Single-face photos already show one person, so the plain
+  // reference crop is correct and we avoid spending the cutout rate budget.
+  if (isMultiFace) {
+    const cutout = await createGroupHeroPersonCutout(env, apiKey, request, eventId, source, budget)
+      .catch((error) => {
+        console.warn('AI group hero cutout failed', eventId, source.id, String(error.message || error));
+        return null;
+      });
+    if (cutout) return cutout;
+
+    // No cutout (budget exhausted or generation failed): only keep this face if
+    // it is alone in its crop column, otherwise drop it — sending the full
+    // multi-person image would let OpenAI redraw the bystanders.
+    if (!isGroupHeroFaceSoleInColumn(source.personReferenceFace, source.faceDetails)) {
+      console.warn('Dropped group hero participant without a clean cutout', eventId, source.id, source.rosterParticipantId || '');
+      return null;
+    }
   }
 
   const reference = await createGroupHeroPersonReference(env, request, eventId, source)
@@ -2229,7 +2246,7 @@ async function requestOpenAiPersonCutout(env, apiKey, imageBytes) {
   formData.append('image[]', new Blob([imageBytes], { type: 'image/jpeg' }), 'person-crop.jpg');
 
   const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), getOpenAiImageTimeoutMs(env));
+  const timeoutId = setTimeout(() => abortController.abort(), GROUP_HERO_CUTOUT_TIMEOUT_MS);
   let response;
   try {
     response = await fetch('https://api.openai.com/v1/images/edits', {
@@ -2263,15 +2280,20 @@ function withGroupHeroPersonCutout(source, objectKey, face) {
   };
 }
 
-async function createGroupHeroPersonCutout(env, apiKey, request, eventId, source) {
+async function createGroupHeroPersonCutout(env, apiKey, request, eventId, source, budget = null) {
   if (!apiKey) return null;
   const face = source.personReferenceFace || source.person_reference_face || null;
   if (!face) return null;
   const clusterId = face.clusterId || face.cluster_id || '';
   const objectKey = getGroupHeroPersonCutoutObjectKey(eventId, source.id, clusterId);
 
+  // A cached cutout is free (no OpenAI call) and never consumes the rate budget.
   const existing = await env.MOMENTS_BUCKET.get(objectKey);
   if (existing) return withGroupHeroPersonCutout(source, objectKey, face);
+
+  // Generating a new cutout costs one OpenAI image-edit call. Defer if we have
+  // exhausted this run's budget so the total stays within the per-minute limit.
+  if (budget && budget.remaining <= 0) return null;
 
   const crop = buildGroupHeroPersonReferenceCrop(face, source);
   if (!crop) return null;
@@ -2292,6 +2314,7 @@ async function createGroupHeroPersonCutout(env, apiKey, request, eventId, source
   const cropBytes = await cropResponse.arrayBuffer();
   if (!cropBytes || cropBytes.byteLength === 0 || cropBytes.byteLength > AI_REFERENCE_MAX_BYTES) return null;
 
+  if (budget) budget.remaining -= 1;
   const cutoutBytes = await requestOpenAiPersonCutout(env, apiKey, new Uint8Array(cropBytes));
   if (!cutoutBytes || !cutoutBytes.byteLength || cutoutBytes.byteLength > AI_REFERENCE_MAX_BYTES) return null;
 
