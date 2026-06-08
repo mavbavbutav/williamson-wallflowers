@@ -2168,7 +2168,7 @@ test('Worker source query supports video thumbnail inputs for group heroes', asy
   assert.doesNotMatch(source, /thumbnail_mime_type IN \('image\/jpeg', 'image\/png', 'image\/webp'\)/);
 });
 
-test('group hero merges two clusters that CompareFaces says are the same person', async () => {
+test('group hero merges two clusters that SearchFaces says are the same person', async () => {
   // photoA is newer (DESC order puts it first) so it becomes the kept participant.
   const photoA = guestSubmission({
     id: 'guest-dupe-a', object_key: 'moments/event-hero/guest-dupe-a.jpg', objectKey: 'moments/event-hero/guest-dupe-a.jpg',
@@ -2184,17 +2184,25 @@ test('group hero merges two clusters that CompareFaces says are the same person'
   });
   const db = new GroupHeroFakeDb({
     submissions: [photoA, photoB],
+    // Seed completed analyses so the pipeline skips Rekognition re-indexing and the
+    // seeded faces (with their provider_face_id) survive for the dedupe merge.
+    faceAnalyses: [
+      { submission_id: 'guest-dupe-a', event_id: 'event-hero', source_object_key: 'moments/event-hero/guest-dupe-a.jpg', status: 'ready', face_count: 1, face_signature_version: 4 },
+      { submission_id: 'guest-dupe-b', event_id: 'event-hero', source_object_key: 'moments/event-hero/guest-dupe-b.jpg', status: 'ready', face_count: 1, face_signature_version: 4 }
+    ],
     faces: [
       faceRow({ submission_id: 'guest-dupe-a', submissionId: 'guest-dupe-a', cluster_id: 'face-dupA', clusterId: 'face-dupA',
+        provider_face_id: 'pf-a', providerFaceId: 'pf-a',
         bounding_box_json: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.18, Height: 0.18 }),
         boundingBoxJson: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.18, Height: 0.18 }) }),
       faceRow({ id: 'face-b', submission_id: 'guest-dupe-b', submissionId: 'guest-dupe-b', cluster_id: 'face-dupB', clusterId: 'face-dupB',
+        provider_face_id: 'pf-b', providerFaceId: 'pf-b',
         bounding_box_json: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.18, Height: 0.18 }),
         boundingBoxJson: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.18, Height: 0.18 }) })
     ]
   });
   // Single-face sources use reference crops (not cutouts). Pre-store them so the
-  // cache-hit path fires and getGroupHeroDedupeImageBytes can read the bytes.
+  // composition has an image to send for the kept participant.
   const bucket = new FakeBucket([
     [photoA.object_key, 'src-a'], [photoB.object_key, 'src-b'],
     ['moments/event-hero/generated/person-roster/guest-dupe-a-face-dupA-v5.jpg', 'ref-crop-a'],
@@ -2202,7 +2210,8 @@ test('group hero merges two clusters that CompareFaces says are the same person'
   ]);
   const env = envWithDb(db, bucket, { AWS_REGION: 'us-east-1', AWS_ACCESS_KEY_ID: 'k', AWS_SECRET_ACCESS_KEY: 's' });
   const waitUntil = [];
-  const calls = mockOpenAiWithCompareFaces({ similarity: 98 });
+  // photoB's SearchFaces returns photoA's indexed face (pf-a) at 98% -> same person.
+  const calls = mockOpenAiWithSearchFaces({ similarity: 98, matchFaceId: 'pf-a' });
 
   try {
     const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
@@ -2213,7 +2222,7 @@ test('group hero merges two clusters that CompareFaces says are the same person'
     await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
     await drainWaitUntil(waitUntil);
 
-    assert.equal(calls.compareFaces.length, 1); // both sources reached the merge and were compared
+    assert.equal(calls.searchFaces.length, 1); // only the second participant searches against the first
     assert.equal(calls.openAi.length, 1);
     assert.equal(calls.openAi[0].imageCount, 1); // duplicate merged out
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-dupe-a']);
@@ -2222,7 +2231,7 @@ test('group hero merges two clusters that CompareFaces says are the same person'
   }
 });
 
-test('group hero keeps both participants when CompareFaces is below the merge threshold', async () => {
+test('group hero keeps both participants when SearchFaces is below the merge threshold', async () => {
   // photoA is newer (DESC order puts it first) so both appear in A-then-B order.
   const photoA = guestSubmission({
     id: 'guest-keep-a', object_key: 'moments/event-hero/guest-keep-a.jpg', objectKey: 'moments/event-hero/guest-keep-a.jpg',
@@ -2238,11 +2247,17 @@ test('group hero keeps both participants when CompareFaces is below the merge th
   });
   const db = new GroupHeroFakeDb({
     submissions: [photoA, photoB],
+    faceAnalyses: [
+      { submission_id: 'guest-keep-a', event_id: 'event-hero', source_object_key: 'moments/event-hero/guest-keep-a.jpg', status: 'ready', face_count: 1, face_signature_version: 4 },
+      { submission_id: 'guest-keep-b', event_id: 'event-hero', source_object_key: 'moments/event-hero/guest-keep-b.jpg', status: 'ready', face_count: 1, face_signature_version: 4 }
+    ],
     faces: [
       faceRow({ submission_id: 'guest-keep-a', submissionId: 'guest-keep-a', cluster_id: 'face-keepA', clusterId: 'face-keepA',
+        provider_face_id: 'pf-keep-a', providerFaceId: 'pf-keep-a',
         bounding_box_json: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.18, Height: 0.18 }),
         boundingBoxJson: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.18, Height: 0.18 }) }),
       faceRow({ id: 'face-kb', submission_id: 'guest-keep-b', submissionId: 'guest-keep-b', cluster_id: 'face-keepB', clusterId: 'face-keepB',
+        provider_face_id: 'pf-keep-b', providerFaceId: 'pf-keep-b',
         bounding_box_json: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.18, Height: 0.18 }),
         boundingBoxJson: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.18, Height: 0.18 }) })
     ]
@@ -2255,7 +2270,8 @@ test('group hero keeps both participants when CompareFaces is below the merge th
   ]);
   const env = envWithDb(db, bucket, { AWS_REGION: 'us-east-1', AWS_ACCESS_KEY_ID: 'k', AWS_SECRET_ACCESS_KEY: 's' });
   const waitUntil = [];
-  const calls = mockOpenAiWithCompareFaces({ similarity: 60 });
+  // SearchFaces returns photoA's face but at only 60% -> below the 93% merge threshold.
+  const calls = mockOpenAiWithSearchFaces({ similarity: 60, matchFaceId: 'pf-keep-a' });
 
   try {
     await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
@@ -2265,7 +2281,7 @@ test('group hero keeps both participants when CompareFaces is below the merge th
     await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
     await drainWaitUntil(waitUntil);
 
-    assert.equal(calls.compareFaces.length, 1); // compared once, similarity below threshold -> kept
+    assert.equal(calls.searchFaces.length, 1); // searched once, similarity below threshold -> kept
     assert.equal(calls.openAi[0].imageCount, 2);
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-keep-a', 'guest-keep-b']);
   } finally {
@@ -2456,16 +2472,18 @@ function mockOpenAiAndAwsRekognition() {
   return calls;
 }
 
-function mockOpenAiWithCompareFaces({ similarity = 0 } = {}) {
+function mockOpenAiWithSearchFaces({ similarity = 0, matchFaceId = '' } = {}) {
   originalFetch = globalThis.fetch;
-  const calls = { openAi: [], compareFaces: [] };
+  const calls = { openAi: [], searchFaces: [] };
   globalThis.fetch = async (url, init = {}) => {
     const urlText = String(url);
     if (urlText.includes('rekognition.')) {
       const target = init.headers?.['x-amz-target'] || init.headers?.['X-Amz-Target'] || '';
-      if (target === 'RekognitionService.CompareFaces') {
-        calls.compareFaces.push(target);
-        return new Response(JSON.stringify({ FaceMatches: similarity > 0 ? [{ Similarity: similarity }] : [] }), {
+      if (target === 'RekognitionService.SearchFaces') {
+        const body = JSON.parse(init.body || '{}');
+        calls.searchFaces.push(body.FaceId || '');
+        const faceMatches = matchFaceId ? [{ Face: { FaceId: matchFaceId }, Similarity: similarity }] : [];
+        return new Response(JSON.stringify({ FaceMatches: faceMatches }), {
           status: 200, headers: { 'Content-Type': 'application/x-amz-json-1.1' }
         });
       }
