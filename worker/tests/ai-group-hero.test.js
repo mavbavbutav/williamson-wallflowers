@@ -623,7 +623,7 @@ test('group hero uses a plain reference, not a cutout, for a single-face photo',
   const bucket = new FakeBucket([
     [solo.object_key, 'source-cutout-cached'],
     ['moments/event-hero/generated/person-cutout/guest-cutout-cached-face-cut111-v1.png', 'cached-cutout-bytes'],
-    ['moments/event-hero/generated/person-roster/guest-cutout-cached-face-cut111-v5.jpg', 'cached-reference-bytes']
+    ['moments/event-hero/generated/person-roster/guest-cutout-cached-face-cut111-v6.jpg', 'cached-reference-bytes']
   ]);
   const env = envWithDb(db, bucket);
   const waitUntil = [];
@@ -813,7 +813,7 @@ test('group hero drops a multi-face participant when its cutout cannot be produc
   const bucket = new FakeBucket([
     [groupPhoto.object_key, 'src-group'],
     [soloPhoto.object_key, 'src-solo'],
-    ['moments/event-hero/generated/person-roster/guest-nocutout-solo-face-solo-v5.jpg', 'solo-reference']
+    ['moments/event-hero/generated/person-roster/guest-nocutout-solo-face-solo-v6.jpg', 'solo-reference']
   ]);
   const env = envWithDb(db, bucket);
   const waitUntil = [];
@@ -2205,8 +2205,8 @@ test('group hero merges two clusters that SearchFaces says are the same person',
   // composition has an image to send for the kept participant.
   const bucket = new FakeBucket([
     [photoA.object_key, 'src-a'], [photoB.object_key, 'src-b'],
-    ['moments/event-hero/generated/person-roster/guest-dupe-a-face-dupA-v5.jpg', 'ref-crop-a'],
-    ['moments/event-hero/generated/person-roster/guest-dupe-b-face-dupB-v5.jpg', 'ref-crop-b']
+    ['moments/event-hero/generated/person-roster/guest-dupe-a-face-dupA-v6.jpg', 'ref-crop-a'],
+    ['moments/event-hero/generated/person-roster/guest-dupe-b-face-dupB-v6.jpg', 'ref-crop-b']
   ]);
   const env = envWithDb(db, bucket, { AWS_REGION: 'us-east-1', AWS_ACCESS_KEY_ID: 'k', AWS_SECRET_ACCESS_KEY: 's' });
   const waitUntil = [];
@@ -2265,8 +2265,8 @@ test('group hero keeps both participants when SearchFaces is below the merge thr
   // Pre-store reference crops for both single-face sources.
   const bucket = new FakeBucket([
     [photoA.object_key, 'src-a'], [photoB.object_key, 'src-b'],
-    ['moments/event-hero/generated/person-roster/guest-keep-a-face-keepA-v5.jpg', 'ref-crop-a'],
-    ['moments/event-hero/generated/person-roster/guest-keep-b-face-keepB-v5.jpg', 'ref-crop-b']
+    ['moments/event-hero/generated/person-roster/guest-keep-a-face-keepA-v6.jpg', 'ref-crop-a'],
+    ['moments/event-hero/generated/person-roster/guest-keep-b-face-keepB-v6.jpg', 'ref-crop-b']
   ]);
   const env = envWithDb(db, bucket, { AWS_REGION: 'us-east-1', AWS_ACCESS_KEY_ID: 'k', AWS_SECRET_ACCESS_KEY: 's' });
   const waitUntil = [];

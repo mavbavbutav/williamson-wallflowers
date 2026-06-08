@@ -19,7 +19,7 @@ const AI_REFERENCE_MIME_TYPE = 'image/jpeg';
 const AI_REFERENCE_EXTENSION = 'jpg';
 const AI_REFERENCE_WIDTH = 1536;
 const AI_REFERENCE_QUALITY = 92;
-const GROUP_HERO_PERSON_REFERENCE_WIDTH = 768;
+const GROUP_HERO_PERSON_REFERENCE_WIDTH = 512; // narrower than tall to trim side/background bystanders while keeping full body height
 const GROUP_HERO_PERSON_REFERENCE_HEIGHT = 1152;
 const GROUP_HERO_ISOLATED_PERSON_REFERENCE_WIDTH = 256;
 const OPENAI_IMAGE_DEFAULT_TIMEOUT_MS = 110 * 1000;
@@ -57,7 +57,7 @@ const GROUP_HERO_GENERATION_STALE_SECONDS = 5 * 60;
 const GROUP_HERO_FAILED_RETRY_LIMIT = 3;
 const GROUP_HERO_DEFAULT_MODEL = 'gpt-image-1.5';
 const GROUP_HERO_FACE_DEDUP_VERSION = 4;
-const GROUP_HERO_PERSON_REFERENCE_VERSION = 5;
+const GROUP_HERO_PERSON_REFERENCE_VERSION = 6; // bumped for the narrower reference-crop width
 const GROUP_HERO_PERSON_CUTOUT_VERSION = 1;
 // Cap NEW cutout image-edits per generation so total OpenAI image calls
 // (cutouts + 1 composition) stays within the org's 5 image-edits/minute limit.
@@ -2420,9 +2420,9 @@ function buildGroupHeroRosterPrompt(prompt, sources) {
 
 Roster requirements:
 - Treat each input image as one roster participant reference.
-- If an input image includes multiple people, use the person centered by the face/body crop as that roster participant.
-- If another person appears near an edge or in the background of a crop, treat them as context only and do not render them as a roster participant.
-- Render every roster participant exactly once unless the source is unusable.
+- Render exactly ${rosterLines.length} ${rosterLines.length === 1 ? 'person' : 'people'} total — one per roster entry below — and no one else.
+- Use only the single clearly-centered foreground person from each reference. Completely ignore any other person who is faint, blurred, partial, turned away, or in the background of a crop; do not render them at all, not even as background figures.
+- Never duplicate a person: each roster participant appears exactly once, and a face that bleeds into the edge or background of another participant's reference must not become a second figure.
 - Preserve age-appropriate likeness cues, hairstyle, facial hair, glasses, clothing, and visible body/clothing details from each participant reference.
 - Do not draw Face IDs, labels, names, captions, or debug text in the artwork.
 
