@@ -31,7 +31,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260607-hero-audit-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260608-admin-polish-1" />
 </head>
 <body class="admin-page">
   <main class="app-shell">
@@ -105,33 +105,36 @@
           <div class="stats-grid" id="statsGrid"></div>
 
           <section class="setup-workflow" id="setupPanel" aria-label="Setup workflow">
-            <div class="section-kicker">
-              <h2>Setup progress</h2>
-              <p class="muted">Track where each new event is in setup. Tap a step to jump to it.</p>
+            <div class="section-kicker setup-kicker">
+              <div>
+                <h2>Setup progress</h2>
+                <p class="muted">Track where each new event is in setup. Tap a step to jump to it.</p>
+              </div>
+              <button class="small-button setup-guide-toggle" type="button" id="setupGuideToggle" aria-expanded="true">Collapse</button>
             </div>
 
             <section class="setup-guide" aria-label="Setup guide">
-              <div class="guide-step" data-guide-step="event" data-guide-view="events">
+              <div class="guide-step" data-guide-step="event" data-guide-view="events" data-guide-target="#eventForm">
                 <span>1</span>
                 <strong>Create event</strong>
                 <small>Name the host gallery and set the date.</small>
               </div>
-              <div class="guide-step" data-guide-step="tag" data-guide-view="tags">
+              <div class="guide-step" data-guide-step="tag" data-guide-view="tags" data-guide-target="#tagForm">
                 <span>2</span>
                 <strong>Register tag</strong>
                 <small>Generate or enter the reusable NTAG code.</small>
               </div>
-              <div class="guide-step" data-guide-step="assign" data-guide-view="tags">
+              <div class="guide-step" data-guide-step="assign" data-guide-view="tags" data-guide-target="#assignTagForm">
                 <span>3</span>
                 <strong>Assign tag</strong>
                 <small>Connect the physical tag to the event.</small>
               </div>
-              <div class="guide-step" data-guide-step="share" data-guide-view="events">
+              <div class="guide-step" data-guide-step="share" data-guide-view="events" data-guide-target="#eventsPanel">
                 <span>4</span>
                 <strong>Share links</strong>
                 <small>Test guest scan, then give the host link.</small>
               </div>
-              <div class="guide-step" data-guide-step="lighting" data-guide-view="lighting">
+              <div class="guide-step" data-guide-step="lighting" data-guide-view="lighting" data-guide-target="#wallDeviceForm">
                 <span>5</span>
                 <strong>Register lighting</strong>
                 <small>Connect the Butterfly Wall bridge and test WLED presets.</small>
@@ -387,11 +390,8 @@
 
         <section class="admin-view" data-view="audit" hidden>
           <section class="panel data-panel media-audit-panel" id="mediaAuditPanel">
-            <div class="panel-heading">
-              <div>
-                <h2>Media audit</h2>
-                <p class="muted">Private staff report for approved photos and video thumbnails.</p>
-              </div>
+            <div class="panel-heading is-compact">
+              <p class="muted">Choose an event, review findings, and regenerate AI artwork.</p>
               <span class="status-pill" id="mediaAuditStatusLabel">Not loaded</span>
             </div>
             <div class="media-audit-toolbar">
@@ -447,6 +447,6 @@
     </section>
   </main>
 
-  <script type="module" src="admin.js?v=20260607-hero-audit-1"></script>
+  <script type="module" src="admin.js?v=20260608-admin-polish-1"></script>
 </body>
 </html>

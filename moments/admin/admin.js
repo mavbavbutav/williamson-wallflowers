@@ -21,6 +21,8 @@ let wallDevices = [];
 let mediaAuditEventId = "";
 let mediaAudit = null;
 let groupHeroPollTimer = null;
+let adminNoticeTimer = null;
+let setupGuideCollapsed = null;
 
 const VIEW_STORAGE_KEY = "wallflowerMomentsAdminView";
 const VIEW_CONFIG = {
@@ -92,7 +94,21 @@ function bindViewNav() {
   });
 
   qsa("[data-guide-view]").forEach((step) => {
-    step.addEventListener("click", () => setActiveView(step.dataset.guideView));
+    step.addEventListener("click", () => {
+      if (step.dataset.guideTarget) {
+        scrollToTarget(step.dataset.guideTarget);
+        return;
+      }
+      setActiveView(step.dataset.guideView);
+    });
+  });
+
+  qs("#setupGuideToggle")?.addEventListener("click", () => {
+    const guide = qs(".setup-guide");
+    if (!guide) return;
+    setupGuideCollapsed = !guide.classList.contains("is-collapsed");
+    guide.classList.toggle("is-collapsed", setupGuideCollapsed);
+    updateSetupGuideToggle();
   });
 
   const saved = window.sessionStorage.getItem(VIEW_STORAGE_KEY);
@@ -105,7 +121,9 @@ function setActiveView(viewId, { focus = true, persist = true } = {}) {
   activeView = target;
 
   qsa(".admin-view").forEach((view) => {
-    view.hidden = view.dataset.view !== target;
+    const isActive = view.dataset.view === target;
+    view.hidden = !isActive;
+    view.classList.toggle("is-entering", isActive);
   });
 
   qsa("[data-view-target]").forEach((button) => {
@@ -130,6 +148,14 @@ function setActiveView(viewId, { focus = true, persist = true } = {}) {
     window.scrollTo({ top: 0, behavior: "smooth" });
     focusElement(titleEl);
   }
+
+  if (target === "audit" && mediaAuditEventId) {
+    loadMediaAudit(mediaAuditEventId, { quiet: true });
+  }
+
+  window.setTimeout(() => {
+    qsa(".admin-view.is-entering").forEach((view) => view.classList.remove("is-entering"));
+  }, 280);
 }
 
 function updateNavBadges(stats) {
@@ -142,8 +168,10 @@ function updateNavBadges(stats) {
 function setNavBadge(selector, count) {
   const badge = qs(selector);
   if (!badge) return;
-  badge.textContent = count > 99 ? "99+" : String(count);
-  badge.hidden = !count;
+  const value = Number(count) || 0;
+  badge.textContent = value > 99 ? "99+" : String(value);
+  badge.hidden = !value;
+  badge.title = value > 99 ? `${value} items` : "";
 }
 
 async function loadAdmin() {
@@ -286,8 +314,15 @@ async function createWallDevice(event) {
 function showAdminNotice(message, type = "") {
   const notice = qs("#adminNotice");
   setNotice(notice, message, type);
+  if (adminNoticeTimer) {
+    window.clearTimeout(adminNoticeTimer);
+    adminNoticeTimer = null;
+  }
   if (!notice.hidden) {
     notice.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (type === "success") {
+      adminNoticeTimer = window.setTimeout(() => setNotice(notice, ""), 5200);
+    }
   }
 }
 
@@ -316,12 +351,15 @@ function renderStats(stats) {
     ["Approved", stats.approved || 0, "approved", "events"]
   ];
 
-  qs("#statsGrid").innerHTML = values.map(([label, value, key, view]) => `
-    <button type="button" class="stat is-clickable is-${key}" data-view-target="${escapeAttribute(view)}">
+  qs("#statsGrid").innerHTML = values.map(([label, value, key, view]) => {
+    const alert = (key === "pending" && Number(value) > 0) ? " is-alert" : "";
+    return `
+    <button type="button" class="stat is-clickable is-${key}${alert}" data-view-target="${escapeAttribute(view)}">
       <strong>${value}</strong>
       <span>${label}</span>
     </button>
-  `).join("");
+  `;
+  }).join("");
 
   qsaWithin("#statsGrid", "[data-view-target]").forEach((button) => {
     button.addEventListener("click", () => setActiveView(button.dataset.viewTarget));
@@ -688,6 +726,7 @@ function renderMediaAuditHero(groupHero) {
 
   if (!eventSelected) {
     container.innerHTML = "";
+    container.className = "media-audit-hero";
     return;
   }
 
@@ -703,6 +742,20 @@ function renderMediaAuditHero(groupHero) {
     empty: "Not generated"
   };
   const statusLabel = statusLabels[status] || status;
+  const statusTone = status === "ready"
+    ? "is-ready"
+    : busy
+    ? "is-busy"
+    : status === "failed"
+    ? "is-failed"
+    : "is-empty";
+  const statusPillClass = status === "ready"
+    ? "is-approved"
+    : busy
+    ? "is-pending"
+    : status === "failed"
+    ? "is-rejected"
+    : "";
 
   const cacheBustedUrl = hasImage
     ? `${hero.imageUrl}${hero.imageUrl.includes("?") ? "&" : "?"}cb=${encodeURIComponent(hero.updatedAt || String(Date.now()))}`
@@ -712,7 +765,7 @@ function renderMediaAuditHero(groupHero) {
     ? `<a class="media-audit-hero-thumb" href="${escapeAttribute(cacheBustedUrl)}" target="_blank" rel="noopener">
          <img src="${escapeAttribute(cacheBustedUrl)}" alt="AI generated group hero artwork" loading="lazy" />
        </a>`
-    : `<div class="media-audit-hero-thumb is-empty">${busy ? "Generating…" : "No artwork yet"}</div>`;
+    : `<div class="media-audit-hero-thumb is-empty${busy ? " is-busy" : ""}">${busy ? '<span class="hero-spinner" aria-hidden="true"></span><span>Generating…</span>' : "No artwork yet"}</div>`;
 
   const meta = [];
   if (Number(hero.participantCount)) {
@@ -725,12 +778,13 @@ function renderMediaAuditHero(groupHero) {
     meta.push(escapeHtml(hero.errorMessage));
   }
 
+  container.className = `media-audit-hero is-${statusTone}`;
   container.innerHTML = `
     ${figure}
     <div class="media-audit-hero-body">
       <div class="media-audit-hero-headline">
         <strong>AI group hero artwork</strong>
-        <span class="status-pill">${escapeHtml(statusLabel)}</span>
+        <span class="status-pill ${statusPillClass}">${escapeHtml(statusLabel)}</span>
       </div>
       <p class="muted">${meta.length ? meta.join(" · ") : "Generate a cartoon group portrait from this event's approved guest photos."}</p>
       <div class="row-actions">
@@ -1649,14 +1703,35 @@ function renderGuide() {
     lighting: hasLighting
   };
   const firstOpen = Object.keys(steps).find((key) => !steps[key]);
-  qs(".setup-guide").classList.toggle("is-collapsed", !firstOpen);
+  const guide = qs(".setup-guide");
+  const autoCollapsed = !firstOpen;
+  if (setupGuideCollapsed === null) {
+    setupGuideCollapsed = autoCollapsed;
+  } else if (autoCollapsed) {
+    setupGuideCollapsed = true;
+  }
+  guide?.classList.toggle("is-collapsed", setupGuideCollapsed);
 
   Object.entries(steps).forEach(([key, isDone]) => {
     const element = qs(`[data-guide-step="${key}"]`);
     if (!element) return;
     element.classList.toggle("is-done", isDone);
     element.classList.toggle("is-current", key === firstOpen);
+    const marker = element.querySelector("span");
+    if (marker) {
+      marker.textContent = isDone ? "✓" : String(Object.keys(steps).indexOf(key) + 1);
+    }
   });
+  updateSetupGuideToggle();
+}
+
+function updateSetupGuideToggle() {
+  const toggle = qs("#setupGuideToggle");
+  const guide = qs(".setup-guide");
+  if (!toggle || !guide) return;
+  const collapsed = guide.classList.contains("is-collapsed");
+  toggle.textContent = collapsed ? "Expand" : "Collapse";
+  toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
 }
 
 function renderTagCard(tag) {
