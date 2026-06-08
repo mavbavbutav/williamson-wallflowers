@@ -211,6 +211,10 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
       return streamGroupHeroImage(request, env, url, corsHeaders, parts[1]);
     }
 
+    if (request.method === 'GET' && parts[0] === 'events' && parts[1] && parts[2] === 'group-hero' && parts[3] === 'input') {
+      return streamGroupHeroInputImage(request, env, url, corsHeaders, parts[1]);
+    }
+
     if (request.method === 'GET' && parts[0] === 'events' && parts[1] && parts[2] === 'group-hero' && parts.length === 3) {
       return getGuestGroupHero(request, env, url, corsHeaders, parts[1]);
     }
@@ -1416,6 +1420,39 @@ async function streamGroupHeroImage(request, env, url, corsHeaders, eventId) {
   return new Response(isHeadRequest ? null : object.body, { status: 200, headers });
 }
 
+async function streamGroupHeroInputImage(request, env, url, corsHeaders, eventId) {
+  const objectKey = url.searchParams.get('key') || '';
+  const token = url.searchParams.get('token') || '';
+
+  // The token is signed against this exact object key, and we additionally
+  // require the key to live under the event's generated prefix so a valid
+  // token can never be used to read arbitrary R2 objects.
+  const allowedPrefix = `moments/${eventId}/generated/`;
+  if (!objectKey.startsWith(allowedPrefix) || objectKey.includes('..')) {
+    return json({ ok: false, message: 'This artwork input link is not valid.' }, 403, corsHeaders);
+  }
+  if (!await verifySignedToken(env, token, 'group-hero-input', objectKey)) {
+    return json({ ok: false, message: 'This artwork input link is not valid.' }, 403, corsHeaders);
+  }
+
+  const object = await env.MOMENTS_BUCKET.get(objectKey);
+  if (!object) {
+    return json({ ok: false, message: 'Artwork input is missing from storage.' }, 404, corsHeaders);
+  }
+
+  const headers = new Headers(corsHeaders);
+  if (typeof object.writeHttpMetadata === 'function') {
+    object.writeHttpMetadata(headers);
+  }
+  if (!headers.get('Content-Type')) {
+    headers.set('Content-Type', objectKey.endsWith('.png') ? 'image/png' : 'image/jpeg');
+  }
+  headers.set('Cache-Control', 'private, max-age=300');
+  headers.set('Content-Disposition', 'inline');
+
+  return new Response(object.body, { status: 200, headers });
+}
+
 async function regenerateHostGroupHero(request, env, url, corsHeaders, eventId, ctx) {
   const token = getAccessToken(request, url);
   const event = await getHostEvent(env, eventId, token);
@@ -1889,6 +1926,9 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
       mediaType: 'group-hero',
       sourceSubmissionIds: JSON.stringify(activeSourceIds)
     }
+  });
+  await writeGroupHeroInputManifest(env, eventId, activeSources).catch((error) => {
+    console.warn('AI group hero input manifest write failed', eventId, String(error.message || error));
   });
   addGroupHeroAttemptTiming(generationContext, 'r2WriteMs', Date.now() - r2WriteStartedAtMs);
 
@@ -2543,6 +2583,75 @@ async function toEventGroupHeroClient(row, request, env, eventId) {
 async function buildGroupHeroAccessUrl(request, env, eventId) {
   const heroToken = await createSignedToken(env, 'group-hero', eventId, GROUP_HERO_TOKEN_TTL_SECONDS);
   return `${getApiOrigin(request, env)}/moments-api/events/${encodeURIComponent(eventId)}/group-hero/image?heroToken=${encodeURIComponent(heroToken)}`;
+}
+
+function getGroupHeroManifestObjectKey(eventId) {
+  return `moments/${eventId}/generated/group-hero-input-manifest.json`;
+}
+
+// Resolve the exact reference image that was sent to OpenAI for a participant,
+// matching the priority order of getGroupHeroSourceObject (cutout > reference
+// crop > AI reference > original). Used to build the troubleshooting manifest.
+function getGroupHeroInputDescriptor(source) {
+  const cutout = source.personCutoutObjectKey || source.person_cutout_object_key || '';
+  if (cutout) return { objectKey: cutout, kind: 'ai-cutout' };
+  const reference = source.personReferenceObjectKey || source.person_reference_object_key || '';
+  if (reference) return { objectKey: reference, kind: 'reference-crop' };
+  const aiReference = source.aiReferenceObjectKey || source.ai_reference_object_key || '';
+  if (aiReference) return { objectKey: aiReference, kind: 'ai-reference' };
+  return { objectKey: source.objectKey || source.object_key || '', kind: 'original' };
+}
+
+function buildGroupHeroInputManifest(sources) {
+  return (Array.isArray(sources) ? sources : []).map((source) => {
+    const descriptor = getGroupHeroInputDescriptor(source);
+    const faceClusterId = source.personReferenceFaceClusterId || source.rosterFaceClusterId || '';
+    return {
+      submissionId: source.id || '',
+      guestName: cleanText(source.guestName || source.guest_name || '', 120),
+      faceId: source.personReferenceFaceId || source.rosterFaceId || buildGroupHeroFacePublicId(faceClusterId),
+      cropMode: source.personReferenceCropMode || '',
+      kind: descriptor.kind,
+      objectKey: descriptor.objectKey
+    };
+  }).filter((entry) => entry.objectKey);
+}
+
+async function writeGroupHeroInputManifest(env, eventId, sources) {
+  const manifest = buildGroupHeroInputManifest(sources);
+  const body = JSON.stringify({ eventId, generatedAt: new Date().toISOString(), inputs: manifest });
+  await env.MOMENTS_BUCKET.put(getGroupHeroManifestObjectKey(eventId), body, {
+    httpMetadata: { contentType: 'application/json' },
+    customMetadata: { eventId, mediaType: 'group-hero-input-manifest' }
+  });
+}
+
+async function getGroupHeroInputManifest(env, eventId) {
+  const object = await env.MOMENTS_BUCKET.get(getGroupHeroManifestObjectKey(eventId));
+  if (!object) return [];
+  try {
+    const parsed = JSON.parse(await new Response(object.body).text());
+    return Array.isArray(parsed.inputs) ? parsed.inputs : [];
+  } catch {
+    return [];
+  }
+}
+
+async function buildGroupHeroInputAccessUrl(request, env, eventId, objectKey) {
+  const token = await createSignedToken(env, 'group-hero-input', objectKey, GROUP_HERO_TOKEN_TTL_SECONDS);
+  return `${getApiOrigin(request, env)}/moments-api/events/${encodeURIComponent(eventId)}/group-hero/input?key=${encodeURIComponent(objectKey)}&token=${encodeURIComponent(token)}`;
+}
+
+async function buildGroupHeroInputClients(request, env, eventId) {
+  const manifest = await getGroupHeroInputManifest(env, eventId);
+  return Promise.all(manifest.map(async (entry) => ({
+    submissionId: entry.submissionId || '',
+    guestName: entry.guestName || '',
+    faceId: entry.faceId || '',
+    cropMode: entry.cropMode || '',
+    kind: entry.kind || '',
+    viewUrl: entry.objectKey ? await buildGroupHeroInputAccessUrl(request, env, eventId, entry.objectKey) : ''
+  })));
 }
 
 async function getEventGroupHero(env, eventId) {
@@ -4660,10 +4769,14 @@ async function getAdminMediaAudit(request, env, corsHeaders, eventId) {
 
 async function getAdminGroupHeroClient(env, eventId, request) {
   try {
-    return await getEventGroupHeroClient(env, eventId, request);
+    const client = await getEventGroupHeroClient(env, eventId, request);
+    // Admin-only: attach the exact reference images sent to OpenAI, with
+    // short-lived signed view links, for troubleshooting generation choices.
+    const inputs = await buildGroupHeroInputClients(request, env, eventId).catch(() => []);
+    return { ...client, inputs };
   } catch (error) {
     console.error('Admin group hero lookup failed', eventId, String(error?.message || error));
-    return { status: 'empty', imageUrl: '', participantCount: 0, updatedAt: '', errorMessage: '' };
+    return { status: 'empty', imageUrl: '', participantCount: 0, updatedAt: '', errorMessage: '', inputs: [] };
   }
 }
 
