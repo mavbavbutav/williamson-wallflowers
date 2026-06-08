@@ -778,6 +778,23 @@ function renderMediaAuditHero(groupHero) {
     meta.push(escapeHtml(hero.errorMessage));
   }
 
+  const inputs = Array.isArray(hero.inputs) ? hero.inputs.filter((input) => input && input.viewUrl) : [];
+  const inputsHtml = inputs.length
+    ? `<details class="media-audit-hero-inputs">
+         <summary>Reference images sent to OpenAI (${inputs.length})</summary>
+         <div class="media-audit-hero-inputs-grid">
+           ${inputs.map((input) => {
+             const title = [input.guestName, input.faceId, input.kind, input.cropMode].filter(Boolean).join(" · ");
+             const caption = [input.kind, input.faceId].filter(Boolean).join(" · ") || "input";
+             return `<a class="media-audit-hero-input" href="${escapeAttribute(input.viewUrl)}" target="_blank" rel="noopener" title="${escapeAttribute(title)}">
+               <img src="${escapeAttribute(input.viewUrl)}" alt="Reference image sent to OpenAI" loading="lazy" />
+               <span class="media-audit-hero-input-meta">${escapeHtml(caption)}</span>
+             </a>`;
+           }).join("")}
+         </div>
+       </details>`
+    : "";
+
   container.className = `media-audit-hero is-${statusTone}`;
   container.innerHTML = `
     ${figure}
@@ -791,6 +808,7 @@ function renderMediaAuditHero(groupHero) {
         ${hasImage ? `<a class="small-button" href="${escapeAttribute(cacheBustedUrl)}" target="_blank" rel="noopener">Open full size</a>` : ""}
         <button class="small-button is-primary" type="button" id="mediaAuditHeroGenerateButton">${hasImage ? "Generate new artwork" : "Generate artwork"}</button>
       </div>
+      ${inputsHtml}
     </div>
   `;
 

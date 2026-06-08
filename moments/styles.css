@@ -3048,6 +3048,47 @@ textarea:focus-visible {
   gap: 0.5rem;
 }
 
+.media-audit-hero-inputs {
+  margin-top: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.media-audit-hero-inputs > summary {
+  cursor: pointer;
+  color: var(--muted, #667085);
+  font-weight: 600;
+}
+
+.media-audit-hero-inputs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.media-audit-hero-input {
+  display: grid;
+  gap: 0.2rem;
+  text-decoration: none;
+  color: var(--muted, #667085);
+  text-align: center;
+}
+
+.media-audit-hero-input img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: 0.4rem;
+  border: 1px solid var(--border, #e4e7ec);
+  background: #f2f4f7;
+}
+
+.media-audit-hero-input-meta {
+  font-size: 0.7rem;
+  line-height: 1.1;
+  word-break: break-word;
+}
+
 .media-audit-hero-headline {
   display: flex;
   align-items: center;

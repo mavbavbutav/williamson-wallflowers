@@ -224,7 +224,8 @@ test('scheduled task generates a ready group hero from a queued approval using t
       'guest-04',
       'guest-03'
     ]);
-    assert.equal(bucket.puts.at(-1).metadata.httpMetadata.contentType, 'image/png');
+    const heroPut = bucket.puts.filter((put) => /\/generated\/group-hero-\d+\.png$/.test(put.key)).at(-1);
+    assert.equal(heroPut.metadata.httpMetadata.contentType, 'image/png');
   } finally {
     restoreFetch();
   }
@@ -1631,7 +1632,8 @@ test('older overlapping group hero generation cannot overwrite a newer result', 
 
     assert.equal(db.groupHeroes[0].status, 'ready');
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-second', 'guest-first']);
-    assert.equal(bucket.puts.at(-1).body.byteLength, new TextEncoder().encode('newer-generated-png').byteLength);
+    const heroPut = bucket.puts.filter((put) => /\/generated\/group-hero-\d+\.png$/.test(put.key)).at(-1);
+    assert.equal(heroPut.body.byteLength, new TextEncoder().encode('newer-generated-png').byteLength);
   } finally {
     resolvePendingOpenAiCalls(calls);
     restoreFetch();
@@ -2287,6 +2289,96 @@ test('group hero keeps both participants when SearchFaces is below the merge thr
   } finally {
     restoreFetch();
   }
+});
+
+test('group hero records an input manifest and serves crops through the admin viewer', async () => {
+  const guest = guestSubmission({
+    id: 'guest-mani',
+    object_key: 'moments/event-hero/guest-mani.jpg',
+    objectKey: 'moments/event-hero/guest-mani.jpg',
+    guest_name: 'Manifest Guest',
+    guestName: 'Manifest Guest',
+    status: 'approved',
+    created_at: '2026-09-19T20:05:00.000Z',
+    createdAt: '2026-09-19T20:05:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:05:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:05:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [guest],
+    faces: [
+      faceRow({
+        submission_id: 'guest-mani', submissionId: 'guest-mani',
+        cluster_id: 'face-mani', clusterId: 'face-mani',
+        bounding_box_json: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.16, Height: 0.16 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.4, Top: 0.1, Width: 0.16, Height: 0.16 })
+      })
+    ]
+  });
+  const refKey = 'moments/event-hero/generated/person-roster/guest-mani-face-mani-v6.jpg';
+  const bucket = new FakeBucket([
+    [guest.object_key, 'source-mani'],
+    [refKey, 'ref-mani-bytes']
+  ]);
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
+  const calls = mockOpenAi();
+
+  try {
+    await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: { Origin: 'https://williamsonwallflowers.com', Authorization: 'Bearer host-token' }
+    }), env);
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    // Manifest written to R2 capturing the exact input sent for the participant.
+    const manifestPut = bucket.puts.find((put) => put.key.endsWith('/generated/group-hero-input-manifest.json'));
+    assert.ok(manifestPut, 'input manifest was written');
+    const manifest = JSON.parse(new TextDecoder().decode(manifestPut.body));
+    assert.equal(manifest.inputs.length, 1);
+    assert.equal(manifest.inputs[0].objectKey, refKey);
+    assert.equal(manifest.inputs[0].kind, 'reference-crop');
+
+    // Admin payload exposes the inputs with signed view URLs.
+    const adminResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/admin/events/event-hero/group-hero', {
+      headers: { Origin: 'https://williamsonwallflowers.com', 'X-Admin-Token': 'admin-token' }
+    }), env);
+    assert.equal(adminResponse.status, 200);
+    const adminPayload = await adminResponse.json();
+    const inputs = adminPayload.groupHero.inputs || [];
+    assert.equal(inputs.length, 1);
+    assert.match(inputs[0].viewUrl, /group-hero\/input\?key=/);
+
+    // The signed view URL serves the exact crop bytes.
+    const viewResponse = await worker.fetch(new Request(inputs[0].viewUrl, {
+      headers: { Origin: 'https://williamsonwallflowers.com' }
+    }), env);
+    assert.equal(viewResponse.status, 200);
+    assert.equal(await viewResponse.text(), 'ref-mani-bytes');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('group hero input endpoint rejects out-of-prefix keys and bad tokens', async () => {
+  const db = new GroupHeroFakeDb({ submissions: [] });
+  const bucket = new FakeBucket([['moments/other-event/secret.png', 'secret-bytes']]);
+  const env = envWithDb(db, bucket);
+
+  // A key outside the event's generated prefix is refused regardless of token.
+  const outOfPrefix = await worker.fetch(new Request(
+    `https://williamsonwallflowers.com/moments-api/events/event-hero/group-hero/input?key=${encodeURIComponent('moments/other-event/secret.png')}&token=whatever`,
+    { headers: { Origin: 'https://williamsonwallflowers.com' } }
+  ), env);
+  assert.equal(outOfPrefix.status, 403);
+
+  // An in-prefix key with an invalid signature is refused.
+  const badToken = await worker.fetch(new Request(
+    `https://williamsonwallflowers.com/moments-api/events/event-hero/group-hero/input?key=${encodeURIComponent('moments/event-hero/generated/person-roster/x-v6.jpg')}&token=badtoken`,
+    { headers: { Origin: 'https://williamsonwallflowers.com' } }
+  ), env);
+  assert.equal(badToken.status, 403);
 });
 
 async function readText(path) {
