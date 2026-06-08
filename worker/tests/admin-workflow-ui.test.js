@@ -57,7 +57,15 @@ test('admin page prioritizes event operations and setup workflow', async () => {
   assert.match(adminJs, /function renderWallDevices/);
   assert.match(adminJs, /function showBridgeConfig/);
   assert.match(adminJs, /data-test-trigger/);
-  assert.match(adminJs, /setup-guide"\)\.classList\.toggle\("is-collapsed"/);
+  assert.match(adminJs, /guide\?\.classList\.toggle\("is-collapsed"/);
+  assert.match(adminJs, /function updateSetupGuideToggle/);
+  assert.match(adminHtml, /data-guide-target="#eventForm"/);
+  assert.match(adminJs, /step\.dataset\.guideTarget/);
+  assert.match(adminHtml, /id="setupGuideToggle"/);
+  assert.match(adminHtml, /panel-heading is-compact/);
+  assert.match(styles, /\.admin-view\.is-entering/);
+  assert.match(styles, /\.stat\.is-clickable\.is-alert/);
+  assert.match(styles, /\.media-audit-hero\.is-ready/);
   assert.doesNotMatch(adminJs, /<span class="muted link-preview">\$\{escapeHtml\(hostUrl\)\}<\/span>/);
 
   assert.match(styles, /\.admin-nav/);
