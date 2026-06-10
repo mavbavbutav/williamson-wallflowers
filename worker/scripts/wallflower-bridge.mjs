@@ -2,13 +2,40 @@ import { pathToFileURL } from 'node:url';
 
 const DEFAULT_POLL_MS = 1500;
 const DEFAULT_WLED_TIMEOUT_MS = 5000;
+const DEFAULT_IDLE_PRESET_ID = 1;
+const DEFAULT_BURST_SECONDS = 8;
+const BURST_SECONDS_BY_TRIGGER = {
+  tag_scan: 7,
+  submission_received: 8,
+  manual_test: 15
+};
 
-export function buildWledPayload(trigger) {
-  return {
+export function buildWledPayload(trigger, config = {}) {
+  const payload = {
     on: true,
-    bri: Number(trigger.brightness || 180),
-    ps: Number(trigger.presetId)
+    bri: Number(trigger.brightness || 180)
   };
+
+  const idlePresetId = config.idlePresetId === undefined
+    ? DEFAULT_IDLE_PRESET_ID
+    : Number(config.idlePresetId);
+
+  if (!Number.isInteger(idlePresetId) || idlePresetId < 1) {
+    payload.ps = Number(trigger.presetId);
+    return payload;
+  }
+
+  const burstSeconds = BURST_SECONDS_BY_TRIGGER[trigger.triggerType] || DEFAULT_BURST_SECONDS;
+
+  payload.playlist = {
+    ps: [Number(trigger.presetId)],
+    dur: [Math.round(burstSeconds * 10)],
+    transition: 7,
+    repeat: 1,
+    end: idlePresetId
+  };
+
+  return payload;
 }
 
 export function readBridgeConfig(env = process.env) {
@@ -20,7 +47,8 @@ export function readBridgeConfig(env = process.env) {
     bridgeToken: requireEnv(env, 'BRIDGE_TOKEN'),
     wledBaseUrl: requireEnv(env, 'WLED_BASE_URL').replace(/\/$/, ''),
     pollMs: normalizeNumber(env.BRIDGE_POLL_MS, DEFAULT_POLL_MS),
-    wledTimeoutMs: normalizeNumber(env.WLED_TIMEOUT_MS, DEFAULT_WLED_TIMEOUT_MS)
+    wledTimeoutMs: normalizeNumber(env.WLED_TIMEOUT_MS, DEFAULT_WLED_TIMEOUT_MS),
+    idlePresetId: normalizeIdlePresetId(env.WLED_IDLE_PRESET_ID)
   };
 }
 
@@ -46,7 +74,7 @@ export async function triggerWled(config, trigger, fetchImpl = fetch) {
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(buildWledPayload(trigger)),
+    body: JSON.stringify(buildWledPayload(trigger, config)),
     signal: AbortSignal.timeout(config.wledTimeoutMs)
   });
 
@@ -125,6 +153,12 @@ function requireEnv(env, key) {
 function normalizeNumber(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function normalizeIdlePresetId(value) {
+  if (value === undefined || String(value).trim() === '') return DEFAULT_IDLE_PRESET_ID;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 && number <= 250 ? number : DEFAULT_IDLE_PRESET_ID;
 }
 
 function cleanErrorMessage(value) {
