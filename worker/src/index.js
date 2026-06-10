@@ -7148,14 +7148,26 @@ async function triggerAdminWallDevice(request, env, corsHeaders, deviceId) {
 
   let body = {};
   try {
-    body = await request.json();
+    const bodyText = await request.text();
+    if (bodyText) {
+      body = JSON.parse(bodyText);
+    }
   } catch {
     body = {};
   }
 
-  const triggerType = normalizeTriggerType(body.triggerType || 'manual_test');
-  const presetId = normalizePresetId(body.presetId, getPresetForTrigger(device, triggerType));
-  const brightness = normalizeBrightness(body.brightness, device.brightness || DEFAULT_LIGHT_BRIGHTNESS);
+  const triggerType = normalizeTriggerType(
+    (body.triggerType || new URL(request.url).searchParams.get('triggerType') || 'manual_test')
+  );
+  const presetId = normalizePresetId(
+    body.presetId ?? new URL(request.url).searchParams.get('presetId'),
+    getPresetForTrigger(device, triggerType)
+  );
+  const brightness = normalizeBrightness(
+    body.brightness ?? new URL(request.url).searchParams.get('brightness'),
+    device.brightness || DEFAULT_LIGHT_BRIGHTNESS
+  );
+
   const trigger = await queueDeviceLightTrigger(env, {
     eventId: device.eventId,
     wallDeviceId: device.id,
@@ -8501,7 +8513,7 @@ function isAdminRequest(request, url, env) {
   const queryToken = url.searchParams.get('adminToken') || '';
   const token = headerToken || bearer || queryToken;
 
-  return Boolean(env.MOMENTS_ADMIN_TOKEN && token && token === env.MOMENTS_ADMIN_TOKEN);
+  return Boolean(env.MOMENTS_ADMIN_TOKEN && token && token.trim() === env.MOMENTS_ADMIN_TOKEN);
 }
 
 async function isEventAdminMediaAuditRequest(request, env, url, eventId) {

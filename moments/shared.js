@@ -118,10 +118,20 @@ export async function requestJson(path, options = {}) {
     });
 
     const contentType = response.headers.get("Content-Type") || "";
-    const payload = contentType.includes("application/json") ? await response.json() : { message: await response.text() };
+    let payload = { message: "Request failed." };
+
+    if (contentType.includes("application/json")) {
+      try {
+        payload = await response.json();
+      } catch {
+        payload.message = (await response.text()).trim();
+      }
+    } else {
+      payload.message = (await response.text()).trim() || payload.message;
+    }
 
     if (!response.ok) {
-      const message = payload.message || "Request failed.";
+      const message = String(payload.message || "Request failed.").trim();
       throw new Error(message);
     }
 

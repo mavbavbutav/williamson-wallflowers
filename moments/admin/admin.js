@@ -12,7 +12,7 @@ import {
   requestJson,
   setAdminToken,
   setNotice
-} from "../shared.js?v=20260531-3";
+} from "../shared.js?v=20260610-admin-1";
 
 let adminToken = getAdminToken();
 let events = [];
@@ -1666,10 +1666,14 @@ async function deleteWallDevice(deviceId, deviceName) {
 }
 
 async function testWallDevice(deviceId, triggerType) {
+  const payload = {
+    triggerType: normalizeTriggerType(triggerType)
+  };
+
   try {
     await adminRequest(`/admin/wall-devices/${encodeURIComponent(deviceId)}/triggers`, {
       method: "POST",
-      body: JSON.stringify({ triggerType })
+      body: JSON.stringify(payload)
     });
     await loadAdmin();
     showAdminNotice("Light test queued. The bridge will pick it up on its next poll.", "success");
@@ -1704,13 +1708,25 @@ async function runCleanup() {
 }
 
 function adminRequest(path, options = {}) {
+  const headers = {
+    ...(options.headers || {})
+  };
+
+  if (adminToken) {
+    headers["X-Admin-Token"] = adminToken;
+    headers.Authorization = `Bearer ${adminToken}`;
+  }
+
   return requestJson(path, {
     ...options,
-    headers: {
-      ...(options.headers || {}),
-      "X-Admin-Token": adminToken
-    }
+    headers
   });
+}
+
+function normalizeTriggerType(value) {
+  const triggerType = String(value || "").trim();
+  const allowed = new Set(["tag_scan", "submission_received", "manual_test"]);
+  return allowed.has(triggerType) ? triggerType : "manual_test";
 }
 
 function generateTagCode() {
