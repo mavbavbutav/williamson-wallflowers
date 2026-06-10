@@ -4495,16 +4495,16 @@ async function handleAdminApi(request, env, url, corsHeaders, parts, ctx) {
     return deleteAdminTag(request, env, corsHeaders, parts[1]);
   }
 
-  if (request.method === 'POST' && parts[0] === 'wall-devices') {
+  if (request.method === 'POST' && parts[0] === 'wall-devices' && parts[1] && parts[2] === 'triggers') {
+    return triggerAdminWallDevice(request, env, corsHeaders, parts[1]);
+  }
+
+  if (request.method === 'POST' && parts[0] === 'wall-devices' && parts.length === 1) {
     return createAdminWallDevice(request, env, corsHeaders);
   }
 
   if (request.method === 'PATCH' && parts[0] === 'wall-devices' && parts[1]) {
     return updateAdminWallDevice(request, env, corsHeaders, parts[1]);
-  }
-
-  if (request.method === 'POST' && parts[0] === 'wall-devices' && parts[1] && parts[2] === 'triggers') {
-    return triggerAdminWallDevice(request, env, corsHeaders, parts[1]);
   }
 
   if (request.method === 'DELETE' && parts[0] === 'wall-devices' && parts[1]) {

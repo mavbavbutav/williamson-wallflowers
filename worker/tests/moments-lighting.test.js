@@ -59,6 +59,35 @@ describe('Wallflower Moments lighting integration', () => {
     assert.equal(response.status, 403);
   });
 
+  test('admin test button queues a manual trigger for the device', async () => {
+    const db = new FakeD1({
+      devices: [activeDevice()]
+    });
+    const env = testEnv(db);
+
+    const response = await worker.fetch(jsonRequest(`${API_URL}/admin/wall-devices/device-1/triggers`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer admin-secret',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ triggerType: 'manual_test' })
+    }), env);
+    const payload = await response.json();
+
+    assert.equal(response.status, 201);
+    assert.equal(payload.ok, true);
+    assert.equal(db.lightTriggers.length, 1);
+    assert.deepEqual(db.lightTriggers[0], {
+      eventId: 'event-1',
+      wallDeviceId: 'device-1',
+      triggerType: 'manual_test',
+      presetId: 4,
+      brightness: 180,
+      status: 'pending'
+    });
+  });
+
   test('admin can delete a wall device along with its queued triggers', async () => {
     const db = new FakeD1({
       devices: [activeDevice()]
