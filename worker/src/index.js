@@ -7594,12 +7594,18 @@ function buildBridgeConfig(env, deviceId, bridgeToken) {
   const apiBase = apiBaseUrl.endsWith('/moments-api') ? apiBaseUrl : `${apiBaseUrl}/moments-api`;
 
   return [
+    '# Wallflower lighting bridge config — save as bridge.env on the computer',
+    '# that shares Wi-Fi with the lights, then run from the worker folder:',
+    '#   node --env-file=bridge.env scripts/wallflower-bridge.mjs',
     `WALLFLOWER_API_BASE=${apiBase}`,
     `WALL_DEVICE_ID=${deviceId}`,
     `BRIDGE_TOKEN=${bridgeToken}`,
-    'WLED_BASE_URL=http://192.168.1.50',
+    '# Set this to the WLED controller address on the local network.',
+    'WLED_BASE_URL=http://REPLACE-WITH-WLED-IP',
     'BRIDGE_POLL_MS=1500',
-    'WLED_TIMEOUT_MS=5000'
+    'WLED_TIMEOUT_MS=5000',
+    '# WLED preset the lights settle back to after each burst (0 = stay on the burst).',
+    'WLED_IDLE_PRESET_ID=1'
   ].join('\n');
 }
 

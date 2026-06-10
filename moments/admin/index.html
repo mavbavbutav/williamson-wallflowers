@@ -340,6 +340,7 @@
                   <input id="wallDeviceName" name="name" required placeholder="Butterfly Wall" />
                 </div>
               </div>
+              <p class="muted">Preset numbers refer to presets saved on the WLED controller. The standard dig2go setup is 1 = Idle Glow, 2 = Tap Sparkle (scan), 3 = Message Pulse (submission), 4 = Celebration (test) — the defaults below just work.</p>
               <div class="preset-grid">
                 <div class="field">
                   <label for="scanPresetId">Scan preset</label>
@@ -365,6 +366,7 @@
               <div>
                 <strong>Bridge config</strong>
                 <p class="muted">Copy this now. The bridge token is only shown when created or rotated.</p>
+                <p class="muted">Save it as <code>bridge.env</code> on the laptop that shares Wi-Fi with the lights, change <code>WLED_BASE_URL</code> to the WLED controller's IP, then run <code>node --env-file=bridge.env scripts/wallflower-bridge.mjs</code> from the <code>worker</code> folder. Lost the token? Use Rotate bridge on the device row to get a fresh config.</p>
               </div>
               <pre id="bridgeConfigText"></pre>
               <button class="small-button is-primary" type="button" id="copyBridgeConfigButton">Copy bridge config</button>
