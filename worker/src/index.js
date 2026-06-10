@@ -4507,6 +4507,10 @@ async function handleAdminApi(request, env, url, corsHeaders, parts, ctx) {
     return triggerAdminWallDevice(request, env, corsHeaders, parts[1]);
   }
 
+  if (request.method === 'DELETE' && parts[0] === 'wall-devices' && parts[1]) {
+    return deleteAdminWallDevice(request, env, corsHeaders, parts[1]);
+  }
+
   return json({ ok: false, message: 'Admin route not found.' }, 404, corsHeaders);
 }
 
@@ -7118,6 +7122,21 @@ async function updateAdminWallDevice(request, env, corsHeaders, deviceId) {
     wallDevice: toAdminWallDeviceClient(updated),
     bridgeToken: bridgeToken || undefined,
     bridgeConfig: bridgeToken ? buildBridgeConfig(env, deviceId, bridgeToken) : undefined
+  }, 200, corsHeaders);
+}
+
+async function deleteAdminWallDevice(request, env, corsHeaders, deviceId) {
+  const current = await getWallDeviceById(env, deviceId);
+  if (!current) {
+    return json({ ok: false, message: 'Wall device not found.' }, 404, corsHeaders);
+  }
+
+  await env.MOMENTS_DB.prepare('DELETE FROM light_triggers WHERE wall_device_id = ?').bind(deviceId).run();
+  await env.MOMENTS_DB.prepare('DELETE FROM wall_devices WHERE id = ?').bind(deviceId).run();
+
+  return json({
+    ok: true,
+    deletedDeviceId: deviceId
   }, 200, corsHeaders);
 }
 

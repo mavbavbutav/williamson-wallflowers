@@ -540,7 +540,7 @@ function renderWallDevices() {
     <tr data-device-id="${escapeAttribute(device.id)}">
       <td>
         <strong>${escapeHtml(device.name)}</strong><br />
-        <span class="muted">${escapeHtml(device.eventName || "Unassigned event")}</span>
+        <select data-device-event>${buildDeviceEventOptions(device.eventId)}</select>
       </td>
       <td>
         <select data-device-status>
@@ -1504,7 +1504,7 @@ function bindAttentionActions() {
 
 function bindWallDeviceActions() {
   qsaWithin("#devicesTable, #devicesCards", "[data-device-id]").forEach((row) => {
-    bindDirtySaveButton(row, "[data-device-status], [data-device-scan-preset], [data-device-submission-preset], [data-device-manual-preset], [data-device-brightness]", "[data-save-device]");
+    bindDirtySaveButton(row, "[data-device-event], [data-device-status], [data-device-scan-preset], [data-device-submission-preset], [data-device-manual-preset], [data-device-brightness]", "[data-save-device]");
   });
 
   qsaWithin("#devicesTable, #devicesCards", "[data-save-device]").forEach((button) => {
@@ -1526,6 +1526,16 @@ function bindWallDeviceActions() {
     button.addEventListener("click", async () => {
       const row = button.closest("[data-device-id]");
       await testWallDevice(row.dataset.deviceId, button.dataset.testTrigger);
+    });
+  });
+
+  qsaWithin("#devicesTable, #devicesCards", "[data-delete-device]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const row = button.closest("[data-device-id]");
+      const device = wallDevices.find((item) => item.id === row.dataset.deviceId);
+      const deviceName = device?.name || "this device";
+      if (!window.confirm(`Delete wall device "${deviceName}"? Its bridge token stops working immediately. Events and guest moments are not affected.`)) return;
+      await deleteWallDevice(row.dataset.deviceId, deviceName);
     });
   });
 }
@@ -1640,6 +1650,18 @@ async function updateWallDevice(deviceId, body, successMessage = "Wall device up
     showAdminNotice(successMessage, "success");
   } catch (error) {
     showAdminNotice(error.message || "Could not update wall device.", "error");
+  }
+}
+
+async function deleteWallDevice(deviceId, deviceName) {
+  try {
+    await adminRequest(`/admin/wall-devices/${encodeURIComponent(deviceId)}`, {
+      method: "DELETE"
+    });
+    await loadAdmin();
+    showAdminNotice(`Wall device "${deviceName}" was deleted. Register a new device or reassign another one to keep lighting an event.`, "success");
+  } catch (error) {
+    showAdminNotice(error.message || "Could not delete wall device.", "error");
   }
 }
 
@@ -1834,6 +1856,10 @@ function renderWallDeviceCard(device) {
           <option value="inactive"${device.status === "inactive" ? " selected" : ""}>Inactive</option>
         </select>
       </div>
+      <div class="field">
+        <label>Assigned event</label>
+        <select data-device-event>${buildDeviceEventOptions(device.eventId)}</select>
+      </div>
       ${renderPresetInputs(device)}
       <div class="button-row">
         <span class="status-pill is-pending">${device.pendingTriggerCount || 0} pending</span>
@@ -1872,12 +1898,14 @@ function renderDeviceActions() {
       <button class="small-button" type="button" data-test-trigger="tag_scan">Test scan</button>
       <button class="small-button" type="button" data-test-trigger="submission_received">Test submit</button>
       <button class="small-button" type="button" data-test-trigger="manual_test">Celebrate</button>
+      <button class="small-button is-danger" type="button" data-delete-device>Delete</button>
     </div>
   `;
 }
 
 function getWallDeviceFormValues(root) {
   return {
+    eventId: root.querySelector("[data-device-event]").value,
     status: root.querySelector("[data-device-status]").value,
     scanPresetId: root.querySelector("[data-device-scan-preset]").value,
     submissionPresetId: root.querySelector("[data-device-submission-preset]").value,
@@ -1949,6 +1977,12 @@ function buildEventOptions(activeEventId) {
     `<option value="">Unassigned</option>`,
     ...events.map((event) => `<option value="${escapeAttribute(event.id)}"${event.id === activeEventId ? " selected" : ""}>${escapeHtml(event.name)}</option>`)
   ].join("");
+}
+
+function buildDeviceEventOptions(selectedEventId) {
+  return events
+    .map((event) => `<option value="${escapeAttribute(event.id)}"${event.id === selectedEventId ? " selected" : ""}>${escapeHtml(event.name)}</option>`)
+    .join("");
 }
 
 function qsaWithin(containerSelector, targetSelector) {

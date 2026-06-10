@@ -58,6 +58,42 @@ describe('Wallflower Moments lighting integration', () => {
 
     assert.equal(response.status, 403);
   });
+
+  test('admin can delete a wall device along with its queued triggers', async () => {
+    const db = new FakeD1({
+      devices: [activeDevice()]
+    });
+    db.lightTriggers.push({ wallDeviceId: 'device-1', status: 'pending' });
+    const env = testEnv(db);
+
+    const response = await worker.fetch(jsonRequest(`${API_URL}/admin/wall-devices/device-1`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: 'Bearer admin-secret'
+      }
+    }), env);
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.deletedDeviceId, 'device-1');
+    assert.equal(db.devices.length, 0);
+    assert.equal(db.lightTriggers.length, 0);
+  });
+
+  test('wall device delete requires the admin token', async () => {
+    const db = new FakeD1({
+      devices: [activeDevice()]
+    });
+    const env = testEnv(db);
+
+    const response = await worker.fetch(jsonRequest(`${API_URL}/admin/wall-devices/device-1`, {
+      method: 'DELETE'
+    }), env);
+
+    assert.equal(response.status, 401);
+    assert.equal(db.devices.length, 1);
+  });
 });
 
 function jsonRequest(url, options = {}) {
@@ -197,6 +233,16 @@ class FakeStatement {
         brightness: this.values[5],
         status: this.values[6]
       });
+      return { success: true };
+    }
+
+    if (normalized.includes('delete from light_triggers where wall_device_id = ?')) {
+      this.db.lightTriggers = this.db.lightTriggers.filter((trigger) => trigger.wallDeviceId !== this.values[0]);
+      return { success: true };
+    }
+
+    if (normalized.includes('delete from wall_devices where id = ?')) {
+      this.db.devices = this.db.devices.filter((device) => device.id !== this.values[0]);
       return { success: true };
     }
 
