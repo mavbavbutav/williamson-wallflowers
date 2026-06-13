@@ -1425,10 +1425,9 @@ async function streamGroupHeroInputImage(request, env, url, corsHeaders, eventId
   const token = url.searchParams.get('token') || '';
 
   // The token is signed against this exact object key, and we additionally
-  // require the key to live under the event's generated prefix so a valid
-  // token can never be used to read arbitrary R2 objects.
-  const allowedPrefix = `moments/${eventId}/generated/`;
-  if (!objectKey.startsWith(allowedPrefix) || objectKey.includes('..')) {
+  // require the key to live in an event-scoped media location that can appear
+  // in the group-hero input manifest.
+  if (!isAllowedGroupHeroInputObjectKey(eventId, objectKey)) {
     return json({ ok: false, message: 'This artwork input link is not valid.' }, 403, corsHeaders);
   }
   if (!await verifySignedToken(env, token, 'group-hero-input', objectKey)) {
@@ -1451,6 +1450,22 @@ async function streamGroupHeroInputImage(request, env, url, corsHeaders, eventId
   headers.set('Content-Disposition', 'inline');
 
   return new Response(object.body, { status: 200, headers });
+}
+
+function isAllowedGroupHeroInputObjectKey(eventId, objectKey) {
+  const key = String(objectKey || '');
+  if (!key || key.includes('..') || key.includes('\\')) return false;
+
+  const eventPrefix = `moments/${eventId}/`;
+  if (!key.startsWith(eventPrefix)) return false;
+
+  const eventPath = key.slice(eventPrefix.length);
+  if (!eventPath || eventPath.startsWith('/')) return false;
+  if (eventPath.startsWith('generated/')) return true;
+  if (eventPath.startsWith('ai-references/')) return true;
+  if (eventPath.startsWith('thumbnails/')) return true;
+
+  return !eventPath.includes('/');
 }
 
 async function regenerateHostGroupHero(request, env, url, corsHeaders, eventId, ctx) {

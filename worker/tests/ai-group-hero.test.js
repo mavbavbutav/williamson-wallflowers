@@ -2361,6 +2361,62 @@ test('group hero records an input manifest and serves crops through the admin vi
   }
 });
 
+test('admin group hero input links serve ai references and event media inputs', async () => {
+  const generatedKey = 'moments/event-hero/generated/person-roster/guest-crop-v6.jpg';
+  const aiReferenceKey = 'moments/event-hero/ai-references/guest-ai.jpg';
+  const originalKey = 'moments/event-hero/guest-original.jpg';
+  const thumbnailKey = 'moments/event-hero/thumbnails/video-thumb.jpg';
+  const manifestKey = 'moments/event-hero/generated/group-hero-input-manifest.json';
+  const manifest = JSON.stringify({
+    eventId: 'event-hero',
+    generatedAt: '2026-09-19T20:35:00.000Z',
+    inputs: [
+      { submissionId: 'guest-crop', kind: 'reference-crop', objectKey: generatedKey },
+      { submissionId: 'guest-ai', kind: 'ai-reference', objectKey: aiReferenceKey },
+      { submissionId: 'guest-original', kind: 'original', objectKey: originalKey },
+      { submissionId: 'guest-video', kind: 'original', objectKey: thumbnailKey }
+    ]
+  });
+  const bucket = new FakeBucket([
+    [manifestKey, manifest],
+    [generatedKey, 'generated-crop-bytes'],
+    [aiReferenceKey, 'ai-reference-bytes'],
+    [originalKey, 'original-photo-bytes'],
+    [thumbnailKey, 'video-thumbnail-bytes']
+  ]);
+  const db = new GroupHeroFakeDb({ groupHeroes: [readyHero()] });
+  const env = envWithDb(db, bucket);
+
+  const adminResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/admin/events/event-hero/group-hero', {
+    headers: { Origin: 'https://williamsonwallflowers.com', 'X-Admin-Token': 'admin-token' }
+  }), env);
+  assert.equal(adminResponse.status, 200);
+  const adminPayload = await adminResponse.json();
+  const inputs = adminPayload.groupHero.inputs || [];
+
+  for (const [kind, expectedBody] of [
+    ['reference-crop', 'generated-crop-bytes'],
+    ['ai-reference', 'ai-reference-bytes'],
+    ['original', 'original-photo-bytes']
+  ]) {
+    const input = inputs.find((entry) => entry.kind === kind && entry.viewUrl);
+    assert.ok(input, `${kind} input should have a signed view URL`);
+    const response = await worker.fetch(new Request(input.viewUrl, {
+      headers: { Origin: 'https://williamsonwallflowers.com' }
+    }), env);
+    assert.equal(response.status, 200, `${kind} input should stream`);
+    assert.equal(await response.text(), expectedBody);
+  }
+
+  const videoInput = inputs.find((entry) => entry.submissionId === 'guest-video' && entry.viewUrl);
+  assert.ok(videoInput, 'video thumbnail input should have a signed view URL');
+  const videoResponse = await worker.fetch(new Request(videoInput.viewUrl, {
+    headers: { Origin: 'https://williamsonwallflowers.com' }
+  }), env);
+  assert.equal(videoResponse.status, 200, 'video thumbnail input should stream');
+  assert.equal(await videoResponse.text(), 'video-thumbnail-bytes');
+});
+
 test('group hero input endpoint rejects out-of-prefix keys and bad tokens', async () => {
   const db = new GroupHeroFakeDb({ submissions: [] });
   const bucket = new FakeBucket([['moments/other-event/secret.png', 'secret-bytes']]);
