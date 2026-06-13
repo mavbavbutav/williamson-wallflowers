@@ -6,6 +6,9 @@ const MAX_AUDIO_SECONDS = 60;
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
+const PHOTO_CAPTURE_QUALITY = 0.98;
+const PHOTO_CAPTURE_WIDTH_IDEAL = 4096;
+const PHOTO_CAPTURE_HEIGHT_IDEAL = 3072;
 const AI_REFERENCE_MAX_DIMENSION = 1536;
 const AI_REFERENCE_QUALITY = 0.9;
 const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "webm", "3gp", "3gpp", "3g2"];
@@ -637,17 +640,81 @@ function buildCameraConstraints(mode, facingMode, exactFacingMode = false) {
   }
 
   return {
-    video: { facingMode: exactFacingMode ? { exact: facingMode } : { ideal: facingMode } },
+    video: mode === "photo"
+      ? getPhotoVideoConstraints(facingMode, exactFacingMode)
+      : { facingMode: exactFacingMode ? { exact: facingMode } : { ideal: facingMode } },
     audio: mode === "video"
   };
 }
 
-function capturePhoto() {
+function getPhotoVideoConstraints(facingMode, exactFacingMode = false) {
+  return {
+    facingMode: exactFacingMode ? { exact: facingMode } : { ideal: facingMode },
+    width: { ideal: PHOTO_CAPTURE_WIDTH_IDEAL },
+    height: { ideal: PHOTO_CAPTURE_HEIGHT_IDEAL }
+  };
+}
+
+async function capturePhoto() {
   if (!state.stream) {
     openPhoneLibrary();
     return;
   }
 
+  const track = state.stream.getVideoTracks?.()[0];
+  try {
+    const file = await captureStillPhotoFile(track);
+    if (file) {
+      state.mediaBlob = file;
+      state.mediaFile = file;
+      state.mediaType = "photo";
+      state.thumbnailFile = null;
+      stopStream();
+      renderPreview();
+      return;
+    }
+  } catch {
+    // Fall back to the preview frame below when still-photo capture is unavailable.
+  }
+
+  capturePreviewPhoto();
+}
+
+async function captureStillPhotoFile(track) {
+  if (!track || typeof ImageCapture !== "function") return null;
+
+  const imageCapture = new ImageCapture(track);
+  const settings = await getStillPhotoSettings(imageCapture);
+  const blob = await takeStillPhoto(imageCapture, settings);
+  if (!blob) return null;
+
+  const type = blob.type || "image/jpeg";
+  return new File([blob], `wallflower-moment-${Date.now()}.${getPhotoFileExtension(type)}`, { type });
+}
+
+async function getStillPhotoSettings(imageCapture) {
+  if (typeof imageCapture.getPhotoCapabilities !== "function") return {};
+
+  try {
+    const capabilities = await imageCapture.getPhotoCapabilities();
+    const imageWidth = Number(capabilities?.imageWidth?.max || 0);
+    const imageHeight = Number(capabilities?.imageHeight?.max || 0);
+    return imageWidth && imageHeight ? { imageWidth, imageHeight } : {};
+  } catch {
+    return {};
+  }
+}
+
+async function takeStillPhoto(imageCapture, settings) {
+  try {
+    return await imageCapture.takePhoto(settings);
+  } catch (error) {
+    if (!Object.keys(settings || {}).length) throw error;
+    return imageCapture.takePhoto();
+  }
+}
+
+function capturePreviewPhoto() {
   const video = cameraPreview;
   const canvas = document.createElement("canvas");
   const width = video.videoWidth || 1280;
@@ -665,9 +732,22 @@ function capturePhoto() {
     state.mediaBlob = blob;
     state.mediaFile = new File([blob], `wallflower-moment-${Date.now()}.jpg`, { type: "image/jpeg" });
     state.mediaType = "photo";
+    state.thumbnailFile = null;
     stopStream();
     renderPreview();
-  }, "image/jpeg", 0.88);
+  }, "image/jpeg", PHOTO_CAPTURE_QUALITY);
+}
+
+function getPhotoFileExtension(mimeType) {
+  const map = {
+    "image/heic": "heic",
+    "image/heif": "heif",
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp"
+  };
+
+  return map[getBaseMimeType(mimeType)] || "jpg";
 }
 
 function startRecording() {

@@ -39,6 +39,14 @@ test('guest link keeps the memory booth flow minimal', async () => {
   assert.match(guestJs, /function openPhoneLibrary/);
   assert.match(guestJs, /fileInput\.removeAttribute\("capture"\)/);
   assert.doesNotMatch(guestJs, /fileInput\.capture\s*=/);
+  assert.match(guestJs, /PHOTO_CAPTURE_QUALITY = 0\.98/);
+  assert.match(guestJs, /PHOTO_CAPTURE_WIDTH_IDEAL = 4096/);
+  assert.match(guestJs, /function getPhotoVideoConstraints/);
+  assert.match(guestJs, /function captureStillPhotoFile/);
+  assert.match(guestJs, /new ImageCapture\(track\)/);
+  assert.match(guestJs, /\.takePhoto\(/);
+  assert.match(guestJs, /await captureStillPhotoFile\(track\)/);
+  assert.match(guestJs, /canvas\.toBlob\([\s\S]*?, "image\/jpeg", PHOTO_CAPTURE_QUALITY\);/);
   assert.match(guestJs, /chooseMode\(button\.dataset\.mode\)/);
   assert.doesNotMatch(guestJs, /function buildMomentInteractionsMarkup/);
   assert.doesNotMatch(guestJs, /function handleMomentInteractionAction/);
