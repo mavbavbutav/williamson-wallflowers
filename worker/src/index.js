@@ -1710,12 +1710,47 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
   }
 
   const faceReferenceStartedAtMs = Date.now();
-  const preparedSources = await prepareGroupHeroPersonInputs(env, request, eventId, apiKey, sources)
+  const prepResult = await prepareGroupHeroPersonInputs(env, request, eventId, apiKey, sources)
     .catch((error) => {
       console.warn('AI group hero person-input preparation failed', eventId, String(error.message || error));
-      return sources;
+      return { prepared: sources, deferred: [], dropped: [] };
     });
   addGroupHeroAttemptTiming(generationContext, 'faceReferenceMs', Date.now() - faceReferenceStartedAtMs);
+  const prepDiagnostics = buildGroupHeroPrepDiagnostics(prepResult);
+
+  if (prepResult.deferred.length > 0) {
+    await writeGroupHeroInputManifest(env, eventId, prepResult.prepared, prepDiagnostics).catch((error) => {
+      console.warn('AI group hero input manifest write failed for deferred prep', eventId, String(error.message || error));
+    });
+    const deferredUpdatedAt = await updateEventGroupHeroStateIfCurrent(env, {
+      eventId,
+      status: 'queued',
+      objectKey: previousObjectKey || null,
+      mimeType: previousMimeType || 'image/png',
+      size: previousSize,
+      participantCount: sources.length,
+      sourceIds,
+      model: getOpenAiImageModel(env),
+      prompt,
+      errorMessage: 'Preparing isolated person references.',
+      generatedAt: previousGeneratedAt
+    }, generationUpdatedAt, currentSourceIds);
+    if (!deferredUpdatedAt) {
+      console.warn('Skipped deferred state for superseded AI group hero generation', eventId);
+      return;
+    }
+    await safeUpdateEventGroupHeroGenerationAttempt(env, generationContext, {
+      status: 'queued',
+      phase: 'face_reference_deferred',
+      sourceIds,
+      participantCount: sources.length,
+      errorMessage: 'Preparing isolated person references.',
+      completed: true
+    });
+    return;
+  }
+
+  const preparedSources = prepResult.prepared;
   const dedupedSources = await mergeDuplicateGroupHeroParticipants(env, eventId, preparedSources)
     .catch((error) => {
       console.warn('AI group hero duplicate merge failed', eventId, String(error.message || error));
@@ -1931,7 +1966,7 @@ async function generateEventGroupHero(env, request, eventId, sources, sourceIds,
       sourceSubmissionIds: JSON.stringify(activeSourceIds)
     }
   });
-  await writeGroupHeroInputManifest(env, eventId, activeSources).catch((error) => {
+  await writeGroupHeroInputManifest(env, eventId, activeSources, buildGroupHeroFinalDiagnostics(prepDiagnostics, activeSources)).catch((error) => {
     console.warn('AI group hero input manifest write failed', eventId, String(error.message || error));
   });
   addGroupHeroAttemptTiming(generationContext, 'r2WriteMs', Date.now() - r2WriteStartedAtMs);
@@ -2168,12 +2203,18 @@ async function prepareGroupHeroPersonInputs(env, request, eventId, apiKey, sourc
   // generation plus the per-run cap keeps OpenAI image-edit calls under the
   // org rate limit; bursting them in parallel previously triggered 429s.
   const budget = { remaining: GROUP_HERO_MAX_CUTOUTS_PER_GENERATION };
-  const prepared = [];
+  const result = { prepared: [], deferred: [], dropped: [] };
   for (const source of Array.isArray(sources) ? sources : []) {
-    const input = await prepareGroupHeroPersonInput(env, request, eventId, apiKey, source, budget);
-    if (input) prepared.push(input);
+    const outcome = await prepareGroupHeroPersonInput(env, request, eventId, apiKey, source, budget);
+    if (outcome.status === 'prepared' && outcome.source) {
+      result.prepared.push(outcome.source);
+    } else if (outcome.status === 'deferred') {
+      result.deferred.push(outcome);
+    } else if (outcome.status === 'dropped') {
+      result.dropped.push(outcome);
+    }
   }
-  return prepared;
+  return result;
 }
 
 async function prepareGroupHeroPersonInput(env, request, eventId, apiKey, source, budget) {
@@ -2188,29 +2229,30 @@ async function prepareGroupHeroPersonInput(env, request, eventId, apiKey, source
     const cutout = await createGroupHeroPersonCutout(env, apiKey, request, eventId, source, budget)
       .catch((error) => {
         console.warn('AI group hero cutout failed', eventId, source.id, String(error.message || error));
-        return null;
+        return { source: null, reason: 'cutout-openai-failed' };
       });
-    if (cutout) return cutout;
+    if (cutout.source) return { status: 'prepared', source: cutout.source };
+    if (cutout.deferred) return { status: 'deferred', source, reason: cutout.reason || 'cutout-budget-exhausted' };
 
     // No cutout (budget exhausted or generation failed): only keep this face if
     // it is alone in its crop column, otherwise drop it — sending the full
     // multi-person image would let OpenAI redraw the bystanders.
     if (!isGroupHeroFaceSoleInColumn(source.personReferenceFace, source.faceDetails)) {
       console.warn('Dropped group hero participant without a clean cutout', eventId, source.id, source.rosterParticipantId || '');
-      return null;
+      return { status: 'dropped', source, reason: cutout.reason || 'unsafe-multi-face' };
     }
   }
 
   const reference = await createGroupHeroPersonReference(env, request, eventId, source)
     .catch((error) => {
       console.warn('AI group hero person reference failed', eventId, source.id, String(error.message || error));
-      return null;
+      return { source: null, reason: 'reference-crop-failed' };
     });
-  if (reference) return reference;
+  if (reference.source) return { status: 'prepared', source: reference.source };
 
   // No cutout and no crop: drop multi-face (unsafe), send the raw single-person source otherwise.
-  if (isMultiFace) return null;
-  return source;
+  if (isMultiFace) return { status: 'dropped', source, reason: reference.reason || 'unsafe-multi-face' };
+  return { status: 'prepared', source };
 }
 
 function getGroupHeroSourceProviderFaceId(source) {
@@ -2264,12 +2306,12 @@ async function mergeDuplicateGroupHeroParticipants(env, eventId, sources) {
 async function createGroupHeroPersonReference(env, request, eventId, source) {
   const face = source.personReferenceFace || source.person_reference_face || null;
   const crop = buildGroupHeroPersonReferenceCrop(face, source);
-  if (!crop) return null;
+  if (!crop) return { source: null, reason: 'missing-face-crop' };
 
   const objectKey = getGroupHeroPersonReferenceObjectKey(eventId, source.id, face.clusterId || face.cluster_id || '');
   const existing = await env.MOMENTS_BUCKET.get(objectKey);
   if (existing) {
-    return withGroupHeroPersonReference(source, objectKey, face, crop);
+    return { source: withGroupHeroPersonReference(source, objectKey, face, crop), reason: '' };
   }
 
   const sourceUrl = await buildGroupHeroSourceAccessUrl(request, env, source);
@@ -2286,12 +2328,12 @@ async function createGroupHeroPersonReference(env, request, eventId, source) {
     }
   });
 
-  if (!response.ok) return null;
+  if (!response.ok) return { source: null, reason: 'reference-crop-fetch-failed' };
   const contentType = getBaseMimeType(response.headers.get('Content-Type') || '') || AI_REFERENCE_MIME_TYPE;
-  if (contentType !== AI_REFERENCE_MIME_TYPE) return null;
+  if (contentType !== AI_REFERENCE_MIME_TYPE) return { source: null, reason: 'reference-crop-invalid-type' };
 
   const bytes = await response.arrayBuffer();
-  if (!bytes || bytes.byteLength === 0 || bytes.byteLength > AI_REFERENCE_MAX_BYTES) return null;
+  if (!bytes || bytes.byteLength === 0 || bytes.byteLength > AI_REFERENCE_MAX_BYTES) return { source: null, reason: 'reference-crop-invalid-bytes' };
 
   await env.MOMENTS_BUCKET.put(objectKey, new Uint8Array(bytes), {
     httpMetadata: {
@@ -2313,7 +2355,7 @@ async function createGroupHeroPersonReference(env, request, eventId, source) {
     }
   });
 
-  return withGroupHeroPersonReference(source, objectKey, face, crop);
+  return { source: withGroupHeroPersonReference(source, objectKey, face, crop), reason: '' };
 }
 
 function withGroupHeroPersonReference(source, objectKey, face, crop) {
@@ -2378,22 +2420,22 @@ function withGroupHeroPersonCutout(source, objectKey, face) {
 }
 
 async function createGroupHeroPersonCutout(env, apiKey, request, eventId, source, budget = null) {
-  if (!apiKey) return null;
+  if (!apiKey) return { source: null, reason: 'missing-openai-api-key' };
   const face = source.personReferenceFace || source.person_reference_face || null;
-  if (!face) return null;
+  if (!face) return { source: null, reason: 'missing-face-reference' };
   const clusterId = face.clusterId || face.cluster_id || '';
   const objectKey = getGroupHeroPersonCutoutObjectKey(eventId, source.id, clusterId);
 
   // A cached cutout is free (no OpenAI call) and never consumes the rate budget.
   const existing = await env.MOMENTS_BUCKET.get(objectKey);
-  if (existing) return withGroupHeroPersonCutout(source, objectKey, face);
+  if (existing) return { source: withGroupHeroPersonCutout(source, objectKey, face), reason: '' };
 
   // Generating a new cutout costs one OpenAI image-edit call. Defer if we have
   // exhausted this run's budget so the total stays within the per-minute limit.
-  if (budget && budget.remaining <= 0) return null;
+  if (budget && budget.remaining <= 0) return { source: null, reason: 'cutout-budget-exhausted', deferred: true };
 
   const crop = buildGroupHeroPersonReferenceCrop(face, source);
-  if (!crop) return null;
+  if (!crop) return { source: null, reason: 'missing-face-crop' };
   const sourceUrl = await buildGroupHeroSourceAccessUrl(request, env, source);
   const cropResponse = await fetch(sourceUrl, {
     cf: {
@@ -2407,13 +2449,16 @@ async function createGroupHeroPersonCutout(env, apiKey, request, eventId, source
       }
     }
   });
-  if (!cropResponse.ok) return null;
+  if (!cropResponse.ok) return { source: null, reason: 'crop-fetch-failed' };
   const cropBytes = await cropResponse.arrayBuffer();
-  if (!cropBytes || cropBytes.byteLength === 0 || cropBytes.byteLength > AI_REFERENCE_MAX_BYTES) return null;
+  if (!cropBytes || cropBytes.byteLength === 0 || cropBytes.byteLength > AI_REFERENCE_MAX_BYTES) return { source: null, reason: 'crop-invalid-bytes' };
 
   if (budget) budget.remaining -= 1;
-  const cutoutBytes = await requestOpenAiPersonCutout(env, apiKey, new Uint8Array(cropBytes));
-  if (!cutoutBytes || !cutoutBytes.byteLength || cutoutBytes.byteLength > AI_REFERENCE_MAX_BYTES) return null;
+  const cutoutBytes = await requestOpenAiPersonCutout(env, apiKey, new Uint8Array(cropBytes)).catch((error) => {
+    console.warn('AI group hero cutout request failed', eventId, source.id, String(error.message || error));
+    return null;
+  });
+  if (!cutoutBytes || !cutoutBytes.byteLength || cutoutBytes.byteLength > AI_REFERENCE_MAX_BYTES) return { source: null, reason: 'cutout-openai-failed' };
 
   await env.MOMENTS_BUCKET.put(objectKey, cutoutBytes, {
     httpMetadata: {
@@ -2427,15 +2472,15 @@ async function createGroupHeroPersonCutout(env, apiKey, request, eventId, source
       faceClusterId: clusterId
     }
   });
-  return withGroupHeroPersonCutout(source, objectKey, face);
+  return { source: withGroupHeroPersonCutout(source, objectKey, face), reason: '' };
 }
 
 async function buildGroupHeroSourceAccessUrl(request, env, source) {
   const mediaType = source.mediaType || source.media_type || '';
   if (mediaType === 'video') {
-    return buildThumbnailAccessUrl(request, env, source.id);
+    return buildImageTransformThumbnailAccessUrl(request, env, source.id);
   }
-  return buildMediaAccessUrl(request, env, source.id);
+  return buildImageTransformMediaAccessUrl(request, env, source.id);
 }
 
 function getGroupHeroPersonReferenceObjectKey(eventId, submissionId, clusterId) {
@@ -2621,24 +2666,101 @@ function buildGroupHeroInputManifest(sources) {
   }).filter((entry) => entry.objectKey);
 }
 
-async function writeGroupHeroInputManifest(env, eventId, sources) {
+function getGroupHeroParticipantKey(source) {
+  return cleanText(source.rosterParticipantId || `${source.id || ''}:${source.personReferenceFaceClusterId || source.rosterFaceClusterId || ''}`, 180);
+}
+
+function buildGroupHeroInputDiagnostic(source, status, reason = '') {
+  const descriptor = getGroupHeroInputDescriptor(source);
+  const faceClusterId = source.personReferenceFaceClusterId || source.rosterFaceClusterId || '';
+  return {
+    participantKey: getGroupHeroParticipantKey(source),
+    submissionId: source.id || '',
+    guestName: cleanText(source.guestName || source.guest_name || '', 120),
+    faceId: source.personReferenceFaceId || source.rosterFaceId || buildGroupHeroFacePublicId(faceClusterId),
+    status,
+    reason: cleanText(reason, 120),
+    cropMode: source.personReferenceCropMode || '',
+    kind: descriptor.kind,
+    objectKey: descriptor.objectKey
+  };
+}
+
+function buildGroupHeroPrepDiagnostics(prepResult) {
+  const diagnostics = [];
+  for (const source of prepResult.prepared || []) {
+    diagnostics.push(buildGroupHeroInputDiagnostic(source, 'prepared'));
+  }
+  for (const outcome of prepResult.deferred || []) {
+    diagnostics.push(buildGroupHeroInputDiagnostic(outcome.source || {}, 'deferred', outcome.reason || 'cutout-budget-exhausted'));
+  }
+  for (const outcome of prepResult.dropped || []) {
+    diagnostics.push(buildGroupHeroInputDiagnostic(outcome.source || {}, 'dropped', outcome.reason || 'unsafe-multi-face'));
+  }
+  return diagnostics;
+}
+
+function buildGroupHeroFinalDiagnostics(prepDiagnostics, sentSources) {
+  const sent = (Array.isArray(sentSources) ? sentSources : []).map((source) => buildGroupHeroInputDiagnostic(source, 'sent'));
+  const sentKeys = new Set(sent.map((entry) => entry.participantKey).filter(Boolean));
+  const remaining = (Array.isArray(prepDiagnostics) ? prepDiagnostics : []).flatMap((entry) => {
+    if (entry.status === 'prepared') {
+      if (sentKeys.has(entry.participantKey)) return [];
+      return [{ ...entry, status: 'dropped', reason: 'duplicate-person-after-prep' }];
+    }
+    return [entry];
+  });
+  return [...sent, ...remaining];
+}
+
+function normalizeGroupHeroInputDiagnostics(diagnostics) {
+  return (Array.isArray(diagnostics) ? diagnostics : []).map((entry) => ({
+    participantKey: cleanText(entry.participantKey, 180),
+    submissionId: cleanText(entry.submissionId, 120),
+    guestName: cleanText(entry.guestName, 120),
+    faceId: cleanText(entry.faceId, 80),
+    status: cleanText(entry.status, 40),
+    reason: cleanText(entry.reason, 120),
+    cropMode: cleanText(entry.cropMode, 80),
+    kind: cleanText(entry.kind, 80),
+    objectKey: cleanText(entry.objectKey, 500)
+  })).filter((entry) => entry.submissionId || entry.objectKey);
+}
+
+async function writeGroupHeroInputManifest(env, eventId, sources, diagnostics = []) {
   const manifest = buildGroupHeroInputManifest(sources);
-  const body = JSON.stringify({ eventId, generatedAt: new Date().toISOString(), inputs: manifest });
+  const body = JSON.stringify({
+    eventId,
+    generatedAt: new Date().toISOString(),
+    inputs: manifest,
+    diagnostics: normalizeGroupHeroInputDiagnostics(diagnostics)
+  });
   await env.MOMENTS_BUCKET.put(getGroupHeroManifestObjectKey(eventId), body, {
     httpMetadata: { contentType: 'application/json' },
     customMetadata: { eventId, mediaType: 'group-hero-input-manifest' }
   });
 }
 
-async function getGroupHeroInputManifest(env, eventId) {
+async function getGroupHeroInputManifestPayload(env, eventId) {
   const object = await env.MOMENTS_BUCKET.get(getGroupHeroManifestObjectKey(eventId));
-  if (!object) return [];
+  if (!object) return { inputs: [], diagnostics: [] };
   try {
     const parsed = JSON.parse(await new Response(object.body).text());
-    return Array.isArray(parsed.inputs) ? parsed.inputs : [];
+    return {
+      inputs: Array.isArray(parsed.inputs) ? parsed.inputs : [],
+      diagnostics: Array.isArray(parsed.diagnostics) ? parsed.diagnostics : []
+    };
   } catch {
-    return [];
+    return { inputs: [], diagnostics: [] };
   }
+}
+
+async function getGroupHeroInputManifest(env, eventId) {
+  return (await getGroupHeroInputManifestPayload(env, eventId)).inputs;
+}
+
+async function getGroupHeroInputDiagnostics(env, eventId) {
+  return (await getGroupHeroInputManifestPayload(env, eventId)).diagnostics;
 }
 
 async function buildGroupHeroInputAccessUrl(request, env, eventId, objectKey) {
@@ -2654,6 +2776,22 @@ async function buildGroupHeroInputClients(request, env, eventId) {
     faceId: entry.faceId || '',
     cropMode: entry.cropMode || '',
     kind: entry.kind || '',
+    viewUrl: entry.objectKey ? await buildGroupHeroInputAccessUrl(request, env, eventId, entry.objectKey) : ''
+  })));
+}
+
+async function buildGroupHeroInputDiagnosticClients(request, env, eventId) {
+  const diagnostics = await getGroupHeroInputDiagnostics(env, eventId);
+  return Promise.all(diagnostics.map(async (entry) => ({
+    participantKey: entry.participantKey || '',
+    submissionId: entry.submissionId || '',
+    guestName: entry.guestName || '',
+    faceId: entry.faceId || '',
+    status: entry.status || '',
+    reason: entry.reason || '',
+    cropMode: entry.cropMode || '',
+    kind: entry.kind || '',
+    objectKey: entry.objectKey || '',
     viewUrl: entry.objectKey ? await buildGroupHeroInputAccessUrl(request, env, eventId, entry.objectKey) : ''
   })));
 }
@@ -4387,6 +4525,11 @@ async function buildMediaAccessUrl(request, env, submissionId, ttlSeconds = MEDI
   return `${getApiOrigin(request, env)}/moments-api/media/${encodeURIComponent(submissionId)}?mediaToken=${encodeURIComponent(mediaToken)}&disposition=inline`;
 }
 
+async function buildImageTransformMediaAccessUrl(request, env, submissionId, ttlSeconds = MEDIA_TOKEN_TTL_SECONDS) {
+  const mediaToken = await createSignedToken(env, 'media', submissionId, ttlSeconds);
+  return `${getImageTransformOrigin(request, env)}/moments-api/media/${encodeURIComponent(submissionId)}?mediaToken=${encodeURIComponent(mediaToken)}&disposition=inline`;
+}
+
 function isStreamConfigured(env) {
   return Boolean(getCloudflareAccountId(env) && getCloudflareAuthHeaders(env));
 }
@@ -4800,11 +4943,14 @@ async function getAdminGroupHeroClient(env, eventId, request) {
     const client = await getEventGroupHeroClient(env, eventId, request);
     // Admin-only: attach the exact reference images sent to OpenAI, with
     // short-lived signed view links, for troubleshooting generation choices.
-    const inputs = await buildGroupHeroInputClients(request, env, eventId).catch(() => []);
-    return { ...client, inputs };
+    const [inputs, inputDiagnostics] = await Promise.all([
+      buildGroupHeroInputClients(request, env, eventId).catch(() => []),
+      buildGroupHeroInputDiagnosticClients(request, env, eventId).catch(() => [])
+    ]);
+    return { ...client, inputs, inputDiagnostics };
   } catch (error) {
     console.error('Admin group hero lookup failed', eventId, String(error?.message || error));
-    return { status: 'empty', imageUrl: '', participantCount: 0, updatedAt: '', errorMessage: '', inputs: [] };
+    return { status: 'empty', imageUrl: '', participantCount: 0, updatedAt: '', errorMessage: '', inputs: [], inputDiagnostics: [] };
   }
 }
 
@@ -9161,8 +9307,19 @@ async function buildThumbnailAccessUrl(request, env, submissionId, ttlSeconds = 
   return `${getApiOrigin(request, env)}/moments-api/media/${encodeURIComponent(submissionId)}/thumbnail?thumbnailToken=${encodeURIComponent(thumbnailToken)}`;
 }
 
+async function buildImageTransformThumbnailAccessUrl(request, env, submissionId, ttlSeconds = THUMBNAIL_TOKEN_TTL_SECONDS) {
+  const thumbnailToken = await createSignedToken(env, 'thumbnail', submissionId, ttlSeconds);
+  return `${getImageTransformOrigin(request, env)}/moments-api/media/${encodeURIComponent(submissionId)}/thumbnail?thumbnailToken=${encodeURIComponent(thumbnailToken)}`;
+}
+
 function getApiOrigin(request, env) {
   return (env.MOMENTS_API_URL || new URL(request.url).origin).replace(/\/$/, '');
+}
+
+function getImageTransformOrigin(request, env) {
+  const publicOrigin = cleanText(env.PUBLIC_SITE_URL || env.SITE_URL || '', 300);
+  if (/^https?:\/\//i.test(publicOrigin)) return publicOrigin.replace(/\/$/, '');
+  return getApiOrigin(request, env);
 }
 
 function getSiteUrl(env) {

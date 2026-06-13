@@ -781,6 +781,67 @@ test('group hero uses a plain reference, not a cutout, for a single-face photo',
   }
 });
 
+test('group hero cutout crops use the public site transform origin', async () => {
+  const groupPhoto = guestSubmission({
+    id: 'guest-transform-group',
+    object_key: 'moments/event-hero/guest-transform-group.jpg',
+    objectKey: 'moments/event-hero/guest-transform-group.jpg',
+    guest_name: 'Transform Group',
+    guestName: 'Transform Group',
+    status: 'approved',
+    created_at: '2026-09-19T20:05:00.000Z',
+    createdAt: '2026-09-19T20:05:00.000Z',
+    ai_artwork_consent_at: '2026-09-19T20:05:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:05:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [groupPhoto],
+    faces: [
+      faceRow({
+        submission_id: 'guest-transform-group', submissionId: 'guest-transform-group',
+        cluster_id: 'face-transform-a', clusterId: 'face-transform-a', face_index: 0, faceIndex: 0,
+        bounding_box_json: JSON.stringify({ Left: 0.22, Top: 0.16, Width: 0.18, Height: 0.18 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.22, Top: 0.16, Width: 0.18, Height: 0.18 })
+      }),
+      faceRow({
+        id: 'face-transform-b',
+        submission_id: 'guest-transform-group', submissionId: 'guest-transform-group',
+        cluster_id: 'face-transform-b', clusterId: 'face-transform-b', face_index: 1, faceIndex: 1,
+        bounding_box_json: JSON.stringify({ Left: 0.54, Top: 0.18, Width: 0.18, Height: 0.18 }),
+        boundingBoxJson: JSON.stringify({ Left: 0.54, Top: 0.18, Width: 0.18, Height: 0.18 })
+      })
+    ]
+  });
+  const bucket = new FakeBucket([[groupPhoto.object_key, 'source-transform-group']]);
+  const env = envWithDb(db, bucket, {
+    MOMENTS_API_URL: 'https://api.example.com',
+    PUBLIC_SITE_URL: 'https://williamsonwallflowers.com'
+  });
+  const waitUntil = [];
+  const calls = mockOpenAi({ normalizationBody: 'transform-crop-bytes' });
+
+  try {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: { Origin: 'https://williamsonwallflowers.com', Authorization: 'Bearer host-token' }
+    }), env);
+    assert.equal(response.status, 202);
+    await worker.scheduled({}, env, { waitUntil: (work) => waitUntil.push(work) });
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.mediaUrls.length, 2);
+    assert.ok(calls.mediaUrls.every((url) => url.startsWith('https://williamsonwallflowers.com/moments-api/media/guest-transform-group?')));
+    const composition = calls.find((call) => /Roster requirements:/.test(call.prompt));
+    assert.equal(composition.imageCount, 2);
+    assert.deepEqual(composition.imageNames, [
+      'guest-transform-group-face-transform-a-person-cutout.png',
+      'guest-transform-group-face-transform-b-person-cutout.png'
+    ]);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('group hero generates a missing cutout for a multi-face photo and reuses a cached one', async () => {
   const groupPhoto = guestSubmission({
     id: 'guest-cutout-miss',
@@ -859,8 +920,9 @@ test('group hero caps new cutout generations per run to stay under the OpenAI ra
     aiArtworkConsentAt: '2026-09-19T20:05:00.000Z'
   });
   // Five faces in one photo, all new, all clustered close together so a face without a
-  // cutout is never sole-in-column. With the per-run cap of 4, only 4 cutouts are generated
-  // (the 5th is dropped), keeping total OpenAI image-edit calls at 5 (4 cutouts + 1 compose).
+  // cutout is never sole-in-column. With the per-run cap of 4, the first run should
+  // cache 4 cutouts and defer composition. The next run uses those cached cutouts,
+  // creates the 5th, and then composes the full 5-person hero.
   const faces = [0, 1, 2, 3, 4].map((index) => faceRow({
     id: `face-crowd${index}`,
     submission_id: 'guest-crowd', submissionId: 'guest-crowd',
@@ -886,10 +948,26 @@ test('group hero caps new cutout generations per run to stay under the OpenAI ra
 
     const cutoutCalls = calls.filter((call) => /Remove every other person/.test(call.prompt));
     assert.equal(cutoutCalls.length, 4);
-    assert.equal(calls.length, 5); // 4 cutouts + 1 composition
+    assert.equal(calls.length, 4);
+    assert.equal(db.groupHeroes[0].status, 'queued');
+    assert.equal(db.groupHeroes[0].participant_count, 5);
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), [
+      'guest-crowd',
+      'guest-crowd',
+      'guest-crowd',
+      'guest-crowd',
+      'guest-crowd'
+    ]);
+
+    await runScheduled(env);
+
+    const allCutoutCalls = calls.filter((call) => /Remove every other person/.test(call.prompt));
+    assert.equal(allCutoutCalls.length, 5);
+    assert.equal(calls.length, 6); // 5 cutouts + 1 composition across two runs
     const composition = calls.find((call) => /Roster requirements:/.test(call.prompt));
-    assert.equal(composition.imageCount, 4);
-    assert.equal(db.groupHeroes[0].participant_count, 4);
+    assert.equal(composition.imageCount, 5);
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.equal(db.groupHeroes[0].participant_count, 5);
   } finally {
     restoreFetch();
   }
@@ -967,6 +1045,24 @@ test('group hero drops a multi-face participant when its cutout cannot be produc
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0].imageNames, ['guest-nocutout-solo-face-solo-person-reference.jpg']);
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-nocutout-solo']);
+
+    const adminResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/admin/events/event-hero/group-hero', {
+      headers: { Origin: 'https://williamsonwallflowers.com', 'X-Admin-Token': 'admin-token' }
+    }), env);
+    assert.equal(adminResponse.status, 200);
+    const adminPayload = await adminResponse.json();
+    const diagnostics = adminPayload.groupHero.inputDiagnostics || [];
+    assert.ok(diagnostics.some((entry) => (
+      entry.submissionId === 'guest-nocutout-group'
+      && entry.status === 'dropped'
+      && entry.reason === 'crop-fetch-failed'
+    )));
+    assert.ok(diagnostics.some((entry) => (
+      entry.submissionId === 'guest-nocutout-solo'
+      && entry.status === 'sent'
+      && entry.kind === 'reference-crop'
+      && entry.viewUrl
+    )));
   } finally {
     restoreFetch();
   }
@@ -2637,10 +2733,12 @@ function mockOpenAi({
 } = {}) {
   originalFetch = globalThis.fetch;
   const calls = [];
+  calls.mediaUrls = [];
   let callIndex = 0;
   globalThis.fetch = async (url, init = {}) => {
     const urlText = String(url);
     if (urlText.includes('/moments-api/media/') || urlText.includes('/moments-api/thumbnails/')) {
+      calls.mediaUrls.push(urlText);
       if (normalizationBody !== null) {
         return new Response(normalizationBody, {
           status: 200,
