@@ -3,6 +3,7 @@ import { createVideoThumbnailFile } from "./video-thumbnails.js?v=20260601-video
 
 const MAX_VIDEO_SECONDS = 30;
 const MAX_AUDIO_SECONDS = 60;
+const RECORDER_TIMESLICE_MS = 1000;
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const PHOTO_CAPTURE_QUALITY = 0.98;
@@ -33,6 +34,8 @@ const state = {
   durationSeconds: 0,
   recordStartedAt: 0,
   timerId: 0,
+  autoStopTimerId: 0,
+  recordingStopWasAutomatic: false,
   hostPosts: [],
   hasLoadedHostPosts: false,
   isLocalDemo: false,
@@ -556,6 +559,8 @@ async function chooseMode(mode) {
   state.mediaFile = null;
   state.thumbnailFile = null;
   state.durationSeconds = 0;
+  state.recordingStopWasAutomatic = false;
+  stopAutoStopTimer();
   state.facingMode = mode === "photo" ? "environment" : "user";
   cameraStage.classList.toggle("is-audio", mode === "audio");
   cameraPreview.hidden = mode === "audio";
@@ -763,41 +768,88 @@ function startRecording() {
   const maxSeconds = getMaxDurationSeconds(mediaType);
   const mimeType = isAudio ? getSupportedAudioMimeType() : getSupportedVideoMimeType();
   state.chunks = [];
-  state.recorder = new MediaRecorder(state.stream, mimeType ? { mimeType } : undefined);
+  state.recordingStopWasAutomatic = false;
+  const recorder = new MediaRecorder(state.stream, mimeType ? { mimeType } : undefined);
+  state.recorder = recorder;
   state.recordStartedAt = Date.now();
 
-  state.recorder.addEventListener("dataavailable", (event) => {
+  recorder.addEventListener("dataavailable", (event) => {
     if (event.data && event.data.size) state.chunks.push(event.data);
   });
 
-  state.recorder.addEventListener("stop", async () => {
-    const type = state.recorder.mimeType || mimeType || (isAudio ? "audio/webm" : "video/webm");
-    const blob = new Blob(state.chunks, { type });
-    state.durationSeconds = Math.min(maxSeconds, Math.round((Date.now() - state.recordStartedAt) / 1000));
-    state.mediaBlob = blob;
-    state.mediaFile = new File([blob], `${isAudio ? "wallflower-voice-memo" : "wallflower-message"}-${Date.now()}.${getRecorderExtension(type, mediaType)}`, { type });
-    state.mediaType = mediaType;
-    state.thumbnailFile = mediaType === "video" ? await createVideoThumbnailFile(state.mediaFile, `wallflower-video-thumbnail-${Date.now()}.jpg`) : null;
-    stopTimer();
-    stopStream();
-    renderPreview();
+  recorder.addEventListener("stop", () => {
+    finishRecordedMedia({ recorder, mimeType, isAudio, mediaType, maxSeconds });
   });
 
-  state.recorder.start();
+  state.recorder.start(RECORDER_TIMESLICE_MS);
   setNotice(permissionNotice, `Recording. Keep it under ${maxSeconds} seconds, then tap Stop when you are done.`);
   qs("#videoRecordButton").hidden = true;
   qs("#videoStopButton").hidden = false;
   qs("#recordTimer").hidden = false;
   updateSwitchCameraButton(true);
   startTimer(maxSeconds);
-  window.setTimeout(() => {
-    if (state.recorder && state.recorder.state === "recording") stopRecording();
-  }, maxSeconds * 1000);
+  stopAutoStopTimer();
+  state.autoStopTimerId = window.setTimeout(autoStopRecording, maxSeconds * 1000);
 }
 
-function stopRecording() {
+function stopRecording({ auto = false } = {}) {
   if (state.recorder && state.recorder.state === "recording") {
+    state.recordingStopWasAutomatic = Boolean(auto);
+    stopAutoStopTimer();
+    try {
+      state.recorder.requestData?.();
+    } catch {
+      // Some browsers throw if data is already being flushed during stop.
+    }
     state.recorder.stop();
+    qs("#videoStopButton").hidden = true;
+    updateSwitchCameraButton(true);
+  }
+}
+
+function autoStopRecording() {
+  stopRecording({ auto: true });
+}
+
+function finishRecordedMedia({ recorder, mimeType, isAudio, mediaType, maxSeconds }) {
+  const type = recorder.mimeType || mimeType || (isAudio ? "audio/webm" : "video/webm");
+  const blob = new Blob(state.chunks, { type });
+  const wasAutoStopped = state.recordingStopWasAutomatic;
+  stopTimer();
+  stopAutoStopTimer();
+  stopStream();
+  state.recorder = null;
+  state.recordingStopWasAutomatic = false;
+
+  if (!blob.size) {
+    setNotice(permissionNotice, "We could not save that recording. Please try again or upload from your phone.", "error");
+    qs("#videoRecordButton").hidden = false;
+    qs("#videoStopButton").hidden = true;
+    return;
+  }
+
+  state.durationSeconds = Math.min(maxSeconds, Math.round((Date.now() - state.recordStartedAt) / 1000));
+  state.mediaBlob = blob;
+  state.mediaFile = new File([blob], `${isAudio ? "wallflower-voice-memo" : "wallflower-message"}-${Date.now()}.${getRecorderExtension(type, mediaType)}`, { type });
+  state.mediaType = mediaType;
+  state.thumbnailFile = null;
+  renderPreview();
+
+  if (wasAutoStopped) {
+    setNotice(uploadNotice, `Recording hit ${formatTimer(maxSeconds)} and is ready to send.`, "success");
+  }
+
+  if (mediaType === "video") generateRecordedVideoThumbnail(state.mediaFile);
+}
+
+async function generateRecordedVideoThumbnail(file) {
+  try {
+    const thumbnailFile = await createVideoThumbnailFile(file, `wallflower-video-thumbnail-${Date.now()}.jpg`);
+    if (state.mediaFile === file && state.mediaType === "video" && thumbnailFile) {
+      state.thumbnailFile = thumbnailFile;
+    }
+  } catch {
+    // Recorded videos can still be sent without a generated thumbnail.
   }
 }
 
@@ -807,12 +859,18 @@ function startTimer(maxSeconds = MAX_VIDEO_SECONDS) {
   state.timerId = window.setInterval(() => {
     const elapsed = Math.min(maxSeconds, Math.floor((Date.now() - state.recordStartedAt) / 1000));
     timer.textContent = formatTimer(elapsed);
+    if (elapsed >= maxSeconds) autoStopRecording();
   }, 250);
 }
 
 function stopTimer() {
   if (state.timerId) window.clearInterval(state.timerId);
   state.timerId = 0;
+}
+
+function stopAutoStopTimer() {
+  if (state.autoStopTimerId) window.clearTimeout(state.autoStopTimerId);
+  state.autoStopTimerId = 0;
 }
 
 function startCountdown() {
@@ -1377,6 +1435,7 @@ function parseJson(value) {
 function resetFlow() {
   stopStream();
   stopTimer();
+  stopAutoStopTimer();
   state.mode = "";
   state.facingMode = "environment";
   cameraStage.classList.remove("is-audio");
@@ -1387,6 +1446,8 @@ function resetFlow() {
   state.thumbnailFile = null;
   state.mediaType = "";
   state.durationSeconds = 0;
+  state.recorder = null;
+  state.recordingStopWasAutomatic = false;
   revokePreviewUrl();
   qs("#submissionForm").reset();
   updateSaveToPhonePrompt();

@@ -131,6 +131,22 @@ test('guest upload success prompts guests to save a local copy', async () => {
   assert.match(styles, /\.guest-page #successView \.hero-main > \.button-row\s*\{[\s\S]*?justify-self: center/);
 });
 
+test('guest video recorder auto-stops at the duration limit and moves to review', async () => {
+  const guestJs = await readText('../../moments/app.js');
+
+  assert.match(guestJs, /const RECORDER_TIMESLICE_MS = 1000/);
+  assert.match(guestJs, /autoStopTimerId: 0/);
+  assert.match(guestJs, /state\.recorder\.start\(RECORDER_TIMESLICE_MS\)/);
+  assert.match(guestJs, /state\.autoStopTimerId = window\.setTimeout\(autoStopRecording, maxSeconds \* 1000\)/);
+  assert.match(guestJs, /function autoStopRecording\(\)/);
+  assert.match(guestJs, /stopRecording\(\{ auto: true \}\)/);
+  assert.match(guestJs, /state\.recorder\.requestData\?\.\(\)/);
+  assert.match(guestJs, /Recording hit \$\{formatTimer\(maxSeconds\)\} and is ready to send\./);
+  assert.match(guestJs, /function finishRecordedMedia\(/);
+  assert.match(guestJs, /renderPreview\(\);[\s\S]*generateRecordedVideoThumbnail/);
+  assert.match(guestJs, /try \{[\s\S]*createVideoThumbnailFile[\s\S]*\} catch \{[\s\S]*Recorded videos can still be sent without a generated thumbnail/);
+});
+
 test('guest Party View audio cards keep controls clear of metadata overlays', async () => {
   const [guestJs, styles] = await Promise.all([
     readText('../../moments/app.js'),
