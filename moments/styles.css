@@ -792,13 +792,8 @@ a {
 }
 
 .guest-page:not(.is-countdown-locked) .memory-mode-card:hover {
-  transform: translateY(-4px) scale(1.01);
   border-color: rgba(119, 86, 71, 0.34);
   box-shadow: 0 22px 42px rgba(47, 43, 40, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.94);
-}
-
-.guest-page:not(.is-countdown-locked) .memory-mode-card:hover .mode-glyph {
-  transform: translateY(-2px);
 }
 
 .guest-page:not(.is-countdown-locked) .memory-mode-card:hover .mode-nudge {
@@ -809,7 +804,7 @@ a {
 }
 
 .guest-page:not(.is-countdown-locked) .memory-mode-card:hover .mode-nudge::after {
-  transform: translateX(2px) rotate(45deg);
+  transform: rotate(45deg);
 }
 
 .mode-glyph {
@@ -1191,6 +1186,13 @@ textarea:focus-visible {
 .icon-button:hover,
 .text-link:hover {
   transform: translateY(-1px);
+}
+
+.guest-page .button:hover,
+.guest-page .icon-button:hover,
+.guest-page .text-link:hover,
+.guest-page .small-button:hover {
+  transform: none;
 }
 
 .button-primary {

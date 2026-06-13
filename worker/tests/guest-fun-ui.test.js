@@ -66,6 +66,13 @@ test('guest link keeps the memory booth flow minimal', async () => {
   assert.match(styles, /\.mode-glyph/);
   assert.match(styles, /\.mode-nudge/);
   assert.match(styles, /\.guest-page:not\(\.is-countdown-locked\) \.memory-mode-card:hover/);
+  assert.doesNotMatch(cssBlock(styles, '.guest-page:not(.is-countdown-locked) .memory-mode-card:hover'), /transform\s*:/);
+  assert.equal(cssBlock(styles, '.guest-page:not(.is-countdown-locked) .memory-mode-card:hover .mode-glyph'), '');
+  assert.doesNotMatch(cssBlock(styles, '.guest-page:not(.is-countdown-locked) .memory-mode-card:hover .mode-nudge::after'), /translate/);
+  assert.match(cssBlock(styles, `.guest-page .button:hover,
+.guest-page .icon-button:hover,
+.guest-page .text-link:hover,
+.guest-page .small-button:hover`), /transform:\s*none/);
   assert.match(styles, /\.mode-detail/);
   assert.match(styles, /\.guest-celebration/);
   assert.match(styles, /\.countdown-unit\s*\{[\s\S]*?grid-template-rows: minmax\(3\.8rem, auto\) auto/);
@@ -174,4 +181,13 @@ test('guest Party View updates are incremental when media updates arrive', async
 
 async function readText(path) {
   return readFile(new URL(path, import.meta.url), 'utf8');
+}
+
+function cssBlock(styles, selector) {
+  const escapedSelector = selector
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\s+/g, '\\s*');
+  const match = styles.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`));
+  return match?.[1] ?? '';
 }
