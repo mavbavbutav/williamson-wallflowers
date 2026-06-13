@@ -91,6 +91,36 @@ test('guest upload flow stays above Party View media when host posts exist', asy
   assert.match(guestJs, /scrollIntoView/);
 });
 
+test('guest upload success prompts guests to save a local copy', async () => {
+  const [guestHtml, guestJs, styles] = await Promise.all([
+    readText('../../moments/index.html'),
+    readText('../../moments/app.js'),
+    readText('../../moments/styles.css')
+  ]);
+
+  assert.match(guestHtml, /id="saveToPhonePanel"/);
+  assert.match(guestHtml, /id="saveToPhoneButton"/);
+  assert.match(guestHtml, /Save photo to phone/);
+  assert.match(guestHtml, /id="saveToPhoneNotice"/);
+
+  assert.match(guestJs, /qs\("#saveToPhoneButton"\)\.addEventListener\("click", saveMomentToPhone\)/);
+  assert.match(guestJs, /function updateSaveToPhonePrompt/);
+  assert.match(guestJs, /function isSaveableMediaType/);
+  assert.match(guestJs, /function getSaveToPhoneButtonLabel/);
+  assert.match(guestJs, /return \["photo", "video", "audio"\]\.includes\(mediaType\)/);
+  assert.match(guestJs, /return "Save voice memo to phone"/);
+  assert.match(guestJs, /function saveMomentToPhone/);
+  assert.match(guestJs, /navigator\.canShare\(\{ files: \[file\] \}\)/);
+  assert.match(guestJs, /navigator\.share\(\{[\s\S]*files: \[file\]/);
+  assert.match(guestJs, /function downloadMomentToPhone/);
+  assert.match(guestJs, /updateSaveToPhonePrompt\(\);[\s\S]*showView\("success"\)/);
+
+  assert.match(styles, /\.save-to-phone-panel/);
+  assert.match(styles, /\.save-to-phone-panel\s*\{[\s\S]*?justify-self: center/);
+  assert.match(styles, /\.guest-page #saveToPhoneButton/);
+  assert.match(styles, /\.guest-page #successView \.hero-main > \.button-row\s*\{[\s\S]*?justify-self: center/);
+});
+
 test('guest Party View audio cards keep controls clear of metadata overlays', async () => {
   const [guestJs, styles] = await Promise.all([
     readText('../../moments/app.js'),

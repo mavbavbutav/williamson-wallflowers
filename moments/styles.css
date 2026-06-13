@@ -1115,6 +1115,42 @@ a {
   --confetti-x: 126px;
 }
 
+.save-to-phone-panel {
+  display: grid;
+  justify-self: center;
+  gap: 0.75rem;
+  width: min(100%, 420px);
+  margin-top: 1.2rem;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.save-to-phone-panel[hidden] {
+  display: none;
+}
+
+.guest-page #saveToPhoneButton {
+  width: 100%;
+  min-height: 56px;
+  font-size: 1rem;
+}
+
+.guest-page #successView .hero-main > .button-row {
+  justify-self: center;
+  width: min(100%, 420px);
+  margin-top: 0.75rem;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.guest-page #successView .hero-main > .button-row .button {
+  width: 100%;
+}
+
+.save-to-phone-panel .notice {
+  box-shadow: none;
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;

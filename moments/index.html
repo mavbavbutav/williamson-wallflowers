@@ -31,7 +31,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20260605-ai-hero-contain-1" />
+  <link rel="stylesheet" href="styles.css?v=20260612-save-to-phone-1" />
 </head>
 <body class="guest-page">
   <main class="app-shell">
@@ -188,16 +188,20 @@
           <span></span>
         </div>
         <h1 tabindex="-1">Sent.</h1>
-        <p>Thank you. Once approved, it can join the group artwork.</p>
+        <p id="successMessage">Thank you. Once approved, it can join the group artwork.</p>
+        <div class="save-to-phone-panel" id="saveToPhonePanel" hidden>
+          <button class="button button-primary" type="button" id="saveToPhoneButton">Save photo to phone</button>
+          <div id="saveToPhoneNotice" class="notice" role="status" aria-live="polite" hidden></div>
+        </div>
+        <div class="button-row">
+          <button class="button button-secondary" type="button" id="addAnotherButton">Add another</button>
+        </div>
         <div class="group-hero-panel" data-group-hero-panel hidden>
           <div class="group-hero-frame">
             <img data-group-hero-image alt="Cartoon group artwork made from approved guest photos." hidden />
             <div class="group-hero-status" data-group-hero-status hidden>Group artwork is refreshing.</div>
           </div>
           <p class="group-hero-caption" data-group-hero-caption></p>
-        </div>
-        <div class="button-row">
-          <button class="button button-primary" type="button" id="addAnotherButton">Add another</button>
         </div>
       </div>
     </section>
@@ -215,6 +219,6 @@
     </section>
   </main>
 
-  <script type="module" src="app.js?v=20260605-ai-reference-1"></script>
+  <script type="module" src="app.js?v=20260612-save-to-phone-1"></script>
 </body>
 </html>

@@ -65,6 +65,10 @@ const countdownUnlockHint = qs("#countdownUnlockHint");
 const countdownLockedNotice = qs("#countdownLockedNotice");
 const hostPostsTitle = qs("#hostPostsTitle");
 const hostPostsSubtitle = qs("#hostPostsSubtitle");
+const saveToPhonePanel = qs("#saveToPhonePanel");
+const saveToPhoneButton = qs("#saveToPhoneButton");
+const saveToPhoneNotice = qs("#saveToPhoneNotice");
+const successMessage = qs("#successMessage");
 
 init();
 
@@ -110,6 +114,7 @@ function bindEvents() {
   switchCameraButton.addEventListener("click", switchCamera);
   qs("#retakeButton").addEventListener("click", () => chooseMode(state.mode));
   qs("#addAnotherButton").addEventListener("click", resetFlow);
+  qs("#saveToPhoneButton").addEventListener("click", saveMomentToPhone);
   qs("#submissionForm").addEventListener("submit", submitMoment);
   if (guestPartySwipeMedia.addEventListener) {
     guestPartySwipeMedia.addEventListener("change", renderHostPosts);
@@ -1089,6 +1094,7 @@ async function submitMoment(event) {
   try {
     await uploadWithProgress(`/events/${encodeURIComponent(state.event.id)}/submissions`, formData);
     qs("#submissionForm").reset();
+    updateSaveToPhonePrompt();
     showView("success");
     showGuestCelebration();
   } catch (error) {
@@ -1096,6 +1102,90 @@ async function submitMoment(event) {
   } finally {
     qs("#submitButton").disabled = isCountdownLocked();
   }
+}
+
+function updateSaveToPhonePrompt() {
+  const canSaveToPhone = state.mediaFile && isSaveableMediaType(state.mediaType);
+  if (saveToPhonePanel) saveToPhonePanel.hidden = !canSaveToPhone;
+  if (saveToPhoneButton) {
+    saveToPhoneButton.textContent = getSaveToPhoneButtonLabel(state.mediaType);
+    saveToPhoneButton.disabled = !canSaveToPhone;
+  }
+  if (successMessage) {
+    successMessage.textContent = canSaveToPhone
+      ? "Save a copy to your phone now."
+      : "Thank you. Once approved, it can join the group artwork.";
+  }
+  if (saveToPhoneNotice) setNotice(saveToPhoneNotice, "");
+}
+
+function isSaveableMediaType(mediaType) {
+  return ["photo", "video", "audio"].includes(mediaType);
+}
+
+function getSaveToPhoneButtonLabel(mediaType) {
+  if (mediaType === "video") return "Save video to phone";
+  if (mediaType === "audio") return "Save voice memo to phone";
+  return "Save photo to phone";
+}
+
+async function saveMomentToPhone() {
+  const file = state.mediaFile;
+  if (!file) {
+    setNotice(saveToPhoneNotice, "This moment is no longer available to save. Add another to try again.", "error");
+    return;
+  }
+
+  saveToPhoneButton.disabled = true;
+
+  try {
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({
+        title: "Wallflower Moment",
+        text: "Save your Wallflower Moment.",
+        files: [file]
+      });
+      setNotice(saveToPhoneNotice, "Save prompt opened.", "success");
+      return;
+    }
+
+    downloadMomentToPhone(file);
+    setNotice(saveToPhoneNotice, "Download started.", "success");
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      setNotice(saveToPhoneNotice, "Save canceled. Tap Save to phone when you're ready.");
+      return;
+    }
+
+    try {
+      downloadMomentToPhone(file);
+      setNotice(saveToPhoneNotice, "Download started.", "success");
+    } catch {
+      setNotice(saveToPhoneNotice, "Your phone blocked the save prompt. Try Add another after saving from your camera app.", "error");
+    }
+  } finally {
+    saveToPhoneButton.disabled = false;
+  }
+}
+
+function downloadMomentToPhone(file) {
+  const url = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = getMomentDownloadName(file);
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+function getMomentDownloadName(file) {
+  const fallbackExtension = state.mediaType === "video" ? "mp4" : (state.mediaType === "audio" ? "webm" : "jpg");
+  const extension = getFileExtension(file.name) || fallbackExtension;
+  const prefix = state.mediaType === "video"
+    ? "wallflower-video"
+    : (state.mediaType === "audio" ? "wallflower-voice-memo" : "wallflower-photo");
+  return `${prefix}-${Date.now()}.${extension}`;
 }
 
 async function createAiReferenceFile(file) {
@@ -1225,6 +1315,7 @@ function resetFlow() {
   state.durationSeconds = 0;
   revokePreviewUrl();
   qs("#submissionForm").reset();
+  updateSaveToPhonePrompt();
   qs("#resetFlowButton").hidden = true;
   showView("welcome");
 }
