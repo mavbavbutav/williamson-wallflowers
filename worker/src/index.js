@@ -1549,7 +1549,7 @@ async function queueEventGroupHeroGeneration(env, request, eventId, options = {}
   const event = await getEventById(env, eventId);
   const prompt = buildGroupHeroPrompt(event?.name || event?.eventName || 'the event');
   const sourceSelectionStartedAtMs = Date.now();
-  const sources = await getGroupHeroSourceSubmissions(env, eventId);
+  const sources = await getGroupHeroSourceSubmissions(env, request, eventId);
   const sourceSelectionMs = Date.now() - sourceSelectionStartedAtMs;
   const sourceIds = sources.map((source) => source.id);
   const existing = await getEventGroupHero(env, eventId);
@@ -2679,9 +2679,9 @@ async function getEventGroupHero(env, eventId) {
   `).bind(eventId).first();
 }
 
-async function getGroupHeroSourceSubmissions(env, eventId) {
+async function getGroupHeroSourceSubmissions(env, request, eventId) {
   const compatibleSources = await getGroupHeroCandidateSubmissions(env, eventId);
-  await ensureGroupHeroFaceAnalyses(env, eventId, compatibleSources);
+  await ensureGroupHeroFaceAnalyses(env, request, eventId, compatibleSources);
   const faceAnalysisMap = await getGroupHeroFaceAnalysisMap(env, eventId, compatibleSources.map((source) => source.id));
   const requireFaceAnalysis = isGroupHeroFaceDedupeEnabled(env) && hasGroupHeroFaceProviderConfig(env);
   const analysisDecisions = [];
@@ -2982,7 +2982,7 @@ function buildGroupHeroSourceDecision(source, decision, reason, details = {}) {
   };
 }
 
-async function ensureGroupHeroFaceAnalyses(env, eventId, sources) {
+async function ensureGroupHeroFaceAnalyses(env, request, eventId, sources) {
   if (!sources.length || !isGroupHeroFaceDedupeEnabled(env) || !hasGroupHeroFaceProviderConfig(env)) return;
   const provider = getGroupHeroFaceProvider(env);
   if (provider !== 'aws-rekognition') return;
@@ -3019,13 +3019,26 @@ async function ensureGroupHeroFaceAnalyses(env, eventId, sources) {
       continue;
     }
 
-    await analyzeAndStoreGroupHeroFaces(env, eventId, source, provider, collectionId, sourceObject);
+    await analyzeAndStoreGroupHeroFaces(env, request, eventId, source, provider, collectionId, sourceObject);
   }
 
   await rebuildEventFaceClusters(env, eventId, provider);
 }
 
 async function getGroupHeroFaceAnalysisSourceObject(env, source) {
+  const aiReferenceObjectKey = source.aiReferenceObjectKey || source.ai_reference_object_key || '';
+  if (aiReferenceObjectKey) {
+    const aiReferenceObject = await env.MOMENTS_BUCKET.get(aiReferenceObjectKey);
+    if (aiReferenceObject) {
+      return {
+        object: aiReferenceObject,
+        objectKey: aiReferenceObjectKey,
+        mimeType: source.aiReferenceMimeType || source.ai_reference_mime_type || AI_REFERENCE_MIME_TYPE,
+        filename: `${source.id}-ai-reference.${AI_REFERENCE_EXTENSION}`
+      };
+    }
+  }
+
   const objectKey = source.objectKey || source.object_key;
   const object = await env.MOMENTS_BUCKET.get(objectKey);
   if (!object) {
@@ -3042,19 +3055,6 @@ async function getGroupHeroFaceAnalysisSourceObject(env, source) {
     };
   }
 
-  const aiReferenceObjectKey = source.aiReferenceObjectKey || source.ai_reference_object_key || '';
-  if (aiReferenceObjectKey) {
-    const aiReferenceObject = await env.MOMENTS_BUCKET.get(aiReferenceObjectKey);
-    if (aiReferenceObject) {
-      return {
-        object: aiReferenceObject,
-        objectKey: aiReferenceObjectKey,
-        mimeType: source.aiReferenceMimeType || source.ai_reference_mime_type || AI_REFERENCE_MIME_TYPE,
-        filename: `${source.id}-ai-reference.${AI_REFERENCE_EXTENSION}`
-      };
-    }
-  }
-
   return {
     object,
     objectKey,
@@ -3063,7 +3063,14 @@ async function getGroupHeroFaceAnalysisSourceObject(env, source) {
   };
 }
 
-async function analyzeAndStoreGroupHeroFaces(env, eventId, source, provider, collectionId, resolvedSourceObject = null) {
+function isRekognitionImageBytesTooLargeError(error) {
+  const message = String(error?.message || error || '');
+  return message.includes('ImageTooLargeException')
+    || message.includes('Member must have length less than or equal to 5242880')
+    || (message.includes('image.bytes') && message.includes('5242880'));
+}
+
+async function analyzeAndStoreGroupHeroFaces(env, request, eventId, source, provider, collectionId, resolvedSourceObject = null) {
   const now = new Date().toISOString();
   const sourceObject = resolvedSourceObject || await getGroupHeroFaceAnalysisSourceObject(env, source);
   const sourceObjectKey = sourceObject.objectKey || source.objectKey || source.object_key || '';
@@ -3125,6 +3132,19 @@ async function analyzeAndStoreGroupHeroFaces(env, eventId, source, provider, col
       analyzedAt: now
     });
   } catch (error) {
+    const normalizedSource = request && isRekognitionImageBytesTooLargeError(error)
+      ? await normalizeGroupHeroSourceImage(env, request, eventId, source).catch((normalizationError) => {
+        console.warn('AI group hero face-analysis normalization failed', eventId, source.id, String(normalizationError.message || normalizationError));
+        return null;
+      })
+      : null;
+
+    if (normalizedSource) {
+      const normalizedObject = await getGroupHeroFaceAnalysisSourceObject(env, normalizedSource);
+      await analyzeAndStoreGroupHeroFaces(env, request, eventId, normalizedSource, provider, collectionId, normalizedObject);
+      return;
+    }
+
     await storeSubmissionFaceAnalysis(env, {
       submissionId: source.id,
       eventId,
@@ -4820,7 +4840,7 @@ async function runAdminGroupHeroRegenerate(request, env, corsHeaders, eventId, c
     return json({ ok: false, message: 'Too many AI artwork refreshes. Please wait before trying again.' }, 429, corsHeaders);
   }
 
-  await queueEventGroupHeroGeneration(env, request, eventId, { force: true }, ctx);
+  await queueEventGroupHeroGeneration(env, request, eventId, { force: true, processNow: true }, ctx);
 
   return json({
     ok: true,

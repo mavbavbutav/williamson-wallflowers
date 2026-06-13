@@ -171,6 +171,98 @@ test('group hero analyzes the actual source image with Rekognition before OpenAI
   }
 });
 
+test('group hero face analysis prefers the stored AI reference over the original photo', async () => {
+  const submission = guestSubmission({
+    id: 'guest-large-reference',
+    object_key: 'moments/event-hero/guest-large-reference-original.jpg',
+    objectKey: 'moments/event-hero/guest-large-reference-original.jpg',
+    guest_name: 'Large Reference',
+    guestName: 'Large Reference',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:03:00.000Z',
+    createdAt: '2026-09-19T20:03:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [submission],
+    groupHeroes: [readyHero({
+      status: 'queued',
+      source_submission_ids: JSON.stringify(['guest-large-reference']),
+      sourceSubmissionIds: JSON.stringify(['guest-large-reference'])
+    })]
+  });
+  const normalizedBytes = 'normalized-face-analysis-bytes';
+  const bucket = new FakeBucket([
+    [submission.object_key, 'oversized-original-photo-bytes'],
+    ['moments/event-hero/ai-references/guest-large-reference.jpg', normalizedBytes]
+  ]);
+  const env = envWithDb(db, bucket, {
+    AWS_REGION: 'us-east-1',
+    AWS_ACCESS_KEY_ID: 'aws-key',
+    AWS_SECRET_ACCESS_KEY: 'aws-secret'
+  });
+  const calls = mockOpenAiAndAwsRekognition();
+
+  try {
+    await runScheduled(env);
+
+    assert.equal(calls.indexFaceBytes[0], normalizedBytes);
+    assert.equal(db.faceAnalyses.length, 1);
+    assert.equal(db.faceAnalyses[0].source_object_key, 'moments/event-hero/ai-references/guest-large-reference.jpg');
+    assert.equal(db.faceAnalyses[0].status, 'ready');
+    assert.equal(db.groupHeroes[0].status, 'ready');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('group hero face analysis normalizes and retries photos rejected by Rekognition size limits', async () => {
+  const submission = guestSubmission({
+    id: 'guest-normalize-retry',
+    object_key: 'moments/event-hero/guest-normalize-retry-original.jpg',
+    objectKey: 'moments/event-hero/guest-normalize-retry-original.jpg',
+    guest_name: 'Normalize Retry',
+    guestName: 'Normalize Retry',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:03:00.000Z',
+    createdAt: '2026-09-19T20:03:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({
+    submissions: [submission],
+    groupHeroes: [readyHero({
+      status: 'queued',
+      source_submission_ids: JSON.stringify(['guest-normalize-retry']),
+      sourceSubmissionIds: JSON.stringify(['guest-normalize-retry'])
+    })]
+  });
+  const normalizedBytes = 'normalized-rekognition-retry-bytes';
+  const bucket = new FakeBucket([[submission.object_key, 'too-large-original-photo-bytes']]);
+  const env = envWithDb(db, bucket, {
+    AWS_REGION: 'us-east-1',
+    AWS_ACCESS_KEY_ID: 'aws-key',
+    AWS_SECRET_ACCESS_KEY: 'aws-secret'
+  });
+  const calls = mockOpenAiAndAwsRekognition({
+    failFirstIndexFacesTooLarge: true,
+    normalizationBody: normalizedBytes
+  });
+
+  try {
+    await runScheduled(env);
+
+    assert.deepEqual(calls.indexFaceBytes, ['too-large-original-photo-bytes', normalizedBytes]);
+    assert.equal(db.faceAnalyses.length, 1);
+    assert.equal(db.faceAnalyses[0].source_object_key, 'moments/event-hero/ai-references/guest-normalize-retry.jpg');
+    assert.equal(db.faceAnalyses[0].status, 'ready');
+    assert.equal(db.groupHeroes[0].status, 'ready');
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('scheduled task generates a ready group hero from a queued approval using the latest 16 sources', async () => {
   const submissions = Array.from({ length: 18 }, (_, index) => guestSubmission({
     id: `guest-${String(index + 1).padStart(2, '0')}`,
@@ -380,6 +472,49 @@ test('group hero uses approved video thumbnails and an event-specific likeness p
     assert.match(calls[0].prompt, /recognizable/i);
     assert.doesNotMatch(calls[0].prompt, /Williamson Wallflowers/);
     assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-video', 'guest-photo']);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('admin group hero regenerate starts generation in a background task', async () => {
+  const submission = guestSubmission({
+    id: 'guest-admin-regenerate',
+    object_key: 'moments/event-hero/guest-admin-regenerate.jpg',
+    objectKey: 'moments/event-hero/guest-admin-regenerate.jpg',
+    guest_name: 'Admin Refresh',
+    guestName: 'Admin Refresh',
+    status: 'approved',
+    ai_artwork_consent_at: '2026-09-19T20:00:00.000Z',
+    aiArtworkConsentAt: '2026-09-19T20:00:00.000Z',
+    created_at: '2026-09-19T20:03:00.000Z',
+    createdAt: '2026-09-19T20:03:00.000Z'
+  });
+  const db = new GroupHeroFakeDb({ submissions: [submission] });
+  const bucket = new FakeBucket([[submission.object_key, 'admin-regenerate-source']]);
+  const env = envWithDb(db, bucket);
+  const waitUntil = [];
+  const calls = mockOpenAi();
+
+  try {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/admin/events/event-hero/group-hero/regenerate', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://williamsonwallflowers.com',
+        'X-Admin-Token': 'admin-token'
+      }
+    }), env, { waitUntil: (work) => waitUntil.push(work) });
+
+    assert.equal(response.status, 202);
+    assert.equal(calls.length, 0);
+    assert.match(db.groupHeroes[0].status, /^(queued|generating)$/);
+    assert.equal(waitUntil.length, 1);
+
+    await drainWaitUntil(waitUntil);
+
+    assert.equal(calls.length, 1);
+    assert.equal(db.groupHeroes[0].status, 'ready');
+    assert.deepEqual(JSON.parse(db.groupHeroes[0].source_submission_ids), ['guest-admin-regenerate']);
   } finally {
     restoreFetch();
   }
@@ -2556,14 +2691,25 @@ function mockOpenAi({
   return calls;
 }
 
-function mockOpenAiAndAwsRekognition() {
+function mockOpenAiAndAwsRekognition({
+  failFirstIndexFacesTooLarge = false,
+  normalizationBody = null
+} = {}) {
   originalFetch = globalThis.fetch;
   const calls = {
     awsTargets: [],
+    indexFaceBytes: [],
     openAi: []
   };
+  let indexFacesCount = 0;
   globalThis.fetch = async (url, init = {}) => {
     const urlText = String(url);
+    if (urlText.includes('/moments-api/media/') && normalizationBody !== null) {
+      return new Response(normalizationBody, {
+        status: 200,
+        headers: { 'Content-Type': 'image/jpeg' }
+      });
+    }
     if (urlText.includes('rekognition.')) {
       const target = init.headers?.get?.('X-Amz-Target')
         || init.headers?.get?.('x-amz-target')
@@ -2578,6 +2724,19 @@ function mockOpenAiAndAwsRekognition() {
         });
       }
       if (target === 'RekognitionService.IndexFaces') {
+        const payload = JSON.parse(init.body || '{}');
+        const encoded = payload?.Image?.Bytes || '';
+        calls.indexFaceBytes.push(encoded ? atob(encoded) : '');
+        indexFacesCount += 1;
+        if (failFirstIndexFacesTooLarge && indexFacesCount === 1) {
+          return new Response(JSON.stringify({
+            __type: 'ValidationException',
+            Message: "1 validation error detected: Value at 'image.bytes' failed to satisfy constraint: Member must have length less than or equal to 5242880"
+          }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/x-amz-json-1.1' }
+          });
+        }
         return new Response(JSON.stringify({
           FaceRecords: [{
             Face: {
