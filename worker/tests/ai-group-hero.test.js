@@ -2144,7 +2144,7 @@ test('frontends expose AI group hero UI and cache-busted assets', async () => {
   assert.match(guestHtml, /AI event artwork use/);
   assert.match(guestHtml, /data-group-hero-panel/);
   assert.match(guestHtml, /styles\.css\?v=20260612-save-to-phone-1/);
-  assert.match(guestHtml, /app\.js\?v=20260612-photo-capture-1/);
+  assert.match(guestHtml, /app\.js\?v=20260613-photo-size-1/);
   assert.match(guestJs, /function renderGroupHero/);
   assert.match(guestJs, /formData\.append\("aiArtworkConsent", "true"\)/);
   assert.match(guestJs, /function createAiReferenceFile/);

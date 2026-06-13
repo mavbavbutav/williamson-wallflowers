@@ -3,7 +3,6 @@ import { createVideoThumbnailFile } from "./video-thumbnails.js?v=20260601-video
 
 const MAX_VIDEO_SECONDS = 30;
 const MAX_AUDIO_SECONDS = 60;
-const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const PHOTO_CAPTURE_QUALITY = 0.98;
@@ -1012,11 +1011,6 @@ async function acceptFile(file) {
 
   if (!isPhoto && !isVideo && !isAudio) {
     setNotice(permissionNotice, "Please choose a photo, standard phone video, or voice memo file.", "error");
-    return;
-  }
-
-  if (isPhoto && file.size > MAX_PHOTO_BYTES) {
-    setNotice(permissionNotice, "Photos must be 8 MB or smaller.", "error");
     return;
   }
 

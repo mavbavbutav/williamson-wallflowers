@@ -10,7 +10,6 @@ const FIELD_LABELS = [
 ];
 
 const REQUIRED_FIELDS = ['name', 'email'];
-const PHOTO_MAX_BYTES = 8 * 1024 * 1024;
 const VIDEO_MAX_BYTES = 50 * 1024 * 1024;
 const AUDIO_MAX_BYTES = 20 * 1024 * 1024;
 const THUMBNAIL_MAX_BYTES = 768 * 1024;
@@ -418,11 +417,6 @@ async function createSubmission(request, env, corsHeaders, eventId, ctx) {
     return json({ ok: false, message: 'Too many uploads from this device. Please wait a bit before trying again.' }, 429, corsHeaders);
   }
 
-  const contentLength = Number(request.headers.get('Content-Length') || 0);
-  if (contentLength > VIDEO_MAX_BYTES + 1024 * 1024) {
-    return json({ ok: false, message: 'Upload is too large.' }, 413, corsHeaders);
-  }
-
   const contentType = request.headers.get('Content-Type') || '';
   if (!contentType.includes('multipart/form-data')) {
     return json({ ok: false, message: 'Upload must use multipart form data.' }, 415, corsHeaders);
@@ -752,11 +746,6 @@ async function createHostPost(request, env, url, corsHeaders, eventId, ctx) {
 
   if (!isActiveEvent(event)) {
     return json({ ok: false, message: 'This event is no longer accepting moments.' }, 410, corsHeaders);
-  }
-
-  const contentLength = Number(request.headers.get('Content-Length') || 0);
-  if (contentLength > VIDEO_MAX_BYTES + 1024 * 1024) {
-    return json({ ok: false, message: 'Upload is too large.' }, 413, corsHeaders);
   }
 
   const contentType = request.headers.get('Content-Type') || '';
@@ -8572,7 +8561,6 @@ function normalizeMediaType(mediaType, mimeType, filename = '') {
 function validateMedia(media, mediaType, durationSeconds) {
   if (mediaType === 'photo') {
     if (!PHOTO_TYPES.has(getBaseMimeType(media.type))) return 'Photos must be JPEG, PNG, WEBP, HEIC, or HEIF.';
-    if (media.size > PHOTO_MAX_BYTES) return 'Photos must be 8 MB or smaller.';
     return '';
   }
 

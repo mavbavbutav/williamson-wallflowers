@@ -102,7 +102,7 @@ Admin access uses the `MOMENTS_ADMIN_TOKEN` secret. Hosts use event-specific mag
 - `GET /moments-api/admin/retention-candidates`
 - `POST /moments-api/admin/retention-cleanup`
 
-Photo uploads are capped at 8 MB. Video uploads are capped at 50 MB and 30 seconds. The browser checks video duration before upload; the Worker also rejects submissions whose provided duration is over the limit. Guests must first resolve an active tag and submit the short-lived upload token returned by `GET /moments-api/tags/:tagCode`.
+Photo uploads keep their original file size unless the browser or hosting platform rejects the request. Video uploads are capped at 50 MB and 30 seconds. The browser checks video duration before upload; the Worker also rejects submissions whose provided duration is over the limit. Guests must first resolve an active tag and submit the short-lived upload token returned by `GET /moments-api/tags/:tagCode`.
 
 Host media URLs use short-lived media tokens so the long-lived host gallery token is not embedded in every video/photo request.
 

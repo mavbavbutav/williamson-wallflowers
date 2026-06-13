@@ -105,6 +105,26 @@ test('guest media upload sends a host-facing Resend review email', async () => {
   }
 });
 
+test('guest photo upload accepts files larger than the legacy 8 MB cap', async () => {
+  const db = new UploadFakeDb();
+  const bucket = new FakeBucket();
+  const env = envWithDb(db, bucket);
+  const largePhotoBytes = new Uint8Array((8 * 1024 * 1024) + 1);
+
+  const response = await submitGuestPhoto(env, {
+    media: new File([largePhotoBytes], 'large-wallflower-photo.jpg', { type: 'image/jpeg' })
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 201);
+  assert.equal(payload.submission.status, 'pending');
+  assert.equal(db.submissions.length, 1);
+  assert.equal(db.submissions[0].media_type, 'photo');
+  assert.equal(db.submissions[0].size, largePhotoBytes.byteLength);
+  assert.equal(bucket.puts.length, 1);
+  assert.equal(bucket.puts[0].metadata.httpMetadata.contentType, 'image/jpeg');
+});
+
 test('guest auto-approved upload sends a no-action host notification email', async () => {
   const db = new UploadFakeDb({ autoApprovePartyViewEnabled: 1 });
   const bucket = new FakeBucket();

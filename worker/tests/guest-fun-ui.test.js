@@ -39,6 +39,8 @@ test('guest link keeps the memory booth flow minimal', async () => {
   assert.match(guestJs, /function openPhoneLibrary/);
   assert.match(guestJs, /fileInput\.removeAttribute\("capture"\)/);
   assert.doesNotMatch(guestJs, /fileInput\.capture\s*=/);
+  assert.doesNotMatch(guestJs, /MAX_PHOTO_BYTES/);
+  assert.doesNotMatch(guestJs, /Photos must be 8 MB or smaller/);
   assert.match(guestJs, /PHOTO_CAPTURE_QUALITY = 0\.98/);
   assert.match(guestJs, /PHOTO_CAPTURE_WIDTH_IDEAL = 4096/);
   assert.match(guestJs, /function getPhotoVideoConstraints/);
