@@ -49,6 +49,9 @@ function installCapsuleDom() {
     '#capsuleEmpty',
     '#capsuleTimeline',
     '#capsuleFeed',
+    '#capsuleWalk',
+    '#capsuleWalkCanvas',
+    '#capsuleWalkFallback',
     '#capsuleNotice',
     '#slideStage',
     '#slideTitle',
@@ -171,6 +174,43 @@ test('capsule viewer exposes a vertical swipe feed alongside the timeline', asyn
   assert.match(styles, /\.capsule-swipe-feed/);
   assert.match(styles, /scroll-snap-type: y mandatory/);
   assert.match(styles, /\.capsule-feed-card/);
+});
+
+test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', async () => {
+  const [capsuleHtml, capsuleJs, styles] = await Promise.all([
+    readText('../../moments/capsule/index.html'),
+    readText('../../moments/capsule/capsule.js'),
+    readText('../../moments/styles.css')
+  ]);
+
+  assert.match(capsuleHtml, /<button[^>]*data-capsule-view="walk"[^>]*hidden[^>]*>3D Walk<\/button>/);
+  assert.match(capsuleHtml, /id="capsuleWalk"/);
+  assert.match(capsuleHtml, /id="capsuleWalkCanvas"/);
+  assert.match(capsuleHtml, /id="capsuleWalkFallback"/);
+
+  assert.match(capsuleJs, /let spatialLayout = null/);
+  assert.match(capsuleJs, /let spatialClusters = \[\]/);
+  assert.match(capsuleJs, /let spatialPlacements = \[\]/);
+  assert.match(capsuleJs, /let spatialWalkStarted = false/);
+  assert.match(capsuleJs, /spatialLayout = payload\.spatialLayout \|\| null/);
+  assert.match(capsuleJs, /spatialClusters = Array\.isArray\(payload\.spatialClusters\) \? payload\.spatialClusters : \[\]/);
+  assert.match(capsuleJs, /spatialPlacements = Array\.isArray\(payload\.spatialPlacements\) \? payload\.spatialPlacements : \[\]/);
+  assert.match(capsuleJs, /function renderSpatialWalk/);
+  assert.match(capsuleJs, /function canUseWebGl/);
+  assert.match(capsuleJs, /async function startSpatialWalkScene/);
+  assert.match(capsuleJs, /function getSpatialScrollProgress/);
+  assert.match(capsuleJs, /import\("https:\/\/cdn\.jsdelivr\.net\/npm\/three[^"]*\/three\.module\.js"\)/);
+  assert.match(capsuleJs, /prefers-reduced-motion/);
+  assert.match(capsuleJs, /if \(view === "walk" && !hasPublishedSpatialWalk\(\)\)[\s\S]*?view = "timeline"/);
+  assert.match(capsuleJs, /qs\("#capsuleWalk"\)\.hidden = currentCapsuleView !== "walk"/);
+  assert.match(capsuleJs, /if \(currentCapsuleView === "walk"\)[\s\S]*?startSpatialWalkScene\(\)/);
+
+  assert.match(styles, /\.capsule-walk/);
+  assert.match(styles, /\.capsule-walk-canvas/);
+  assert.match(styles, /\.capsule-walk-copy/);
+  assert.match(styles, /\.capsule-walk-fallback/);
+  assert.match(styles, /@media \(max-width: 680px\)[\s\S]*\.capsule-walk/);
+  assert.match(styles, /\.capsule-view-tabs[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
 });
 
 test('capsule swipe feed becomes fullscreen on mobile and videos use poster art', async () => {

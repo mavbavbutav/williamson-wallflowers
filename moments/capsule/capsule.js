@@ -5,6 +5,12 @@ const eventId = getParam("event");
 const token = readShareToken();
 let capsule = null;
 let items = [];
+let spatialLayout = null;
+let spatialClusters = [];
+let spatialPlacements = [];
+let spatialWalkStarted = false;
+let spatialWalkScene = null;
+let spatialWalkFrame = 0;
 let slideIndex = 0;
 let lastFocusedElement = null;
 let currentCapsuleView = "timeline";
@@ -46,6 +52,7 @@ async function init() {
     lastFeedScrollTop = nextScrollTop;
     scheduleFeedAutoplay();
   }, { passive: true });
+  qs("#capsuleWalk")?.addEventListener("scroll", requestSpatialWalkFrame, { passive: true });
   qs("#slideClose").addEventListener("click", closeSlide);
   qs("#slidePrev").addEventListener("click", () => changeSlide(-1));
   qs("#slideNext").addEventListener("click", () => changeSlide(1));
@@ -65,7 +72,10 @@ async function init() {
   });
   document.addEventListener("fullscreenchange", handleFullscreenChange);
   document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
-  window.addEventListener?.("resize", sizeTvSlideFrame);
+  window.addEventListener?.("resize", () => {
+    sizeTvSlideFrame();
+    resizeSpatialWalkScene();
+  });
 
   if (!eventId || !token) {
     showError("This private Time Capsule link is missing its event or access token.");
@@ -78,6 +88,9 @@ async function init() {
     });
     capsule = payload.event;
     items = payload.items || [];
+    spatialLayout = payload.spatialLayout || null;
+    spatialClusters = Array.isArray(payload.spatialClusters) ? payload.spatialClusters : [];
+    spatialPlacements = Array.isArray(payload.spatialPlacements) ? payload.spatialPlacements : [];
     render();
   } catch (error) {
     showError(error.message || "This Time Capsule link is not valid.");
@@ -96,6 +109,7 @@ function render() {
   qs("#capsuleEmpty").hidden = items.length > 0;
   renderTimeline();
   renderSwipeFeed();
+  renderSpatialWalk();
   setCapsuleView(items.length ? currentCapsuleView : "timeline");
   updateCastTvControls();
   hydrateVideoPosters();
@@ -309,12 +323,443 @@ function renderFeedMedia(item, index) {
   `;
 }
 
+function renderSpatialWalk() {
+  const walk = qs("#capsuleWalk");
+  const fallback = qs("#capsuleWalkFallback");
+  const spacer = qs("#capsuleWalkScrollSpacer");
+  const walkButton = qs('[data-capsule-view="walk"]');
+  const placements = getSpatialWalkPlacements();
+  const hasWalk = spatialLayout?.status === "published" && placements.length > 0;
+
+  if (walkButton) {
+    walkButton.hidden = !hasWalk;
+    walkButton.parentElement?.classList.toggle("has-walk", hasWalk);
+  }
+
+  if (!walk) return;
+
+  if (!hasWalk) {
+    walk.hidden = true;
+    if (fallback) fallback.innerHTML = "";
+    if (spacer) spacer.style.setProperty("--walk-spacer-height", "0px");
+    return;
+  }
+
+  if (spacer) {
+    const spacerHeight = Math.max(480, placements.length * 260);
+    spacer.style.setProperty("--walk-spacer-height", `${spacerHeight}px`);
+  }
+
+  const pathLabel = spatialLayout.layoutMode === "timeline_path"
+    ? "Cinematic memory path"
+    : spatialLayout.layoutMode === "visual_cluster"
+      ? "Adaptive memory path"
+      : "Spatial memory path";
+  const summary = capsule?.title || capsule?.name || "this Time Capsule";
+
+  if (fallback) {
+    fallback.hidden = false;
+    fallback.innerHTML = `
+      <div class="capsule-walk-fallback-head">
+        <span class="status-pill">${escapeHtml(pathLabel)}</span>
+        <strong>Walk through ${escapeHtml(summary)}</strong>
+        <p class="capsule-walk-fallback-note">A polished static path is ready while the 3D view loads or when this browser prefers a calmer experience.</p>
+      </div>
+      <div class="capsule-walk-path">
+        ${placements.map(renderSpatialWalkFallbackCard).join("")}
+      </div>
+    `;
+  }
+}
+
+function renderSpatialWalkFallbackCard(placement, index) {
+  const item = placement.item;
+  const cluster = placement.cluster;
+  const label = cluster?.label || item.chapter || "Memory path";
+  const caption = item.caption || item.guestNote || cluster?.summary || "";
+
+  return `
+    <article class="capsule-walk-card is-${escapeAttribute(item.mediaType || "photo")}">
+      <span class="capsule-walk-step">${String(index + 1).padStart(2, "0")}</span>
+      <div class="capsule-walk-card-media">
+        ${renderSpatialWalkFallbackMedia(item)}
+      </div>
+      <div class="capsule-walk-card-copy">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(item.title || "Time Capsule moment")}</strong>
+        <p>${escapeHtml(caption)}</p>
+        <small>${escapeHtml(formatDateTime(item.capturedAt))}</small>
+      </div>
+    </article>
+  `;
+}
+
+function renderSpatialWalkFallbackMedia(item) {
+  const mediaType = String(item.mediaType || "").toLowerCase();
+  const title = escapeAttribute(item.title || "Time Capsule moment");
+
+  if (mediaType === "photo" && item.mediaUrl) {
+    return `<img src="${escapeAttribute(inlineMediaUrl(item.mediaUrl))}" alt="${title}" loading="lazy" />`;
+  }
+
+  if (mediaType === "video") {
+    const poster = item.thumbnailUrl || videoPosterUrl(item);
+    return `
+      <img src="${escapeAttribute(poster)}" alt="${title}" loading="lazy" />
+      <span class="capsule-walk-media-badge">Video</span>
+    `;
+  }
+
+  return `
+    <div class="capsule-walk-audio-marker" aria-label="${title}">
+      <span></span><span></span><span></span><span></span><span></span>
+    </div>
+  `;
+}
+
+function hasPublishedSpatialWalk() {
+  return spatialLayout?.status === "published" && getSpatialWalkPlacements().length > 0;
+}
+
+function getSpatialWalkPlacements() {
+  if (!spatialLayout || !Array.isArray(spatialPlacements) || !spatialPlacements.length) return [];
+
+  const itemMap = new Map(items.map((item) => [String(item.id || ""), item]));
+  const clusterMap = new Map(spatialClusters.map((cluster) => [String(cluster.id || ""), cluster]));
+
+  return spatialPlacements
+    .map((placement, index) => normalizeSpatialPlacement(placement, index, itemMap, clusterMap))
+    .filter(Boolean)
+    .sort((left, right) => left.routeOrder - right.routeOrder);
+}
+
+function normalizeSpatialPlacement(placement, index, itemMap, clusterMap) {
+  const itemId = String(placement.itemId || placement.timeCapsuleItemId || placement.time_capsule_item_id || "");
+  const item = itemMap.get(itemId);
+  if (!item) return null;
+
+  const fallbackX = Math.sin(index * 0.88) * 1.8;
+  const fallbackY = 0.15 + (index % 3) * 0.18;
+  const fallbackZ = -index * 2.15;
+  const position = placement.position || {};
+  const rotation = placement.rotation || {};
+  const clusterId = String(placement.clusterId || placement.cluster_id || "");
+
+  return {
+    ...placement,
+    item,
+    cluster: clusterMap.get(clusterId) || null,
+    routeOrder: safeSpatialNumber(placement.routeOrder ?? placement.route_order, index, -10000, 10000),
+    position: {
+      x: safeSpatialNumber(position.x ?? placement.positionX ?? placement.position_x, fallbackX, -40, 40),
+      y: safeSpatialNumber(position.y ?? placement.positionY ?? placement.position_y, fallbackY, -8, 12),
+      z: safeSpatialNumber(position.z ?? placement.positionZ ?? placement.position_z, fallbackZ, -80, 20)
+    },
+    rotation: {
+      x: safeSpatialNumber(rotation.x ?? placement.rotationX ?? placement.rotation_x, 0, -Math.PI * 2, Math.PI * 2),
+      y: safeSpatialNumber(rotation.y ?? placement.rotationY ?? placement.rotation_y, 0, -Math.PI * 2, Math.PI * 2),
+      z: safeSpatialNumber(rotation.z ?? placement.rotationZ ?? placement.rotation_z, 0, -Math.PI * 2, Math.PI * 2)
+    },
+    scale: safeSpatialNumber(placement.scale, 1, 0.45, 2.4)
+  };
+}
+
+function canUseWebGl() {
+  const canvas = qs("#capsuleWalkCanvas");
+  if (!canvas || typeof canvas.getContext !== "function") return false;
+
+  try {
+    const context = canvas.getContext("webgl2") || canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+    return Boolean(context);
+  } catch {
+    return false;
+  }
+}
+
+async function startSpatialWalkScene() {
+  if (spatialWalkStarted || !hasPublishedSpatialWalk()) return;
+  spatialWalkStarted = true;
+  renderSpatialWalk();
+
+  if (prefersReducedMotion()) {
+    showSpatialWalkFallback("A still spatial path is shown because reduced motion is enabled.");
+    return;
+  }
+
+  if (!canUseWebGl()) {
+    showSpatialWalkFallback("This browser is showing the static spatial path.");
+    return;
+  }
+
+  try {
+    const THREE = await import("https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js");
+    buildSpatialWalkScene(THREE);
+    qs("#capsuleWalkFallback").hidden = true;
+    qs("#capsuleWalk").classList.add("is-webgl-ready");
+    resizeSpatialWalkScene();
+    requestSpatialWalkFrame();
+  } catch {
+    showSpatialWalkFallback("The 3D scene could not load, so this capsule is showing the static spatial path.");
+  }
+}
+
+function buildSpatialWalkScene(THREE) {
+  const canvas = qs("#capsuleWalkCanvas");
+  const placements = getSpatialWalkPlacements();
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: true,
+    alpha: true,
+    powerPreference: "high-performance"
+  });
+  renderer.setClearColor(0x171514, 0);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.6));
+  if (THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x171514, 8, 34);
+
+  const camera = new THREE.PerspectiveCamera(48, 1, 0.1, 90);
+  const ambient = new THREE.AmbientLight(0xfffaf5, 1.45);
+  const key = new THREE.DirectionalLight(0xf7d8c7, 2.1);
+  key.position.set(4, 6, 7);
+  scene.add(ambient, key);
+
+  const routePoints = placements.map((placement) => new THREE.Vector3(
+    placement.position.x,
+    placement.position.y,
+    placement.position.z
+  ));
+  addSpatialRouteRibbon(THREE, scene, routePoints);
+  placements.forEach((placement) => addSpatialPlacementMesh(THREE, scene, placement));
+
+  spatialWalkScene = {
+    THREE,
+    renderer,
+    scene,
+    camera,
+    routePoints
+  };
+}
+
+function addSpatialRouteRibbon(THREE, scene, routePoints) {
+  if (routePoints.length < 2) return;
+
+  const curve = new THREE.CatmullRomCurve3(routePoints);
+  const geometry = new THREE.TubeGeometry(curve, Math.max(24, routePoints.length * 14), 0.018, 8, false);
+  const material = new THREE.MeshBasicMaterial({
+    color: 0xf7d8c7,
+    transparent: true,
+    opacity: 0.42
+  });
+  scene.add(new THREE.Mesh(geometry, material));
+}
+
+function addSpatialPlacementMesh(THREE, scene, placement) {
+  const item = placement.item;
+  const mediaType = String(item.mediaType || "").toLowerCase();
+  const isAudio = mediaType === "audio";
+  const width = isAudio ? 1.55 : 1.38;
+  const height = isAudio ? 0.92 : 1.84;
+  const group = new THREE.Group();
+  const cardGeometry = new THREE.PlaneGeometry(width * placement.scale, height * placement.scale);
+  const material = new THREE.MeshBasicMaterial({
+    color: isAudio ? 0x3f6d58 : 0xfffaf5,
+    map: spatialTextureForItem(THREE, item, isAudio),
+    transparent: true,
+    side: THREE.DoubleSide
+  });
+  const card = new THREE.Mesh(cardGeometry, material);
+
+  const frameGeometry = new THREE.PlaneGeometry((width + 0.08) * placement.scale, (height + 0.08) * placement.scale);
+  const frame = new THREE.Mesh(frameGeometry, new THREE.MeshBasicMaterial({
+    color: 0xfffaf5,
+    transparent: true,
+    opacity: 0.34,
+    side: THREE.DoubleSide
+  }));
+  frame.position.z = -0.018;
+
+  group.add(frame, card);
+  group.position.set(placement.position.x, placement.position.y, placement.position.z);
+  group.rotation.set(placement.rotation.x, placement.rotation.y, placement.rotation.z);
+  scene.add(group);
+}
+
+function spatialTextureForItem(THREE, item, isAudio) {
+  const fallbackTexture = createSpatialCardTexture(THREE, item);
+  if (isAudio) return fallbackTexture;
+
+  const mediaType = String(item.mediaType || "").toLowerCase();
+  const textureUrl = mediaType === "video"
+    ? item.thumbnailUrl || videoPosterUrl(item)
+    : item.mediaUrl
+      ? inlineMediaUrl(item.mediaUrl)
+      : "";
+  if (!textureUrl) return fallbackTexture;
+
+  const loader = new THREE.TextureLoader();
+  loader.setCrossOrigin?.("anonymous");
+  const texture = loader.load(textureUrl, () => {
+    texture.colorSpace = THREE.SRGBColorSpace || texture.colorSpace;
+    requestSpatialWalkFrame();
+  }, undefined, () => requestSpatialWalkFrame());
+  texture.colorSpace = THREE.SRGBColorSpace || texture.colorSpace;
+  return texture;
+}
+
+function createSpatialCardTexture(THREE, item) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 640;
+  canvas.height = 420;
+  const context = canvas.getContext("2d");
+  const title = item.title || "Time Capsule moment";
+  const detail = item.mediaType === "audio" ? "Voice memo" : getMediaTypeLabel(item.mediaType);
+
+  context.fillStyle = "#2f2b28";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = item.mediaType === "audio" ? "#3f6d58" : "#a98776";
+  context.globalAlpha = 0.92;
+  context.beginPath();
+  context.arc(118, 120, 58, 0, Math.PI * 2);
+  context.fill();
+  context.globalAlpha = 1;
+  context.fillStyle = "#fffaf5";
+  context.font = "700 32px Manrope, sans-serif";
+  context.fillText(detail, 56, 230);
+  context.font = "700 44px Georgia, serif";
+  wrapCanvasText(context, title, 56, 292, 532, 48, 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace || texture.colorSpace;
+  return texture;
+}
+
+function wrapCanvasText(context, text, x, y, maxWidth, lineHeight, maxLines) {
+  const words = String(text || "").split(/\s+/);
+  let line = "";
+  let lineCount = 0;
+
+  for (const word of words) {
+    const nextLine = line ? `${line} ${word}` : word;
+    if (context.measureText(nextLine).width > maxWidth && line) {
+      context.fillText(line, x, y + lineCount * lineHeight);
+      line = word;
+      lineCount += 1;
+      if (lineCount >= maxLines) return;
+    } else {
+      line = nextLine;
+    }
+  }
+
+  if (line && lineCount < maxLines) {
+    context.fillText(line, x, y + lineCount * lineHeight);
+  }
+}
+
+function resizeSpatialWalkScene() {
+  if (!spatialWalkScene) return;
+
+  const walk = qs("#capsuleWalk");
+  const rect = walk?.getBoundingClientRect?.();
+  const width = Math.max(1, Math.round(rect?.width || walk?.clientWidth || 1));
+  const height = Math.max(1, Math.round(rect?.height || walk?.clientHeight || 1));
+
+  spatialWalkScene.renderer.setSize(width, height, false);
+  spatialWalkScene.camera.aspect = width / height;
+  spatialWalkScene.camera.updateProjectionMatrix();
+  requestSpatialWalkFrame();
+}
+
+function requestSpatialWalkFrame() {
+  if (!spatialWalkScene || spatialWalkFrame) return;
+
+  const requestFrame = window.requestAnimationFrame || ((callback) => window.setTimeout(callback, 16));
+  spatialWalkFrame = requestFrame(() => {
+    spatialWalkFrame = 0;
+    renderSpatialWalkFrame();
+  });
+}
+
+function cancelSpatialWalkFrame() {
+  if (!spatialWalkFrame) return;
+
+  const cancelFrame = window.cancelAnimationFrame || window.clearTimeout;
+  cancelFrame(spatialWalkFrame);
+  spatialWalkFrame = 0;
+}
+
+function renderSpatialWalkFrame() {
+  if (!spatialWalkScene || currentCapsuleView !== "walk") return;
+
+  const { THREE, renderer, scene, camera, routePoints } = spatialWalkScene;
+  const progress = getSpatialScrollProgress();
+  const lookAt = new THREE.Vector3(0, 0.45, -4);
+
+  if (routePoints.length > 1) {
+    const routeIndex = Math.min(routePoints.length - 2, Math.floor(progress * (routePoints.length - 1)));
+    const segmentProgress = progress * (routePoints.length - 1) - routeIndex;
+    const current = routePoints[routeIndex];
+    const next = routePoints[routeIndex + 1];
+    camera.position.lerpVectors(current, next, segmentProgress);
+    camera.position.y += 1.05;
+    camera.position.z += 4.6;
+    lookAt.lerpVectors(current, next, Math.min(1, segmentProgress + 0.28));
+  } else if (routePoints.length === 1) {
+    const point = routePoints[0];
+    camera.position.set(point.x, point.y + 1.1, point.z + 4.8);
+    lookAt.copy(point);
+  }
+
+  camera.lookAt(lookAt);
+  renderer.render(scene, camera);
+}
+
+function getSpatialScrollProgress() {
+  const walk = qs("#capsuleWalk");
+  if (!walk) return 0;
+
+  const maxScroll = Math.max(1, Number(walk.scrollHeight || 0) - Number(walk.clientHeight || 0));
+  return clamp(Number(walk.scrollTop || 0) / maxScroll, 0, 1);
+}
+
+function showSpatialWalkFallback(message) {
+  const walk = qs("#capsuleWalk");
+  const fallback = qs("#capsuleWalkFallback");
+  if (walk) walk.classList.remove("is-webgl-ready");
+  if (!fallback) return;
+
+  fallback.hidden = false;
+  const note = fallback.querySelector?.(".capsule-walk-fallback-note");
+  if (note && message) note.textContent = message;
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+}
+
+function safeSpatialNumber(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return clamp(number, min, max);
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function setCapsuleView(view, options = {}) {
-  currentCapsuleView = view === "feed" && items.length ? "feed" : "timeline";
+  if (view === "walk" && !hasPublishedSpatialWalk()) {
+    view = "timeline";
+  }
+
+  currentCapsuleView = view === "feed" && items.length ? "feed" : view === "walk" ? "walk" : "timeline";
   qs("#capsuleTimeline").hidden = currentCapsuleView !== "timeline";
   qs("#capsuleFeed").hidden = currentCapsuleView !== "feed";
+  qs("#capsuleWalk").hidden = currentCapsuleView !== "walk";
   qs("#exitSwipeFeedButton").hidden = currentCapsuleView !== "feed";
   document.body.classList.toggle("is-swipe-feed-active", currentCapsuleView === "feed");
+  document.body.classList.toggle("is-spatial-walk-active", currentCapsuleView === "walk");
 
   if (currentCapsuleView !== "feed") {
     pauseAllFeedMedia();
@@ -332,6 +777,13 @@ function setCapsuleView(view, options = {}) {
     } else {
       scheduleFeedAutoplay(320);
     }
+  }
+
+  if (currentCapsuleView === "walk") {
+    renderSpatialWalk();
+    startSpatialWalkScene();
+  } else {
+    cancelSpatialWalkFrame();
   }
 
   qsaCapsuleViewButtons().forEach((button) => {
@@ -1082,11 +1534,12 @@ function closeSlide(options = {}) {
 }
 
 function showError(message) {
-  document.body.classList.remove("is-swipe-feed-active");
+  document.body.classList.remove("is-swipe-feed-active", "is-spatial-walk-active");
   qs("#capsuleTitle").textContent = "Time Capsule unavailable";
   qs("#capsuleMeta").textContent = "Ask the event host for the current private link.";
   setNotice(qs("#capsuleNotice"), message, "error");
   qs("#capsuleEmpty").hidden = true;
+  qs("#capsuleWalk").hidden = true;
 }
 
 function readShareToken() {
