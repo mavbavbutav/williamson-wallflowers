@@ -16,14 +16,45 @@ const BASE_ENV = {
 
 test('spatial capsule migration creates layout, cluster, and placement tables', async () => {
   const migration = await readText('../migrations/0021_wallflower_spatial_capsule.sql');
+  const layoutTable = tableSchema(migration, 'time_capsule_spatial_layouts');
+  const clusterTable = tableSchema(migration, 'time_capsule_spatial_clusters');
+  const placementTable = tableSchema(migration, 'time_capsule_spatial_placements');
 
   assert.match(migration, /CREATE TABLE IF NOT EXISTS time_capsule_spatial_layouts/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS time_capsule_spatial_clusters/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS time_capsule_spatial_placements/);
-  assert.match(migration, /layout_mode TEXT NOT NULL/);
-  assert.match(migration, /evidence_json TEXT NOT NULL DEFAULT '\{\}'/);
+
+  assert.match(layoutTable, /event_id TEXT NOT NULL REFERENCES events\(id\) ON DELETE CASCADE/);
+  assert.match(layoutTable, /status TEXT NOT NULL DEFAULT 'draft' CHECK \(status IN \('draft', 'published', 'failed', 'archived'\)\)/);
+  assert.match(layoutTable, /version INTEGER NOT NULL DEFAULT 1/);
+  assert.match(layoutTable, /generation_status TEXT NOT NULL DEFAULT 'ready' CHECK \(generation_status IN \('queued', 'running', 'ready', 'failed'\)\)/);
+  assert.match(layoutTable, /layout_mode TEXT NOT NULL DEFAULT 'timeline_path' CHECK \(layout_mode IN \('spatial', 'visual_cluster', 'timeline_path'\)\)/);
+  assert.match(layoutTable, /input_fingerprint TEXT NOT NULL DEFAULT ''/);
+  assert.match(layoutTable, /generator_version INTEGER NOT NULL DEFAULT 1/);
+  assert.match(layoutTable, /published_at TEXT/);
+
+  assert.match(clusterTable, /layout_id TEXT NOT NULL REFERENCES time_capsule_spatial_layouts\(id\) ON DELETE CASCADE/);
+  assert.match(clusterTable, /anchor_x REAL NOT NULL DEFAULT 0/);
+  assert.match(clusterTable, /anchor_y REAL NOT NULL DEFAULT 0/);
+  assert.match(clusterTable, /anchor_z REAL NOT NULL DEFAULT 0/);
+  assert.match(clusterTable, /evidence_json TEXT NOT NULL DEFAULT '\{\}'/);
+
+  assert.match(placementTable, /layout_id TEXT NOT NULL REFERENCES time_capsule_spatial_layouts\(id\) ON DELETE CASCADE/);
+  assert.match(placementTable, /cluster_id TEXT NOT NULL REFERENCES time_capsule_spatial_clusters\(id\) ON DELETE CASCADE/);
+  assert.match(placementTable, /time_capsule_item_id TEXT NOT NULL REFERENCES time_capsule_items\(id\) ON DELETE CASCADE/);
+  assert.match(placementTable, /position_x REAL NOT NULL DEFAULT 0/);
+  assert.match(placementTable, /position_y REAL NOT NULL DEFAULT 0/);
+  assert.match(placementTable, /position_z REAL NOT NULL DEFAULT 0/);
+  assert.match(placementTable, /rotation_x REAL NOT NULL DEFAULT 0/);
+  assert.match(placementTable, /rotation_y REAL NOT NULL DEFAULT 0/);
+  assert.match(placementTable, /rotation_z REAL NOT NULL DEFAULT 0/);
+  assert.match(placementTable, /scale REAL NOT NULL DEFAULT 1/);
+  assert.match(placementTable, /evidence_json TEXT NOT NULL DEFAULT '\{\}'/);
+
   assert.match(migration, /CREATE UNIQUE INDEX IF NOT EXISTS idx_spatial_layout_one_published/);
+  assert.match(migration, /CREATE INDEX IF NOT EXISTS idx_spatial_layouts_event_status/);
   assert.match(migration, /CREATE INDEX IF NOT EXISTS idx_spatial_clusters_layout_order/);
+  assert.match(migration, /CREATE UNIQUE INDEX IF NOT EXISTS idx_spatial_placements_layout_item/);
   assert.match(migration, /CREATE INDEX IF NOT EXISTS idx_spatial_placements_layout_order/);
 });
 
@@ -278,6 +309,12 @@ function approvedSubmission(overrides = {}) {
 async function readText(path) {
   const { readFile } = await import('node:fs/promises');
   return readFile(new URL(path, import.meta.url), 'utf8');
+}
+
+function tableSchema(migration, tableName) {
+  const match = migration.match(new RegExp(`CREATE TABLE IF NOT EXISTS ${tableName} \\(([^;]+)\\);`, 's'));
+  assert.ok(match, `Expected migration to create ${tableName}`);
+  return match[1].replace(/\s+/g, ' ');
 }
 
 class FakeMomentsDb {

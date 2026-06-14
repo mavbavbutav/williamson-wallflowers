@@ -1,10 +1,10 @@
 CREATE TABLE IF NOT EXISTS time_capsule_spatial_layouts (
   id TEXT PRIMARY KEY,
-  event_id TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'draft',
+  event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'failed', 'archived')),
   version INTEGER NOT NULL DEFAULT 1,
-  generation_status TEXT NOT NULL DEFAULT 'ready',
-  layout_mode TEXT NOT NULL DEFAULT 'timeline_path',
+  generation_status TEXT NOT NULL DEFAULT 'ready' CHECK (generation_status IN ('queued', 'running', 'ready', 'failed')),
+  layout_mode TEXT NOT NULL DEFAULT 'timeline_path' CHECK (layout_mode IN ('spatial', 'visual_cluster', 'timeline_path')),
   confidence_score REAL NOT NULL DEFAULT 0,
   input_fingerprint TEXT NOT NULL DEFAULT '',
   generator_version INTEGER NOT NULL DEFAULT 1,
@@ -23,7 +23,7 @@ CREATE INDEX IF NOT EXISTS idx_spatial_layouts_event_status
 
 CREATE TABLE IF NOT EXISTS time_capsule_spatial_clusters (
   id TEXT PRIMARY KEY,
-  layout_id TEXT NOT NULL,
+  layout_id TEXT NOT NULL REFERENCES time_capsule_spatial_layouts(id) ON DELETE CASCADE,
   label TEXT NOT NULL DEFAULT '',
   summary TEXT NOT NULL DEFAULT '',
   route_order INTEGER NOT NULL DEFAULT 0,
@@ -41,9 +41,9 @@ CREATE INDEX IF NOT EXISTS idx_spatial_clusters_layout_order
 
 CREATE TABLE IF NOT EXISTS time_capsule_spatial_placements (
   id TEXT PRIMARY KEY,
-  layout_id TEXT NOT NULL,
-  cluster_id TEXT NOT NULL,
-  time_capsule_item_id TEXT NOT NULL,
+  layout_id TEXT NOT NULL REFERENCES time_capsule_spatial_layouts(id) ON DELETE CASCADE,
+  cluster_id TEXT NOT NULL REFERENCES time_capsule_spatial_clusters(id) ON DELETE CASCADE,
+  time_capsule_item_id TEXT NOT NULL REFERENCES time_capsule_items(id) ON DELETE CASCADE,
   route_order INTEGER NOT NULL DEFAULT 0,
   position_x REAL NOT NULL DEFAULT 0,
   position_y REAL NOT NULL DEFAULT 0,
