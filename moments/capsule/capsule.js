@@ -36,6 +36,7 @@ let feedScrollDirection = 0;
 let lastFeedScrollTop = 0;
 let feedSoundUnlocked = false;
 let nativeSwipeFullscreenActive = false;
+let nativeSpatialWalkFullscreenActive = false;
 let nativeSlideshowFullscreenActive = false;
 let slideAutoPlaying = true;
 let slideAdvanceTimer = 0;
@@ -52,6 +53,9 @@ const SLIDE_ERROR_ADVANCE_MS = 6000;
 const CAST_RECEIVER_APP_ID = "D4D06631";
 const SPATIAL_STATION_SPACING = 10;
 const SPATIAL_STATION_SIDE_OFFSET = 4.4;
+const SPATIAL_STATION_SIZE_MULTIPLIER = 1.18;
+const SPATIAL_FEATURED_STATION_SCALE = 1.18;
+const SPATIAL_DUST_PARTICLE_MULTIPLIER = 1.75;
 const SPATIAL_CAMERA_PULLBACK = 8.6;
 const SPATIAL_CAMERA_HEIGHT = 2.15;
 const SPATIAL_STATION_FOCUS_HEIGHT = 1.35;
@@ -85,6 +89,7 @@ async function init() {
   qs("#capsuleWalk")?.addEventListener("scroll", handleSpatialWalkScroll, { passive: true });
   qs("#capsuleWalkViewButton")?.addEventListener("click", () => openSpatialWalkStation(spatialActiveStationIndex));
   qs("#capsuleWalkTourToggle")?.addEventListener("click", toggleSpatialTour);
+  qs("#capsuleWalkFullscreenButton")?.addEventListener("click", toggleSpatialWalkFullscreen);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       pauseSpatialWalkVideos();
@@ -736,15 +741,17 @@ function getStationMediaAspect(item) {
 function displaySizeFromAspect(aspect) {
   const safeAspect = clamp(Number(aspect) || 0.75, 0.42, 2.4);
   if (safeAspect >= 1) {
+    const width = 3.65 * SPATIAL_STATION_SIZE_MULTIPLIER;
     return {
-      width: 3.65,
-      height: clamp(3.65 / safeAspect, 1.82, 2.9)
+      width,
+      height: clamp(width / safeAspect, 2.08, 3.42)
     };
   }
 
+  const height = 3.36 * SPATIAL_STATION_SIZE_MULTIPLIER;
   return {
-    width: clamp(3.36 * safeAspect, 1.86, 2.95),
-    height: 3.36
+    width: clamp(height * safeAspect, 2.12, 3.48),
+    height
   };
 }
 
@@ -829,7 +836,7 @@ function buildSpatialWalkScene(THREE) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, spatialWalkQuality === "lite" ? 1.25 : 1.65));
   if (THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.04;
+  renderer.toneMappingExposure = 0.88;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0d0c0b);
@@ -838,12 +845,13 @@ function buildSpatialWalkScene(THREE) {
   const camera = new THREE.PerspectiveCamera(42, 1, 0.1, Math.max(120, stations.length * 16));
 
   // Gallery rig: low fill, warm key, cool rim, plus a moving spotlight pool.
-  const hemi = new THREE.HemisphereLight(0x3a4654, 0x140f0c, 0.55);
-  const key = new THREE.DirectionalLight(0xffe9d6, 0.55);
-  const rim = new THREE.DirectionalLight(0x9fb8c4, 0.45);
+  const hemi = new THREE.HemisphereLight(0x3a4654, 0x140f0c, 0.48);
+  const key = new THREE.DirectionalLight(0xffe9d6, 0.38);
+  const rim = new THREE.DirectionalLight(0x9fb8c4, 0.34);
   key.position.set(5, 9, 7);
   rim.position.set(-6, 5, -9);
-  const spot = new THREE.SpotLight(0xfff2e2, spatialWalkQuality === "lite" ? 3.6 : 4.6, 0, 0.62, 0.55, 0);
+  const SPATIAL_SPOTLIGHT_INTENSITY = spatialWalkQuality === "lite" ? 1.45 : 1.85;
+  const spot = new THREE.SpotLight(0xfff2e2, SPATIAL_SPOTLIGHT_INTENSITY, 0, 0.72, 0.68, 0);
   const spotTarget = new THREE.Object3D();
   const firstFocus = stations[0]?.focus || { x: 0, y: SPATIAL_STATION_FOCUS_HEIGHT, z: 0 };
   spotTarget.position.set(firstFocus.x, firstFocus.y, firstFocus.z);
@@ -858,9 +866,11 @@ function buildSpatialWalkScene(THREE) {
   ));
   const stationHitMeshes = [];
   addGalleryFloor(THREE, scene, stations);
+  addSpatialEventTitleBackdrop(THREE, scene, stations);
   addSpatialRouteRibbon(THREE, scene, routePoints);
   stations.forEach((station) => addSpatialStationMesh(THREE, scene, station, stationHitMeshes));
   const dust = addGalleryDust(THREE, scene, stations);
+  const atmosphereStreams = addGalleryAtmosphereStreams(THREE, scene, stations);
 
   spatialWalkScene = {
     THREE,
@@ -877,6 +887,7 @@ function buildSpatialWalkScene(THREE) {
     spot,
     spotTarget,
     dust,
+    atmosphereStreams,
     currentLookAt: new THREE.Vector3(firstFocus.x, firstFocus.y, firstFocus.z)
   };
   camera.position.set(firstFocus.x, firstFocus.y + SPATIAL_CAMERA_HEIGHT, firstFocus.z + SPATIAL_CAMERA_PULLBACK);
@@ -924,6 +935,135 @@ function addGalleryFloor(THREE, scene, stations) {
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(0, 0, spatialFloorCenterZ(stations));
   scene.add(floor);
+}
+
+function addSpatialEventTitleBackdrop(THREE, scene, stations) {
+  const title = capsule?.eventTitle || capsule?.title || capsule?.name || "Wallflower Moments";
+  const texture = createSpatialTitleTexture(THREE, title);
+  const lastStation = stations[stations.length - 1];
+  const z = lastStation ? lastStation.focus.z - Math.max(9, SPATIAL_STATION_SPACING * 0.9) : -18;
+  const plane = new THREE.PlaneGeometry(20.5, 5.2);
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 0.56,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending
+  });
+  const titleMesh = new THREE.Mesh(plane, material);
+  titleMesh.position.set(0, 3.55, z);
+  titleMesh.renderOrder = -4;
+  scene.add(titleMesh);
+
+  const halo = new THREE.Mesh(
+    new THREE.PlaneGeometry(22, 6.2),
+    new THREE.MeshBasicMaterial({
+      color: 0xfff1dc,
+      transparent: true,
+      opacity: 0.055,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending
+    })
+  );
+  halo.position.set(0, 3.55, z - 0.08);
+  halo.renderOrder = -5;
+  scene.add(halo);
+}
+
+function createSpatialTitleTexture(THREE, eventTitle) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 2048;
+  canvas.height = 640;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const glow = ctx.createRadialGradient(1024, 330, 20, 1024, 330, 860);
+  glow.addColorStop(0, "rgba(255,250,245,0.22)");
+  glow.addColorStop(0.5, "rgba(247,216,199,0.09)");
+  glow.addColorStop(1, "rgba(255,250,245,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "rgba(255,250,245,0.72)";
+  ctx.font = "800 44px Manrope, Arial, sans-serif";
+  drawTrackedCanvasText(ctx, "WALLFLOWER MOMENTS", 1024, 122, 7);
+
+  const lines = titleLinesForCanvas(ctx, eventTitle, 1560);
+  const titleFontSize = fitSpatialTitleFontSize(ctx, lines, lines.length > 1 ? 138 : 166, 76, 1600);
+  ctx.font = `700 ${titleFontSize}px Cormorant Garamond, Georgia, serif`;
+  ctx.shadowColor = "rgba(255,232,210,0.62)";
+  ctx.shadowBlur = 36;
+  ctx.fillStyle = "#fffaf5";
+  const lineHeight = lines.length > 1 ? titleFontSize * 1.02 : 0;
+  const baseY = lines.length > 1 ? 318 - ((lines.length - 1) * lineHeight) / 2 : 316;
+  lines.forEach((line, index) => {
+    ctx.fillText(line, 1024, baseY + index * lineHeight);
+  });
+
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(255,250,245,0.52)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(420, 525);
+  ctx.lineTo(1628, 525);
+  ctx.stroke();
+
+  const dateLine = capsule?.eventDate ? formatDate(capsule.eventDate) : "A PRIVATE TIME CAPSULE";
+  ctx.fillStyle = "rgba(255,250,245,0.66)";
+  ctx.font = "800 38px Manrope, Arial, sans-serif";
+  drawTrackedCanvasText(ctx, dateLine.toUpperCase(), 1024, 570, 5);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace || texture.colorSpace;
+  return texture;
+}
+
+function titleLinesForCanvas(ctx, eventTitle, maxWidth) {
+  const title = String(eventTitle || "Wallflower Moments").replace(/\s+/g, " ").trim();
+  const words = title.split(" ");
+  const lines = [];
+  let line = "";
+
+  ctx.font = "700 148px Cormorant Garamond, Georgia, serif";
+  words.forEach((word) => {
+    const nextLine = line ? `${line} ${word}` : word;
+    if (ctx.measureText(nextLine).width > maxWidth && line && lines.length < 1) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = nextLine;
+    }
+  });
+
+  if (line) lines.push(line);
+  if (lines.length <= 2) return lines;
+  return [lines[0], lines.slice(1).join(" ")];
+}
+
+function fitSpatialTitleFontSize(ctx, lines, preferredSize, minSize, maxWidth) {
+  let size = preferredSize;
+  while (size > minSize) {
+    ctx.font = `700 ${size}px Cormorant Garamond, Georgia, serif`;
+    const widest = Math.max(...lines.map((line) => ctx.measureText(line).width), 0);
+    if (widest <= maxWidth) return size;
+    size -= 6;
+  }
+  return minSize;
+}
+
+function drawTrackedCanvasText(ctx, text, x, y, spacing) {
+  const characters = String(text || "").split("");
+  const widths = characters.map((character) => ctx.measureText(character).width);
+  const totalWidth = widths.reduce((sum, width) => sum + width, 0) + Math.max(0, characters.length - 1) * spacing;
+  let cursor = x - totalWidth / 2;
+  characters.forEach((character, index) => {
+    ctx.fillText(character, cursor + widths[index] / 2, y);
+    cursor += widths[index] + spacing;
+  });
 }
 
 function createFloorTexture(THREE) {
@@ -979,7 +1119,7 @@ function addStationReflection(THREE, scene, station) {
 }
 
 function addGalleryDust(THREE, scene, stations) {
-  const count = spatialWalkQuality === "lite" ? 120 : 320;
+  const count = Math.round((spatialWalkQuality === "lite" ? 120 : 320) * SPATIAL_DUST_PARTICLE_MULTIPLIER);
   const depth = Math.max(40, stations.length * SPATIAL_STATION_SPACING + 20);
   const positions = new Float32Array(count * 3);
   for (let index = 0; index < count; index += 1) {
@@ -1003,6 +1143,33 @@ function addGalleryDust(THREE, scene, stations) {
   points.userData.baseY = positions.slice();
   scene.add(points);
   return points;
+}
+
+function addGalleryAtmosphereStreams(THREE, scene, stations) {
+  const count = Math.round((spatialWalkQuality === "lite" ? 90 : 260) * SPATIAL_DUST_PARTICLE_MULTIPLIER);
+  const depth = Math.max(50, stations.length * SPATIAL_STATION_SPACING + 32);
+  const positions = new Float32Array(count * 3);
+  for (let index = 0; index < count; index += 1) {
+    positions[index * 3] = (hashUnit(index * 11 + 4) - 0.5) * 30;
+    positions[index * 3 + 1] = hashUnit(index * 11 + 5) * 6.4 + 0.35;
+    positions[index * 3 + 2] = -hashUnit(index * 11 + 6) * depth + 6;
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.PointsMaterial({
+    color: 0xffd7bc,
+    size: spatialWalkQuality === "lite" ? 0.045 : 0.065,
+    map: getSharedDustSprite(THREE),
+    transparent: true,
+    opacity: 0.38,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    sizeAttenuation: true
+  });
+  const streams = new THREE.Points(geometry, material);
+  streams.userData.depth = depth;
+  scene.add(streams);
+  return streams;
 }
 
 function getSharedShadowTexture(THREE) {
@@ -1087,7 +1254,7 @@ function addSpatialStationMesh(THREE, scene, station, stationHitMeshes) {
     roughness: 0.56,
     metalness: 0,
     emissive: 0xffffff,
-    emissiveIntensity: isAudio ? 0.3 : 0.4,
+    emissiveIntensity: isAudio ? 0.22 : 0.24,
     transparent: true,
     opacity: 1,
     side: THREE.DoubleSide,
@@ -1589,18 +1756,28 @@ function playSpatialWalkArrival() {
 
 function animateSpatialAtmosphere(dt) {
   const dust = spatialWalkScene?.dust;
-  if (!dust) return;
-
-  dust.rotation.y += dt * 0.015;
-  const positions = dust.geometry?.attributes?.position;
-  const base = dust.userData?.baseY;
-  if (positions && base) {
-    const array = positions.array;
-    const t = spatialWalkClock;
-    for (let index = 1; index < array.length; index += 3) {
-      array[index] = base[index] + Math.sin(t * 0.3 + index) * 0.12;
+  if (dust) {
+    dust.rotation.y += dt * 0.015;
+    const positions = dust.geometry?.attributes?.position;
+    const base = dust.userData?.baseY;
+    if (positions && base) {
+      const array = positions.array;
+      const t = spatialWalkClock;
+      for (let index = 1; index < array.length; index += 3) {
+        array[index] = base[index] + Math.sin(t * 0.3 + index) * 0.12;
+      }
+      positions.needsUpdate = true;
     }
-    positions.needsUpdate = true;
+  }
+
+  const streams = spatialWalkScene?.atmosphereStreams;
+  if (streams) {
+    const depth = Number(streams.userData?.depth || 60);
+    streams.rotation.y += dt * 0.024;
+    streams.position.z = (spatialWalkClock * 1.8) % Math.max(8, SPATIAL_STATION_SPACING);
+    streams.position.x = Math.sin(spatialWalkClock * 0.18) * 0.45;
+    streams.material.opacity = 0.32 + Math.sin(spatialWalkClock * 0.7) * 0.06;
+    if (streams.position.z > depth) streams.position.z = 0;
   }
 }
 
@@ -1652,11 +1829,11 @@ function updateSpatialStationFocus(stationFloat) {
     const isActive = station.index === spatialActiveStationIndex;
     const isHovered = station.index === spatialHoveredStationIndex;
     const opacity = isActive ? 1 : near ? Math.max(0.4, 0.85 - distance * 0.16) : 0.12;
-    const scale = isActive ? 1.05 : near ? Math.max(0.8, 0.95 - distance * 0.07) : 0.62;
+    const scale = isActive ? SPATIAL_FEATURED_STATION_SCALE : near ? Math.max(0.86, 1 - distance * 0.06) : 0.68;
     station.group.visible = distance < 5;
     station.group.scale.setScalar(isHovered ? scale + 0.04 : scale);
     station.card.material.opacity = opacity;
-    station.card.material.emissiveIntensity = isActive ? 0.5 : near ? 0.42 : 0.32;
+    station.card.material.emissiveIntensity = isActive ? 0.28 : near ? 0.22 : 0.16;
     station.frame.material.opacity = opacity;
     if (station.bevel) station.bevel.material.opacity = opacity;
     if (station.reflection) station.reflection.material.opacity = opacity * 0.16;
@@ -1785,6 +1962,17 @@ function updateSpatialTourToggle() {
   button.setAttribute("aria-pressed", String(spatialTourPlaying));
 }
 
+function updateSpatialWalkFullscreenButton() {
+  const button = qs("#capsuleWalkFullscreenButton");
+  const walk = qs("#capsuleWalk");
+  if (!button || !walk) return;
+  const activeElement = activeFullscreenElement();
+  const isWalkFullscreen = activeElement === walk || Boolean(activeElement && walk.contains?.(activeElement));
+  button.hidden = currentCapsuleView !== "walk";
+  button.textContent = isWalkFullscreen ? "Exit full screen" : "Full screen";
+  button.setAttribute("aria-pressed", String(isWalkFullscreen));
+}
+
 function scrollSpatialWalkToStation(stationIndex) {
   const walk = qs("#capsuleWalk");
   const nextIndex = clamp(Math.round(Number(stationIndex) || 0), 0, spatialWalkStations.length - 1);
@@ -1901,6 +2089,7 @@ function setCapsuleView(view, options = {}) {
   qs("#capsuleFeed").hidden = currentCapsuleView !== "feed";
   qs("#capsuleWalk").hidden = currentCapsuleView !== "walk";
   updateSpatialWalkViewButton();
+  updateSpatialWalkFullscreenButton();
   qs("#exitSwipeFeedButton").hidden = currentCapsuleView !== "feed";
   document.body.classList.toggle("is-swipe-feed-active", currentCapsuleView === "feed");
   document.body.classList.toggle("is-spatial-walk-active", currentCapsuleView === "walk");
@@ -1954,12 +2143,49 @@ async function requestSwipeFullscreen() {
   }
 }
 
-async function exitSwipeFullscreen() {
-  const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
-  if (!exitFullscreen || !activeFullscreenElement()) return;
+async function toggleSpatialWalkFullscreen() {
+  const target = qs("#capsuleWalk");
+  if (!target) return;
+
+  const activeElement = activeFullscreenElement();
+  const isWalkFullscreen = activeElement === target || Boolean(activeElement && target.contains?.(activeElement));
+  if (isWalkFullscreen) {
+    try {
+      await exitNativeFullscreen();
+    } catch {
+      nativeSpatialWalkFullscreenActive = false;
+      updateSpatialWalkFullscreenButton();
+    }
+    return;
+  }
+
+  const requestFullscreen = target.requestFullscreen || target.webkitRequestFullscreen || target.msRequestFullscreen;
+  if (!requestFullscreen) {
+    updateSpatialWalkFullscreenButton();
+    return;
+  }
 
   try {
-    await exitFullscreen.call(document);
+    await requestFullscreen.call(target, { navigationUI: "hide" });
+  } catch {
+    try {
+      await requestFullscreen.call(target);
+    } catch {
+      nativeSpatialWalkFullscreenActive = false;
+      updateSpatialWalkFullscreenButton();
+    }
+  }
+}
+
+async function exitNativeFullscreen() {
+  const exitFullscreen = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+  if (!exitFullscreen || !activeFullscreenElement()) return;
+  await exitFullscreen.call(document);
+}
+
+async function exitSwipeFullscreen() {
+  try {
+    await exitNativeFullscreen();
   } catch {
     nativeSwipeFullscreenActive = false;
   }
@@ -1971,10 +2197,22 @@ function activeFullscreenElement() {
 
 function handleFullscreenChange() {
   const swipeTarget = qs("#capsuleDashboard");
+  const spatialTarget = qs("#capsuleWalk");
   const slideshowTarget = qs("#slideshowModal");
   const activeElement = activeFullscreenElement();
-  const isSwipeFullscreen = activeElement === swipeTarget || Boolean(activeElement && swipeTarget?.contains?.(activeElement));
+  const isSpatialFullscreen = activeElement === spatialTarget || Boolean(activeElement && spatialTarget?.contains?.(activeElement));
+  const isSwipeFullscreen = !isSpatialFullscreen && (activeElement === swipeTarget || Boolean(activeElement && swipeTarget?.contains?.(activeElement)));
   const isSlideshowFullscreen = activeElement === slideshowTarget || Boolean(activeElement && slideshowTarget?.contains?.(activeElement));
+
+  if (isSpatialFullscreen) {
+    nativeSpatialWalkFullscreenActive = true;
+    document.body.classList.add("is-native-spatial-walk");
+    window.setTimeout(resizeSpatialWalkScene, 80);
+  } else {
+    nativeSpatialWalkFullscreenActive = false;
+    document.body.classList.remove("is-native-spatial-walk");
+  }
+  updateSpatialWalkFullscreenButton();
 
   if (isSwipeFullscreen) {
     nativeSwipeFullscreenActive = true;
@@ -2679,7 +2917,7 @@ function closeSlide(options = {}) {
 }
 
 function showError(message) {
-  document.body.classList.remove("is-swipe-feed-active", "is-spatial-walk-active");
+  document.body.classList.remove("is-swipe-feed-active", "is-spatial-walk-active", "is-native-spatial-walk");
   qs("#capsuleTitle").textContent = "Time Capsule unavailable";
   qs("#capsuleMeta").textContent = "Ask the event host for the current private link.";
   setNotice(qs("#capsuleNotice"), message, "error");

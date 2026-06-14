@@ -316,8 +316,8 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(capsuleHtml, /id="capsuleWalk"/);
   assert.match(capsuleHtml, /id="capsuleWalkCanvas"/);
   assert.match(capsuleHtml, /id="capsuleWalkFallback"/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260614-luxury-gallery-1/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260614-walk-video-captions-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260614-walk-world-polish-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260614-walk-world-polish-1/);
 
   assert.match(capsuleJs, /let spatialLayout = null/);
   assert.match(capsuleJs, /let spatialClusters = \[\]/);
@@ -362,8 +362,8 @@ test('capsule 3D Walk uses cinematic stations with safe spacing and camera poses
   ]);
 
   assert.match(capsuleHtml, /id="capsuleWalkViewButton"/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260614-walk-video-captions-1/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260614-luxury-gallery-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260614-walk-world-polish-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260614-walk-world-polish-1/);
 
   assert.match(capsuleJs, /const SPATIAL_STATION_SPACING = 10/);
   assert.match(capsuleJs, /const SPATIAL_CAMERA_PULLBACK = 8\.6/);
@@ -451,6 +451,40 @@ test('capsule 3D Walk renders a lit, post-processed luxury gallery', async () =>
   // Styling hooks.
   assert.match(styles, /\.capsule-walk-progress/);
   assert.match(styles, /\.capsule-walk-vignette/);
+});
+
+test('capsule 3D Walk uses softer lighting and larger featured station scale', async () => {
+  const capsuleJs = await readText('../../moments/capsule/capsule.js');
+
+  assert.match(capsuleJs, /const SPATIAL_SPOTLIGHT_INTENSITY = spatialWalkQuality === "lite" \? 1\.45 : 1\.85/);
+  assert.match(capsuleJs, /renderer\.toneMappingExposure = 0\.88/);
+  assert.match(capsuleJs, /const SPATIAL_STATION_SIZE_MULTIPLIER = 1\.18/);
+  assert.match(capsuleJs, /const SPATIAL_FEATURED_STATION_SCALE = 1\.18/);
+  assert.match(capsuleJs, /station\.card\.material\.emissiveIntensity = isActive \? 0\.28 : near \? 0\.22 : 0\.16/);
+});
+
+test('capsule 3D Walk adds event-title world art, richer atmosphere, and fullscreen controls', async () => {
+  const [capsuleHtml, capsuleJs, styles] = await Promise.all([
+    readText('../../moments/capsule/index.html'),
+    readText('../../moments/capsule/capsule.js'),
+    readText('../../moments/styles.css')
+  ]);
+
+  assert.match(capsuleHtml, /capsule\.js\?v=20260614-walk-world-polish-1/);
+  assert.match(capsuleHtml, /id="capsuleWalkFullscreenButton"/);
+  assert.match(capsuleJs, /qs\("#capsuleWalkFullscreenButton"\)\?\.addEventListener\("click", toggleSpatialWalkFullscreen\)/);
+  assert.match(capsuleJs, /let nativeSpatialWalkFullscreenActive = false/);
+  assert.match(capsuleJs, /function toggleSpatialWalkFullscreen/);
+  assert.match(capsuleJs, /document\.body\.classList\.add\("is-native-spatial-walk"\)/);
+  assert.match(capsuleJs, /function addSpatialEventTitleBackdrop/);
+  assert.match(capsuleJs, /createSpatialTitleTexture/);
+  assert.match(capsuleJs, /capsule\?\.eventTitle \|\| capsule\?\.title/);
+  assert.match(capsuleJs, /function addGalleryAtmosphereStreams/);
+  assert.match(capsuleJs, /const SPATIAL_DUST_PARTICLE_MULTIPLIER = 1\.75/);
+  assert.match(styles, /\.capsule-walk-fullscreen-toggle/);
+  assert.match(styles, /\.capsule-walk-controls \{[\s\S]*?top: clamp\(0\.85rem, 2vw, 1\.4rem\);[\s\S]*?bottom: auto;/);
+  assert.match(styles, /\.capsule-walk:fullscreen/);
+  assert.match(styles, /\.is-native-spatial-walk/);
 });
 
 test('capsule 3D Walk captions include AI vision and public spatial evidence', async () => {

@@ -2859,7 +2859,8 @@ textarea:focus-visible {
   position: absolute;
   z-index: 4;
   right: clamp(0.85rem, 2vw, 1.4rem);
-  bottom: clamp(0.85rem, 2vw, 1.4rem);
+  top: clamp(0.85rem, 2vw, 1.4rem);
+  bottom: auto;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -2872,6 +2873,18 @@ textarea:focus-visible {
   color: #fffaf5;
   box-shadow: 0 14px 38px rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(14px);
+}
+
+.capsule-walk-fullscreen-toggle {
+  border-color: rgba(255, 250, 245, 0.32);
+  background: rgba(23, 21, 20, 0.54);
+  color: #fffaf5;
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(14px);
+}
+
+.capsule-walk-fullscreen-toggle[hidden] {
+  display: none;
 }
 
 .capsule-walk-view-button {
@@ -2956,6 +2969,30 @@ textarea:focus-visible {
 
 .capsule-walk-copy.is-swap {
   animation: capsuleWalkCopyIn 520ms ease both;
+}
+
+.capsule-walk:fullscreen,
+.capsule-walk:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100vh;
+  min-height: 100dvh;
+  max-height: 100vh;
+  max-height: 100dvh;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.capsule-walk:fullscreen .capsule-walk-viewport,
+.capsule-walk:-webkit-full-screen .capsule-walk-viewport {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.is-native-spatial-walk {
+  overflow: hidden;
 }
 
 @keyframes capsuleWalkCopyIn {
@@ -5432,7 +5469,8 @@ tr:last-child td {
 
   .capsule-walk-controls {
     right: 0.7rem;
-    bottom: calc(env(safe-area-inset-bottom) + 0.7rem);
+    top: calc(env(safe-area-inset-top) + 0.7rem);
+    bottom: auto;
     gap: 0.4rem;
   }
 
@@ -5441,7 +5479,8 @@ tr:last-child td {
     min-height: 2.6rem;
   }
 
-  .capsule-walk-tour-toggle {
+  .capsule-walk-tour-toggle,
+  .capsule-walk-fullscreen-toggle {
     min-height: 2.6rem;
   }
 
