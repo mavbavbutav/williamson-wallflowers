@@ -1322,15 +1322,17 @@ async function generateSpatialLayoutDraft(env, event, request) {
 
 function buildSpatialLayoutDraft(eventId, items, insightRows, now) {
   const orderedItems = [...items].sort(compareSpatialItems);
+  const placedSubmissionIds = new Set(orderedItems.map((item) => item.submissionId).filter(Boolean));
+  const placementInsightRows = insightRows.filter((row) => placedSubmissionIds.has(row.submissionId || row.submission_id));
   const insightsBySubmissionId = new Map();
-  for (const row of insightRows) {
+  for (const row of placementInsightRows) {
     const submissionId = row.submissionId || row.submission_id;
     if (submissionId && !insightsBySubmissionId.has(submissionId)) {
       insightsBySubmissionId.set(submissionId, row);
     }
   }
 
-  const repeatedCue = selectRepeatedSpatialCue(insightRows);
+  const repeatedCue = selectRepeatedSpatialCue(placementInsightRows);
   const layoutMode = repeatedCue ? 'visual_cluster' : 'timeline_path';
   const layoutId = crypto.randomUUID();
   const clusterId = crypto.randomUUID();
@@ -1393,7 +1395,7 @@ function buildSpatialLayoutDraft(eventId, items, insightRows, now) {
       generationStatus: 'ready',
       layoutMode,
       confidenceScore,
-      inputFingerprint: buildSpatialInputFingerprint(orderedItems, insightRows),
+      inputFingerprint: buildSpatialInputFingerprint(orderedItems, placementInsightRows),
       generatorVersion: 1,
       errorMessage: '',
       publishedAt: null,
@@ -1781,7 +1783,7 @@ async function getAuthorizedSpatialLayout(request, env, url, layoutId, corsHeade
 
 function toSpatialLayoutBundleClient(bundle, options = {}) {
   return {
-    spatialLayout: toSpatialLayoutClient(bundle.layout),
+    spatialLayout: toSpatialLayoutClient(bundle.layout, options),
     spatialClusters: bundle.clusters.map((row) => toSpatialClusterClient(row, options)),
     spatialPlacements: bundle.placements.map((row) => toSpatialPlacementClient(row, options))
   };
@@ -1798,22 +1800,27 @@ function filterSpatialBundleForGuestItems(bundle, items) {
   };
 }
 
-function toSpatialLayoutClient(row) {
-  return {
+function toSpatialLayoutClient(row, options = {}) {
+  const client = {
     id: row.id,
     eventId: row.eventId || row.event_id,
     status: row.status || 'draft',
     version: Number(row.version || 1),
-    generationStatus: row.generationStatus || row.generation_status || 'ready',
     layoutMode: row.layoutMode || row.layout_mode || 'timeline_path',
     confidenceScore: Number(row.confidenceScore ?? row.confidence_score ?? 0),
-    inputFingerprint: row.inputFingerprint || row.input_fingerprint || '',
-    generatorVersion: Number(row.generatorVersion || row.generator_version || 1),
-    errorMessage: row.errorMessage || row.error_message || '',
     publishedAt: row.publishedAt || row.published_at || '',
     createdAt: row.createdAt || row.created_at || '',
     updatedAt: row.updatedAt || row.updated_at || ''
   };
+
+  if (options.includeEvidence) {
+    client.generationStatus = row.generationStatus || row.generation_status || 'ready';
+    client.inputFingerprint = row.inputFingerprint || row.input_fingerprint || '';
+    client.generatorVersion = Number(row.generatorVersion || row.generator_version || 1);
+    client.errorMessage = row.errorMessage || row.error_message || '';
+  }
+
+  return client;
 }
 
 function toSpatialClusterClient(row, options = {}) {

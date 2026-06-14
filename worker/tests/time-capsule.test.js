@@ -306,7 +306,7 @@ test('published capsule includes guest-safe spatial layout without private evide
     events: [timeCapsuleEvent()],
     submissions: [approvedSubmission({ id: 'photo-1' })],
     items: [capsuleItem({ id: 'item-1', submissionId: 'photo-1' })],
-    layouts: [spatialLayout({ id: 'layout-published', status: 'published' })],
+    layouts: [spatialLayout({ id: 'layout-published', status: 'published', inputFingerprint: 'private-fingerprint', input_fingerprint: 'private-fingerprint' })],
     clusters: [spatialCluster({ id: 'cluster-1', layoutId: 'layout-published', evidenceJson: '{"gps":[36,-86]}' })],
     placements: [spatialPlacement({ id: 'placement-1', layoutId: 'layout-published', clusterId: 'cluster-1', itemId: 'item-1', evidenceJson: '{"rawGps":"secret"}' })]
   });
@@ -318,8 +318,10 @@ test('published capsule includes guest-safe spatial layout without private evide
 
   assert.equal(response.status, 200);
   assert.equal(payload.spatialLayout.status, 'published');
+  assert.equal(payload.spatialLayout.inputFingerprint, undefined);
   assert.equal(payload.spatialClusters[0].evidence, undefined);
   assert.equal(payload.spatialPlacements[0].evidence, undefined);
+  assert.equal(JSON.stringify(payload).includes('private-fingerprint'), false);
   assert.equal(JSON.stringify(payload).includes('rawGps'), false);
 });
 
@@ -333,6 +335,38 @@ test('spatial generator falls back to timeline path when visual evidence is weak
     items: [
       capsuleItem({ id: 'item-1', submissionId: 'photo-1', sortOrder: 1 }),
       capsuleItem({ id: 'item-2', submissionId: 'photo-2', sortOrder: 2 })
+    ]
+  });
+
+  const response = await worker.fetch(jsonRequest(
+    '/moments-api/host/events/event-1/spatial-layouts/generate',
+    {},
+    { Authorization: 'Bearer host-token' }
+  ), envWithDb(db));
+  const payload = await response.json();
+
+  assert.equal(response.status, 201);
+  assert.equal(payload.spatialLayout.layoutMode, 'timeline_path');
+  assert.equal(payload.spatialClusters.length, 1);
+  assert.match(payload.spatialClusters[0].label, /Story|Sequence|Moments/);
+});
+
+test('spatial generator ignores repeated cues outside visible capsule items', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    submissions: [
+      approvedSubmission({ id: 'photo-1', createdAt: '2026-09-19T20:00:00.000Z' }),
+      approvedSubmission({ id: 'photo-2', createdAt: '2026-09-19T20:25:00.000Z' }),
+      approvedSubmission({ id: 'stray-1', createdAt: '2026-09-19T20:30:00.000Z' }),
+      approvedSubmission({ id: 'stray-2', createdAt: '2026-09-19T20:35:00.000Z' })
+    ],
+    items: [
+      capsuleItem({ id: 'item-1', submissionId: 'photo-1', sortOrder: 1 }),
+      capsuleItem({ id: 'item-2', submissionId: 'photo-2', sortOrder: 2 })
+    ],
+    insights: [
+      mediaInsight({ submissionId: 'stray-1', backgroundCues: ['velvet arch'] }),
+      mediaInsight({ submissionId: 'stray-2', backgroundCues: ['velvet arch'] })
     ]
   });
 
