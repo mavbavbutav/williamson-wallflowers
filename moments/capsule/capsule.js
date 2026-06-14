@@ -594,9 +594,32 @@ function stationItemIndex(item) {
 function getStationDisplaySize(item) {
   const mediaType = String(item?.mediaType || "").toLowerCase();
   if (mediaType === "audio") return { width: 3.2, height: 1.8 };
-  const isLandscape = Number(item?.width || item?.mediaWidth || 0) > Number(item?.height || item?.mediaHeight || 0);
-  if (isLandscape) return { width: 3.65, height: 2.18 };
-  return { width: 2.56, height: 3.36 };
+  const aspect = getStationMediaAspect(item);
+  return displaySizeFromAspect(aspect);
+}
+
+function getStationMediaAspect(item) {
+  const width = Number(item?.displayWidth || item?.mediaWidth || item?.width || 0);
+  const height = Number(item?.displayHeight || item?.mediaHeight || item?.height || 0);
+  if (width > 0 && height > 0) return width / height;
+  const aspect = Number(item?.aspectRatio || item?.mediaAspectRatio || 0);
+  if (aspect > 0) return aspect;
+  return 3 / 4;
+}
+
+function displaySizeFromAspect(aspect) {
+  const safeAspect = clamp(Number(aspect) || 0.75, 0.42, 2.4);
+  if (safeAspect >= 1) {
+    return {
+      width: 3.65,
+      height: clamp(3.65 / safeAspect, 1.82, 2.9)
+    };
+  }
+
+  return {
+    width: clamp(3.36 * safeAspect, 1.86, 2.95),
+    height: 3.36
+  };
 }
 
 function spatialTintForStation(placement, index) {
@@ -754,7 +777,7 @@ function addSpatialStationMesh(THREE, scene, station, stationHitMeshes) {
     side: THREE.DoubleSide,
     depthWrite: false
   });
-  material.map = spatialTextureForItem(THREE, item, isAudio, material);
+  material.map = spatialTextureForItem(THREE, item, isAudio, material, (texture) => updateSpatialStationMediaAspect(THREE, station, texture));
   material.needsUpdate = true;
   const card = new THREE.Mesh(cardGeometry, material);
   card.userData.stationIndex = station.index;
@@ -784,7 +807,32 @@ function addSpatialStationMesh(THREE, scene, station, stationHitMeshes) {
   stationHitMeshes.push(hitArea);
 }
 
-function spatialTextureForItem(THREE, item, isAudio, material) {
+function updateSpatialStationMediaAspect(THREE, station, texture) {
+  const image = texture?.image || {};
+  const width = Number(image.naturalWidth || image.videoWidth || image.width || 0);
+  const height = Number(image.naturalHeight || image.videoHeight || image.height || 0);
+  if (!width || !height || !station.card || !station.frame || !station.group?.userData?.hitArea) return;
+
+  const display = displaySizeFromAspect(width / height);
+  station.display = display;
+  station.cameraPosition = {
+    ...station.cameraPosition,
+    z: station.focus.z + SPATIAL_CAMERA_PULLBACK + Math.min(1.4, display.height * 0.18)
+  };
+  station.lookAt = {
+    ...station.lookAt,
+    y: station.focus.y + display.height * 0.04
+  };
+
+  station.card.geometry.dispose?.();
+  station.card.geometry = new THREE.PlaneGeometry(display.width, display.height);
+  station.frame.geometry.dispose?.();
+  station.frame.geometry = new THREE.PlaneGeometry(display.width + 0.16, display.height + 0.16);
+  station.group.userData.hitArea.geometry.dispose?.();
+  station.group.userData.hitArea.geometry = new THREE.PlaneGeometry(display.width + 0.52, display.height + 0.52);
+}
+
+function spatialTextureForItem(THREE, item, isAudio, material, onTextureReady) {
   const fallbackTexture = createSpatialCardTexture(THREE, item);
   if (isAudio) return fallbackTexture;
 
@@ -802,6 +850,7 @@ function spatialTextureForItem(THREE, item, isAudio, material) {
     texture.colorSpace = THREE.SRGBColorSpace || texture.colorSpace;
     material.map = texture;
     material.needsUpdate = true;
+    onTextureReady?.(texture);
     requestSpatialWalkFrame();
   }, undefined, () => {
     material.map = fallbackTexture;

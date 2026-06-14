@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 function createElement() {
+  const listeners = new Map();
+
   return {
     hidden: false,
     innerHTML: '',
@@ -21,7 +23,13 @@ function createElement() {
       toggle() {}
     },
     setAttribute() {},
-    addEventListener() {},
+    addEventListener(type, callback) {
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(callback);
+    },
+    click() {
+      (listeners.get('click') || []).forEach((callback) => callback({ currentTarget: this, target: this }));
+    },
     append() {},
     focus() {},
     scrollTo() {},
@@ -36,6 +44,8 @@ function createElement() {
 
 function installCapsuleDom() {
   const elements = new Map();
+  let walkCards = [];
+  let walkCardSignature = '';
   const selectors = [
     '#playSlideshowButton',
     '#castTvButton',
@@ -87,6 +97,21 @@ function installCapsuleDom() {
     },
     querySelectorAll(selector) {
       if (selector === '[data-capsule-view]') return viewButtons;
+      if (selector === '[data-walk-slide]') {
+        const fallbackHtml = elements.get('#capsuleWalkFallback')?.innerHTML || '';
+        const signature = Array.from(fallbackHtml.matchAll(/data-walk-slide="([^"]+)"/g)).map((match) => match[1]).join('|');
+        if (signature !== walkCardSignature) {
+          walkCardSignature = signature;
+          walkCards = signature
+            ? signature.split('|').map((walkSlide) => {
+                const element = createElement();
+                element.dataset.walkSlide = walkSlide;
+                return element;
+              })
+            : [];
+        }
+        return walkCards;
+      }
       return [];
     },
     createElement() {
@@ -191,8 +216,11 @@ test('capsule viewer offers a 3D Walk fallback when a published capsule has no s
     },
     localStorage: storage,
     sessionStorage: storage,
-    setTimeout,
-    clearTimeout,
+    setTimeout(callback, delay) {
+      if (delay <= 100 && typeof callback === 'function') callback();
+      return 0;
+    },
+    clearTimeout() {},
     addEventListener() {},
     getComputedStyle() {
       return {};
@@ -242,6 +270,12 @@ test('capsule viewer offers a 3D Walk fallback when a published capsule has no s
     assert.equal(elements.get('#capsuleTitle').textContent, 'Published Capsule', elements.get('#capsuleNotice').textContent);
     assert.equal(elements.get('[data-capsule-view="walk"]').hidden, false);
     assert.match(elements.get('#capsuleWalkFallback').innerHTML, /Cinematic memory path/);
+    const walkCards = document.querySelectorAll('[data-walk-slide]');
+    assert.equal(walkCards.length, 2);
+    assert.equal(walkCards[1].dataset.walkSlide, '1');
+    walkCards[1].click();
+    assert.equal(elements.get('#slideshowModal').hidden, false);
+    assert.equal(elements.get('#slideTitle').textContent, 'Gift moment');
   } finally {
     globalThis.window = previousWindow;
     globalThis.document = previousDocument;
@@ -308,7 +342,7 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(capsuleJs, /if \(spatialWalkScene\) \{[\s\S]*?hideSpatialWalkFallback\(\);[\s\S]*?resizeSpatialWalkScene\(\);[\s\S]*?requestSpatialWalkFrame\(\);[\s\S]*?return;/);
   assert.match(capsuleJs, /fallback\.hidden = Boolean\(spatialWalkScene\)/);
   assert.match(capsuleJs, /function hideSpatialWalkFallback/);
-  assert.match(capsuleJs, /material\.map = spatialTextureForItem\(THREE, item, isAudio, material\)/);
+  assert.match(capsuleJs, /material\.map = spatialTextureForItem\(THREE, item, isAudio, material, \(texture\) => updateSpatialStationMediaAspect\(THREE, station, texture\)\)/);
   assert.match(capsuleJs, /loader\.load\(textureUrl, \(texture\) => \{[\s\S]*?material\.map = texture[\s\S]*?material\.needsUpdate = true[\s\S]*?\}, undefined, \(\) => \{[\s\S]*?material\.map = fallbackTexture[\s\S]*?material\.needsUpdate = true/);
   assert.match(capsuleJs, /return fallbackTexture;/);
 
@@ -336,6 +370,9 @@ test('capsule 3D Walk uses cinematic stations with safe spacing and camera poses
   assert.match(capsuleJs, /function getSpatialWalkStations/);
   assert.match(capsuleJs, /function buildSpatialStation/);
   assert.match(capsuleJs, /function getStationDisplaySize/);
+  assert.match(capsuleJs, /function getStationMediaAspect/);
+  assert.match(capsuleJs, /function updateSpatialStationMediaAspect/);
+  assert.match(capsuleJs, /texture\?\.image/);
   assert.match(capsuleJs, /function stationItemIndex/);
   assert.match(capsuleJs, /itemIndex: stationItemIndex\(placement\.item\)/);
   assert.match(capsuleJs, /z: -index \* SPATIAL_STATION_SPACING/);
