@@ -282,8 +282,8 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(capsuleHtml, /id="capsuleWalk"/);
   assert.match(capsuleHtml, /id="capsuleWalkCanvas"/);
   assert.match(capsuleHtml, /id="capsuleWalkFallback"/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260614-spatial-walk-fallback-1/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260614-spatial-walk-fallback-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260614-cinematic-stations-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260614-cinematic-stations-1/);
 
   assert.match(capsuleJs, /let spatialLayout = null/);
   assert.match(capsuleJs, /let spatialClusters = \[\]/);
@@ -318,6 +318,49 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(styles, /\.capsule-walk-fallback/);
   assert.match(styles, /@media \(max-width: 680px\)[\s\S]*\.capsule-walk/);
   assert.match(styles, /\.capsule-view-tabs[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
+});
+
+test('capsule 3D Walk uses cinematic stations with safe spacing and camera poses', async () => {
+  const [capsuleHtml, capsuleJs, styles] = await Promise.all([
+    readText('../../moments/capsule/index.html'),
+    readText('../../moments/capsule/capsule.js'),
+    readText('../../moments/styles.css')
+  ]);
+
+  assert.match(capsuleHtml, /id="capsuleWalkViewButton"/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260614-cinematic-stations-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260614-cinematic-stations-1/);
+
+  assert.match(capsuleJs, /const SPATIAL_STATION_SPACING = 10/);
+  assert.match(capsuleJs, /const SPATIAL_CAMERA_PULLBACK = 8\.6/);
+  assert.match(capsuleJs, /function getSpatialWalkStations/);
+  assert.match(capsuleJs, /function buildSpatialStation/);
+  assert.match(capsuleJs, /function getStationDisplaySize/);
+  assert.match(capsuleJs, /function stationItemIndex/);
+  assert.match(capsuleJs, /itemIndex: stationItemIndex\(placement\.item\)/);
+  assert.match(capsuleJs, /z: -index \* SPATIAL_STATION_SPACING/);
+  assert.match(capsuleJs, /cameraPosition:/);
+  assert.match(capsuleJs, /lookAt:/);
+  assert.match(capsuleJs, /Math\.atan2\(cameraPosition\.x - focus\.x, cameraPosition\.z - focus\.z\)/);
+
+  assert.match(styles, /\.capsule-walk-view-button/);
+  assert.match(styles, /\.capsule-walk-card-media img[\s\S]*?object-fit: contain/);
+});
+
+test('capsule 3D Walk stations open the existing full-screen moment viewer', async () => {
+  const capsuleJs = await readText('../../moments/capsule/capsule.js');
+
+  assert.match(capsuleJs, /new THREE\.Raycaster\(\)/);
+  assert.match(capsuleJs, /stationHitMeshes/);
+  assert.match(capsuleJs, /canvas\.addEventListener\("pointermove", handleSpatialWalkPointerMove/);
+  assert.match(capsuleJs, /canvas\.addEventListener\("click", handleSpatialWalkClick/);
+  assert.match(capsuleJs, /#capsuleWalkViewButton/);
+  assert.match(capsuleJs, /openSpatialWalkStation\(spatialActiveStationIndex\)/);
+  assert.match(capsuleJs, /openSlide\(station\.itemIndex, \{ autoPlay: false \}\)/);
+  assert.match(capsuleJs, /event\.key === "Enter"/);
+  assert.match(capsuleJs, /event\.key === " "/);
+  assert.match(capsuleJs, /scrollSpatialWalkToStation/);
+  assert.match(capsuleJs, /data-walk-slide/);
 });
 
 test('capsule swipe feed becomes fullscreen on mobile and videos use poster art', async () => {

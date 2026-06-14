@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260614-spatial-walk-fallback-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260614-cinematic-stations-1" />
 </head>
 <body class="host-page capsule-viewer">
   <main class="app-shell">
@@ -66,6 +66,7 @@
       <div class="capsule-walk" id="capsuleWalk" aria-label="Move through a spatial memory path" hidden>
         <div class="capsule-walk-viewport">
           <canvas class="capsule-walk-canvas" id="capsuleWalkCanvas" aria-hidden="true"></canvas>
+          <button class="button button-primary capsule-walk-view-button" type="button" id="capsuleWalkViewButton" hidden>View moment</button>
           <div class="capsule-walk-copy">
             <span class="status-pill">3D Walk</span>
             <strong>A spatial path through these moments</strong>
@@ -102,6 +103,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js" defer></script>
-  <script type="module" src="capsule.js?v=20260614-spatial-walk-fallback-1"></script>
+  <script type="module" src="capsule.js?v=20260614-cinematic-stations-1"></script>
 </body>
 </html>

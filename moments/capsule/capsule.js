@@ -11,6 +11,10 @@ let spatialPlacements = [];
 let spatialWalkStarted = false;
 let spatialWalkScene = null;
 let spatialWalkFrame = 0;
+let spatialWalkStations = [];
+let spatialActiveStationIndex = 0;
+let spatialHoveredStationIndex = -1;
+let spatialWalkInteractionsBound = false;
 let slideIndex = 0;
 let lastFocusedElement = null;
 let currentCapsuleView = "timeline";
@@ -34,6 +38,12 @@ const FEED_EARLY_PLAY_VISIBILITY_RATIO = 0.28;
 const PHOTO_SLIDE_DURATION_MS = 20000;
 const SLIDE_ERROR_ADVANCE_MS = 6000;
 const CAST_RECEIVER_APP_ID = "D4D06631";
+const SPATIAL_STATION_SPACING = 10;
+const SPATIAL_STATION_SIDE_OFFSET = 4.4;
+const SPATIAL_CAMERA_PULLBACK = 8.6;
+const SPATIAL_CAMERA_HEIGHT = 2.15;
+const SPATIAL_STATION_FOCUS_HEIGHT = 1.35;
+const SPATIAL_NEAR_STATION_RADIUS = 2.35;
 
 init();
 
@@ -53,6 +63,7 @@ async function init() {
     scheduleFeedAutoplay();
   }, { passive: true });
   qs("#capsuleWalk")?.addEventListener("scroll", requestSpatialWalkFrame, { passive: true });
+  qs("#capsuleWalkViewButton")?.addEventListener("click", () => openSpatialWalkStation(spatialActiveStationIndex));
   qs("#slideClose").addEventListener("click", closeSlide);
   qs("#slidePrev").addEventListener("click", () => changeSlide(-1));
   qs("#slideNext").addEventListener("click", () => changeSlide(1));
@@ -67,6 +78,20 @@ async function init() {
     if (!qs("#slideshowModal").hidden) revealSlideshowControls();
     if (event.key === "Escape" && currentCapsuleView === "feed") setCapsuleView("timeline", { userInitiated: true });
     if (event.key === "Escape" && !qs("#slideshowModal").hidden) closeSlide();
+    if (currentCapsuleView === "walk" && qs("#slideshowModal").hidden) {
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+        event.preventDefault();
+        scrollSpatialWalkToStation(spatialActiveStationIndex + 1);
+      }
+      if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        event.preventDefault();
+        scrollSpatialWalkToStation(spatialActiveStationIndex - 1);
+      }
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openSpatialWalkStation(spatialActiveStationIndex);
+      }
+    }
     if (event.key === "ArrowRight" && !qs("#slideshowModal").hidden) changeSlide(1);
     if (event.key === "ArrowLeft" && !qs("#slideshowModal").hidden) changeSlide(-1);
   });
@@ -346,7 +371,7 @@ function renderSpatialWalk() {
   }
 
   if (spacer) {
-    const spacerHeight = Math.max(480, placements.length * 260);
+    const spacerHeight = Math.max(720, placements.length * 520);
     spacer.style.setProperty("--walk-spacer-height", `${spacerHeight}px`);
   }
 
@@ -369,6 +394,9 @@ function renderSpatialWalk() {
         ${placements.map(renderSpatialWalkFallbackCard).join("")}
       </div>
     `;
+    qsaWalkCards().forEach((button) => {
+      button.addEventListener("click", () => openSlide(Number(button.dataset.walkSlide || 0), { autoPlay: false }));
+    });
   }
 }
 
@@ -377,9 +405,10 @@ function renderSpatialWalkFallbackCard(placement, index) {
   const cluster = placement.cluster;
   const label = cluster?.label || item.chapter || "Memory path";
   const caption = item.caption || item.guestNote || cluster?.summary || "";
+  const itemIndex = stationItemIndex(item);
 
   return `
-    <article class="capsule-walk-card is-${escapeAttribute(item.mediaType || "photo")}">
+    <button class="capsule-walk-card is-${escapeAttribute(item.mediaType || "photo")}" type="button" data-walk-slide="${itemIndex}">
       <span class="capsule-walk-step">${String(index + 1).padStart(2, "0")}</span>
       <div class="capsule-walk-card-media">
         ${renderSpatialWalkFallbackMedia(item)}
@@ -390,7 +419,7 @@ function renderSpatialWalkFallbackCard(placement, index) {
         <p>${escapeHtml(caption)}</p>
         <small>${escapeHtml(formatDateTime(item.capturedAt))}</small>
       </div>
-    </article>
+    </button>
   `;
 }
 
@@ -508,6 +537,83 @@ function normalizeSpatialPlacement(placement, index, itemMap, clusterMap) {
   };
 }
 
+function getSpatialWalkStations() {
+  const placements = getSpatialWalkPlacements();
+  return placements.map((placement, index) => buildSpatialStation(placement, index, placements.length));
+}
+
+function buildSpatialStation(placement, index, total) {
+  const item = placement.item;
+  const sourcePosition = placement.position || { x: 0, y: 0, z: 0 };
+  const display = getStationDisplaySize(item);
+  const clusterSeed = placement.cluster?.id || placement.cluster?.label || item.chapter || "";
+  const clusterOffset = clusterSeed
+    ? ((hashSpatialText(clusterSeed) % 100) / 100 - 0.5) * 1.25
+    : 0;
+  const routeCurve = Math.sin(index * 0.72) * SPATIAL_STATION_SIDE_OFFSET;
+  const sourceHint = clamp(Number(sourcePosition.x || 0) * 0.18, -1.25, 1.25);
+  const focus = {
+    x: routeCurve + sourceHint + clusterOffset,
+    y: SPATIAL_STATION_FOCUS_HEIGHT + Math.sin(index * 0.41) * 0.22,
+    z: -index * SPATIAL_STATION_SPACING
+  };
+  const cameraPosition = {
+    x: focus.x * 0.32,
+    y: focus.y + SPATIAL_CAMERA_HEIGHT,
+    z: focus.z + SPATIAL_CAMERA_PULLBACK + Math.min(1.4, display.height * 0.18)
+  };
+  const lookAt = {
+    x: focus.x,
+    y: focus.y + display.height * 0.04,
+    z: focus.z
+  };
+  const rotationY = Math.atan2(cameraPosition.x - focus.x, cameraPosition.z - focus.z);
+
+  return {
+    id: placement.id || `station-${index}`,
+    item,
+    itemIndex: stationItemIndex(placement.item),
+    cluster: placement.cluster || null,
+    index,
+    total,
+    focus,
+    cameraPosition: cameraPosition,
+    lookAt: lookAt,
+    rotation: { x: 0, y: rotationY, z: 0 },
+    display,
+    tint: spatialTintForStation(placement, index)
+  };
+}
+
+function stationItemIndex(item) {
+  const id = String(item?.id || "");
+  const index = items.findIndex((candidate) => String(candidate.id || "") === id);
+  return index >= 0 ? index : 0;
+}
+
+function getStationDisplaySize(item) {
+  const mediaType = String(item?.mediaType || "").toLowerCase();
+  if (mediaType === "audio") return { width: 3.2, height: 1.8 };
+  const isLandscape = Number(item?.width || item?.mediaWidth || 0) > Number(item?.height || item?.mediaHeight || 0);
+  if (isLandscape) return { width: 3.65, height: 2.18 };
+  return { width: 2.56, height: 3.36 };
+}
+
+function spatialTintForStation(placement, index) {
+  const palette = [0xf7d8c7, 0xfffaf5, 0xded3c8, 0xc9d7cc, 0xe6c7b8];
+  const seed = placement.cluster?.id || placement.cluster?.label || placement.item?.chapter || String(index);
+  return palette[hashSpatialText(seed) % palette.length];
+}
+
+function hashSpatialText(value) {
+  const text = String(value || "");
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
+  }
+  return hash;
+}
+
 function canUseWebGl() {
   const canvas = qs("#capsuleWalkCanvas");
   if (!canvas || typeof canvas.getContext !== "function") return false;
@@ -557,7 +663,11 @@ async function startSpatialWalkScene() {
 
 function buildSpatialWalkScene(THREE) {
   const canvas = qs("#capsuleWalkCanvas");
-  const placements = getSpatialWalkPlacements();
+  const stations = getSpatialWalkStations();
+  spatialWalkStations = stations;
+  spatialActiveStationIndex = 0;
+  spatialHoveredStationIndex = -1;
+
   const renderer = new THREE.WebGLRenderer({
     canvas,
     antialias: true,
@@ -569,29 +679,38 @@ function buildSpatialWalkScene(THREE) {
   if (THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x171514, 8, 34);
+  scene.fog = new THREE.Fog(0x171514, 16, Math.max(46, stations.length * 7));
 
-  const camera = new THREE.PerspectiveCamera(48, 1, 0.1, 90);
-  const ambient = new THREE.AmbientLight(0xfffaf5, 1.45);
-  const key = new THREE.DirectionalLight(0xf7d8c7, 2.1);
-  key.position.set(4, 6, 7);
-  scene.add(ambient, key);
+  const camera = new THREE.PerspectiveCamera(43, 1, 0.1, Math.max(110, stations.length * 14));
+  const ambient = new THREE.AmbientLight(0xfffaf5, 1.2);
+  const key = new THREE.DirectionalLight(0xf7d8c7, 2.45);
+  const rim = new THREE.DirectionalLight(0xc9d7cc, 1.3);
+  key.position.set(4, 7, 8);
+  rim.position.set(-5, 4, -8);
+  scene.add(ambient, key, rim);
 
-  const routePoints = placements.map((placement) => new THREE.Vector3(
-    placement.position.x,
-    placement.position.y,
-    placement.position.z
+  const routePoints = stations.map((station) => new THREE.Vector3(
+    station.focus.x,
+    0.04,
+    station.focus.z
   ));
+  const stationHitMeshes = [];
   addSpatialRouteRibbon(THREE, scene, routePoints);
-  placements.forEach((placement) => addSpatialPlacementMesh(THREE, scene, placement));
+  stations.forEach((station) => addSpatialStationMesh(THREE, scene, station, stationHitMeshes));
 
   spatialWalkScene = {
     THREE,
     renderer,
     scene,
     camera,
-    routePoints
+    routePoints,
+    stations,
+    stationHitMeshes,
+    raycaster: new THREE.Raycaster(),
+    pointer: new THREE.Vector2()
   };
+  bindSpatialWalkInteractions(canvas);
+  updateSpatialWalkViewButton();
 }
 
 function addSpatialRouteRibbon(THREE, scene, routePoints) {
@@ -607,36 +726,62 @@ function addSpatialRouteRibbon(THREE, scene, routePoints) {
   scene.add(new THREE.Mesh(geometry, material));
 }
 
-function addSpatialPlacementMesh(THREE, scene, placement) {
-  const item = placement.item;
+function addSpatialStationMesh(THREE, scene, station, stationHitMeshes) {
+  const item = station.item;
   const mediaType = String(item.mediaType || "").toLowerCase();
   const isAudio = mediaType === "audio";
-  const width = isAudio ? 1.55 : 1.38;
-  const height = isAudio ? 0.92 : 1.84;
+  const width = station.display.width;
+  const height = station.display.height;
   const group = new THREE.Group();
-  const cardGeometry = new THREE.PlaneGeometry(width * placement.scale, height * placement.scale);
+  group.userData.stationIndex = station.index;
+
+  const frameGeometry = new THREE.PlaneGeometry(width + 0.16, height + 0.16);
+  const frame = new THREE.Mesh(frameGeometry, new THREE.MeshBasicMaterial({
+    color: station.tint,
+    transparent: true,
+    opacity: 0.24,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  }));
+  frame.position.z = -0.026;
+  frame.userData.stationIndex = station.index;
+
+  const cardGeometry = new THREE.PlaneGeometry(width, height);
   const material = new THREE.MeshBasicMaterial({
     color: isAudio ? 0x3f6d58 : 0xfffaf5,
     transparent: true,
-    side: THREE.DoubleSide
+    opacity: 0.88,
+    side: THREE.DoubleSide,
+    depthWrite: false
   });
   material.map = spatialTextureForItem(THREE, item, isAudio, material);
   material.needsUpdate = true;
   const card = new THREE.Mesh(cardGeometry, material);
+  card.userData.stationIndex = station.index;
 
-  const frameGeometry = new THREE.PlaneGeometry((width + 0.08) * placement.scale, (height + 0.08) * placement.scale);
-  const frame = new THREE.Mesh(frameGeometry, new THREE.MeshBasicMaterial({
-    color: 0xfffaf5,
+  const hitGeometry = new THREE.PlaneGeometry(width + 0.52, height + 0.52);
+  const hitMaterial = new THREE.MeshBasicMaterial({
     transparent: true,
-    opacity: 0.34,
-    side: THREE.DoubleSide
-  }));
-  frame.position.z = -0.018;
+    opacity: 0,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  });
+  const hitArea = new THREE.Mesh(hitGeometry, hitMaterial);
+  hitArea.position.z = 0.045;
+  hitArea.userData.stationIndex = station.index;
 
-  group.add(frame, card);
-  group.position.set(placement.position.x, placement.position.y, placement.position.z);
-  group.rotation.set(placement.rotation.x, placement.rotation.y, placement.rotation.z);
+  group.add(frame, card, hitArea);
+  group.position.set(station.focus.x, station.focus.y, station.focus.z);
+  group.rotation.set(station.rotation.x, station.rotation.y, station.rotation.z);
+  group.userData.frame = frame;
+  group.userData.card = card;
+  group.userData.hitArea = hitArea;
   scene.add(group);
+
+  station.group = group;
+  station.card = card;
+  station.frame = frame;
+  stationHitMeshes.push(hitArea);
 }
 
 function spatialTextureForItem(THREE, item, isAudio, material) {
@@ -750,23 +895,30 @@ function cancelSpatialWalkFrame() {
 function renderSpatialWalkFrame() {
   if (!spatialWalkScene || currentCapsuleView !== "walk") return;
 
-  const { THREE, renderer, scene, camera, routePoints } = spatialWalkScene;
+  const { THREE, renderer, scene, camera, stations } = spatialWalkScene;
   const progress = getSpatialScrollProgress();
-  const lookAt = new THREE.Vector3(0, 0.45, -4);
+  const stationCount = stations.length;
+  const lookAt = new THREE.Vector3(0, SPATIAL_STATION_FOCUS_HEIGHT, -4);
 
-  if (routePoints.length > 1) {
-    const routeIndex = Math.min(routePoints.length - 2, Math.floor(progress * (routePoints.length - 1)));
-    const segmentProgress = progress * (routePoints.length - 1) - routeIndex;
-    const current = routePoints[routeIndex];
-    const next = routePoints[routeIndex + 1];
-    camera.position.lerpVectors(current, next, segmentProgress);
-    camera.position.y += 1.05;
-    camera.position.z += 4.6;
-    lookAt.lerpVectors(current, next, Math.min(1, segmentProgress + 0.28));
-  } else if (routePoints.length === 1) {
-    const point = routePoints[0];
-    camera.position.set(point.x, point.y + 1.1, point.z + 4.8);
-    lookAt.copy(point);
+  if (stationCount > 1) {
+    const stationFloat = progress * (stationCount - 1);
+    const routeIndex = Math.min(stationCount - 2, Math.floor(stationFloat));
+    const segmentProgress = stationFloat - routeIndex;
+    const current = stations[routeIndex];
+    const next = stations[routeIndex + 1];
+    const currentCamera = vectorFromPose(THREE, current.cameraPosition);
+    const nextCamera = vectorFromPose(THREE, next.cameraPosition);
+    const currentLookAt = vectorFromPose(THREE, current.lookAt);
+    const nextLookAt = vectorFromPose(THREE, next.lookAt);
+    const eased = easeSpatialStation(segmentProgress);
+    camera.position.lerpVectors(currentCamera, nextCamera, eased);
+    lookAt.lerpVectors(currentLookAt, nextLookAt, Math.min(1, eased + 0.12));
+    updateSpatialStationFocus(stationFloat);
+  } else if (stationCount === 1) {
+    const station = stations[0];
+    camera.position.copy(vectorFromPose(THREE, station.cameraPosition));
+    lookAt.copy(vectorFromPose(THREE, station.lookAt));
+    updateSpatialStationFocus(0);
   }
 
   camera.lookAt(lookAt);
@@ -779,6 +931,64 @@ function getSpatialScrollProgress() {
 
   const maxScroll = Math.max(1, Number(walk.scrollHeight || 0) - Number(walk.clientHeight || 0));
   return clamp(Number(walk.scrollTop || 0) / maxScroll, 0, 1);
+}
+
+function vectorFromPose(THREE, pose) {
+  return new THREE.Vector3(pose.x, pose.y, pose.z);
+}
+
+function easeSpatialStation(value) {
+  const progress = clamp(value, 0, 1);
+  return progress * progress * (3 - 2 * progress);
+}
+
+function updateSpatialStationFocus(stationFloat) {
+  if (!spatialWalkScene) return;
+  const nextActive = clamp(Math.round(stationFloat), 0, spatialWalkStations.length - 1);
+  if (nextActive !== spatialActiveStationIndex) {
+    spatialActiveStationIndex = nextActive;
+    updateSpatialWalkViewButton();
+  }
+
+  spatialWalkScene.stations.forEach((station) => {
+    if (!station.group || !station.card || !station.frame) return;
+    const distance = Math.abs(station.index - stationFloat);
+    const near = distance <= SPATIAL_NEAR_STATION_RADIUS;
+    const isActive = station.index === spatialActiveStationIndex;
+    const isHovered = station.index === spatialHoveredStationIndex;
+    const opacity = isActive ? 1 : near ? Math.max(0.34, 0.74 - distance * 0.16) : 0.12;
+    const scale = isActive ? 1.06 : near ? Math.max(0.78, 0.94 - distance * 0.08) : 0.58;
+    station.group.visible = distance < 4.5;
+    station.group.scale.setScalar(isHovered ? scale + 0.05 : scale);
+    station.card.material.opacity = opacity;
+    station.frame.material.opacity = isHovered ? 0.62 : isActive ? 0.48 : near ? 0.24 : 0.08;
+  });
+}
+
+function updateSpatialWalkViewButton() {
+  const button = qs("#capsuleWalkViewButton");
+  const station = spatialWalkStations[spatialActiveStationIndex];
+  if (!button || !station) {
+    if (button) button.hidden = true;
+    return;
+  }
+  button.hidden = currentCapsuleView !== "walk";
+  button.textContent = `View ${String(spatialActiveStationIndex + 1).padStart(2, "0")}`;
+  button.setAttribute("aria-label", `View ${station.item.title || "Time Capsule moment"} full screen`);
+}
+
+function scrollSpatialWalkToStation(stationIndex) {
+  const walk = qs("#capsuleWalk");
+  const nextIndex = clamp(Math.round(Number(stationIndex) || 0), 0, spatialWalkStations.length - 1);
+  if (!walk || spatialWalkStations.length <= 1) {
+    spatialActiveStationIndex = nextIndex;
+    updateSpatialWalkViewButton();
+    requestSpatialWalkFrame();
+    return;
+  }
+  const maxScroll = Math.max(1, Number(walk.scrollHeight || 0) - Number(walk.clientHeight || 0));
+  const top = maxScroll * (nextIndex / (spatialWalkStations.length - 1));
+  walk.scrollTo({ top, behavior: prefersReducedMotion() ? "auto" : "smooth" });
 }
 
 function showSpatialWalkFallback(message) {
@@ -797,6 +1007,54 @@ function hideSpatialWalkFallback() {
   const walk = qs("#capsuleWalk");
   if (fallback) fallback.hidden = true;
   if (walk) walk.classList.add("is-webgl-ready");
+}
+
+function bindSpatialWalkInteractions(canvas) {
+  if (!canvas || spatialWalkInteractionsBound) return;
+  spatialWalkInteractionsBound = true;
+  canvas.addEventListener("pointermove", handleSpatialWalkPointerMove);
+  canvas.addEventListener("pointerleave", clearSpatialWalkHover);
+  canvas.addEventListener("click", handleSpatialWalkClick);
+}
+
+function handleSpatialWalkPointerMove(event) {
+  const station = stationFromSpatialPointer(event);
+  spatialHoveredStationIndex = station ? station.index : -1;
+  if (event.currentTarget?.style) {
+    event.currentTarget.style.cursor = station ? "pointer" : "";
+  }
+  requestSpatialWalkFrame();
+}
+
+function clearSpatialWalkHover(event) {
+  spatialHoveredStationIndex = -1;
+  if (event?.currentTarget?.style) event.currentTarget.style.cursor = "";
+  requestSpatialWalkFrame();
+}
+
+function handleSpatialWalkClick(event) {
+  const station = stationFromSpatialPointer(event);
+  openSpatialWalkStation(station ? station.index : spatialActiveStationIndex);
+}
+
+function stationFromSpatialPointer(event) {
+  if (!spatialWalkScene || !spatialWalkScene.stationHitMeshes?.length) return null;
+  const rect = event.currentTarget.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  const { pointer, raycaster, camera, stationHitMeshes, stations } = spatialWalkScene;
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(stationHitMeshes, false);
+  if (!hits.length) return null;
+  const stationIndex = Number(hits[0].object.userData.stationIndex);
+  return stations[stationIndex] || null;
+}
+
+function openSpatialWalkStation(stationIndex) {
+  const station = spatialWalkStations[clamp(Math.round(Number(stationIndex) || 0), 0, spatialWalkStations.length - 1)];
+  if (!station) return;
+  openSlide(station.itemIndex, { autoPlay: false });
 }
 
 function prefersReducedMotion() {
@@ -822,6 +1080,7 @@ function setCapsuleView(view, options = {}) {
   qs("#capsuleTimeline").hidden = currentCapsuleView !== "timeline";
   qs("#capsuleFeed").hidden = currentCapsuleView !== "feed";
   qs("#capsuleWalk").hidden = currentCapsuleView !== "walk";
+  updateSpatialWalkViewButton();
   qs("#exitSwipeFeedButton").hidden = currentCapsuleView !== "feed";
   document.body.classList.toggle("is-swipe-feed-active", currentCapsuleView === "feed");
   document.body.classList.toggle("is-spatial-walk-active", currentCapsuleView === "walk");
@@ -1640,6 +1899,10 @@ function qsaFeedVideos() {
 
 function qsaFeedCards(feed) {
   return Array.from(feed?.querySelectorAll(".capsule-feed-card") || []);
+}
+
+function qsaWalkCards() {
+  return document.querySelectorAll("[data-walk-slide]");
 }
 
 function getMediaTypeLabel(mediaType) {
