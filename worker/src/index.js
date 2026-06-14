@@ -254,6 +254,34 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
       return regenerateHostGroupHero(request, env, url, corsHeaders, parts[2], ctx);
     }
 
+    if (parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'spatial-layouts') {
+      if (request.method === 'POST' && parts[4] === 'generate') {
+        return generateHostSpatialLayout(request, env, url, corsHeaders, parts[2]);
+      }
+
+      if (request.method === 'GET' && parts[4] === 'draft') {
+        return getHostSpatialLayoutDraft(request, env, url, corsHeaders, parts[2]);
+      }
+    }
+
+    if (parts[0] === 'host' && parts[1] === 'spatial-layouts' && parts[2]) {
+      if (request.method === 'PATCH' && parts.length === 3) {
+        return updateHostSpatialLayout(request, env, url, corsHeaders, parts[2]);
+      }
+
+      if (request.method === 'PATCH' && parts[3] === 'clusters' && parts[4]) {
+        return updateHostSpatialCluster(request, env, url, corsHeaders, parts[2], parts[4]);
+      }
+
+      if (request.method === 'PATCH' && parts[3] === 'placements' && parts[4]) {
+        return updateHostSpatialPlacement(request, env, url, corsHeaders, parts[2], parts[4]);
+      }
+
+      if (request.method === 'POST' && parts[3] === 'publish') {
+        return publishHostSpatialLayout(request, env, url, corsHeaders, parts[2]);
+      }
+    }
+
     if (parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'time-capsule') {
       if (request.method === 'GET') {
         return getHostTimeCapsule(request, env, url, corsHeaders, parts[2]);
@@ -1131,8 +1159,8 @@ async function getPublishedTimeCapsule(request, env, url, corsHeaders, eventId) 
   }
 
   const items = await getTimeCapsuleItems(env, event.id, request, { visibleOnly: true });
-
-  return json({
+  const spatialBundle = await getPublishedSpatialLayoutBundle(env, event.id);
+  const payload = {
     ok: true,
     event: {
       id: event.id,
@@ -1142,7 +1170,855 @@ async function getPublishedTimeCapsule(request, env, url, corsHeaders, eventId) 
       publishedAt: event.timeCapsulePublishedAt
     },
     items
+  };
+
+  if (spatialBundle) {
+    Object.assign(payload, toSpatialLayoutBundleClient(filterSpatialBundleForGuestItems(spatialBundle, items), { includeEvidence: false }));
+  }
+
+  return json(payload, 200, corsHeaders);
+}
+
+async function generateHostSpatialLayout(request, env, url, corsHeaders, eventId) {
+  const event = await getAuthorizedSpatialEvent(request, env, url, eventId, corsHeaders);
+  if (event.response) return event.response;
+
+  const bundle = await generateSpatialLayoutDraft(env, event.record, request);
+  return json({
+    ok: true,
+    ...toSpatialLayoutBundleClient(bundle, { includeEvidence: true })
+  }, 201, corsHeaders);
+}
+
+async function getHostSpatialLayoutDraft(request, env, url, corsHeaders, eventId) {
+  const event = await getAuthorizedSpatialEvent(request, env, url, eventId, corsHeaders);
+  if (event.response) return event.response;
+
+  const bundle = await getSpatialLayoutBundleByStatus(env, event.record.id, 'draft');
+  if (!bundle) {
+    return json({ ok: false, message: 'No draft spatial layout has been generated for this event yet.' }, 404, corsHeaders);
+  }
+
+  return json({
+    ok: true,
+    ...toSpatialLayoutBundleClient(bundle, { includeEvidence: true })
   }, 200, corsHeaders);
+}
+
+async function updateHostSpatialLayout(request, env, url, corsHeaders, layoutId) {
+  const auth = await getAuthorizedSpatialLayout(request, env, url, layoutId, corsHeaders);
+  if (auth.response) return auth.response;
+
+  const body = await request.json().catch(() => ({}));
+  const requestedMode = body.layoutMode === undefined ? auth.record.layoutMode : cleanText(body.layoutMode, 40);
+  if (!['spatial', 'visual_cluster', 'timeline_path'].includes(requestedMode)) {
+    return json({ ok: false, message: 'Spatial layout mode is not supported.' }, 400, corsHeaders);
+  }
+
+  await updateSpatialLayoutRecord(env, auth.record.id, {
+    layoutMode: requestedMode,
+    confidenceScore: normalizeSpatialNumber(body.confidenceScore ?? body.confidence, auth.record.confidenceScore, 0, 1),
+    errorMessage: body.errorMessage === undefined ? auth.record.errorMessage : cleanText(body.errorMessage, 500)
+  });
+
+  const bundle = await getSpatialLayoutBundleByLayoutId(env, auth.record.id);
+  return json({
+    ok: true,
+    ...toSpatialLayoutBundleClient(bundle, { includeEvidence: true })
+  }, 200, corsHeaders);
+}
+
+async function updateHostSpatialCluster(request, env, url, corsHeaders, layoutId, clusterId) {
+  const auth = await getAuthorizedSpatialLayout(request, env, url, layoutId, corsHeaders);
+  if (auth.response) return auth.response;
+
+  const cluster = await getSpatialClusterById(env, auth.record.id, clusterId);
+  if (!cluster) {
+    return json({ ok: false, message: 'Spatial cluster not found for this layout.' }, 404, corsHeaders);
+  }
+
+  const body = await request.json().catch(() => ({}));
+  const anchor = body.anchor && typeof body.anchor === 'object' ? body.anchor : {};
+
+  await updateSpatialClusterRecord(env, auth.record.id, cluster.id, {
+    label: body.label === undefined ? cluster.label : cleanText(body.label, 100),
+    summary: body.summary === undefined ? cluster.summary : cleanText(body.summary, 260),
+    routeOrder: normalizeSpatialRouteOrder(body.routeOrder, cluster.routeOrder),
+    anchorX: normalizeSpatialNumber(body.anchorX ?? body.anchor_x ?? anchor.x, cluster.anchorX, -100, 100),
+    anchorY: normalizeSpatialNumber(body.anchorY ?? body.anchor_y ?? anchor.y, cluster.anchorY, -100, 100),
+    anchorZ: normalizeSpatialNumber(body.anchorZ ?? body.anchor_z ?? anchor.z, cluster.anchorZ, -100, 100),
+    confidenceScore: normalizeSpatialNumber(body.confidenceScore ?? body.confidence, cluster.confidenceScore, 0, 1)
+  });
+
+  const updated = await getSpatialClusterById(env, auth.record.id, cluster.id);
+  return json({
+    ok: true,
+    spatialCluster: toSpatialClusterClient(updated, { includeEvidence: true })
+  }, 200, corsHeaders);
+}
+
+async function updateHostSpatialPlacement(request, env, url, corsHeaders, layoutId, placementId) {
+  const auth = await getAuthorizedSpatialLayout(request, env, url, layoutId, corsHeaders);
+  if (auth.response) return auth.response;
+
+  const placement = await getSpatialPlacementById(env, auth.record.id, placementId);
+  if (!placement) {
+    return json({ ok: false, message: 'Spatial placement not found for this layout.' }, 404, corsHeaders);
+  }
+
+  const body = await request.json().catch(() => ({}));
+  const nextClusterId = body.clusterId === undefined ? placement.clusterId : cleanText(body.clusterId, 80);
+  const cluster = await getSpatialClusterById(env, auth.record.id, nextClusterId);
+  if (!cluster) {
+    return json({ ok: false, message: 'Spatial placement cluster must belong to this layout.' }, 400, corsHeaders);
+  }
+
+  const position = body.position && typeof body.position === 'object' ? body.position : {};
+  const rotation = body.rotation && typeof body.rotation === 'object' ? body.rotation : {};
+  await updateSpatialPlacementRecord(env, auth.record.id, placement.id, {
+    clusterId: cluster.id,
+    routeOrder: normalizeSpatialRouteOrder(body.routeOrder, placement.routeOrder),
+    positionX: normalizeSpatialNumber(body.positionX ?? body.position_x ?? position.x, placement.positionX, -100, 100),
+    positionY: normalizeSpatialNumber(body.positionY ?? body.position_y ?? position.y, placement.positionY, -100, 100),
+    positionZ: normalizeSpatialNumber(body.positionZ ?? body.position_z ?? position.z, placement.positionZ, -100, 100),
+    rotationX: normalizeSpatialNumber(body.rotationX ?? body.rotation_x ?? rotation.x, placement.rotationX, -Math.PI * 2, Math.PI * 2),
+    rotationY: normalizeSpatialNumber(body.rotationY ?? body.rotation_y ?? rotation.y, placement.rotationY, -Math.PI * 2, Math.PI * 2),
+    rotationZ: normalizeSpatialNumber(body.rotationZ ?? body.rotation_z ?? rotation.z, placement.rotationZ, -Math.PI * 2, Math.PI * 2),
+    scale: normalizeSpatialNumber(body.scale, placement.scale, 0.1, 4),
+    confidenceScore: normalizeSpatialNumber(body.confidenceScore ?? body.confidence, placement.confidenceScore, 0, 1)
+  });
+
+  const updated = await getSpatialPlacementById(env, auth.record.id, placement.id);
+  return json({
+    ok: true,
+    spatialPlacement: toSpatialPlacementClient(updated, { includeEvidence: true })
+  }, 200, corsHeaders);
+}
+
+async function publishHostSpatialLayout(request, env, url, corsHeaders, layoutId) {
+  const auth = await getAuthorizedSpatialLayout(request, env, url, layoutId, corsHeaders);
+  if (auth.response) return auth.response;
+
+  if (auth.record.status === 'archived') {
+    return json({ ok: false, message: 'Archived spatial layouts cannot be published.' }, 400, corsHeaders);
+  }
+
+  const bundle = await publishSpatialLayout(env, auth.record);
+  return json({
+    ok: true,
+    ...toSpatialLayoutBundleClient(bundle, { includeEvidence: true })
+  }, 200, corsHeaders);
+}
+
+async function generateSpatialLayoutDraft(env, event, request) {
+  const [items, insightRows] = await Promise.all([
+    getTimeCapsuleItems(env, event.id, request, { visibleOnly: true }),
+    getEventMediaInsightRows(env, event.id)
+  ]);
+  const now = new Date().toISOString();
+  const draft = buildSpatialLayoutDraft(event.id, items, insightRows, now);
+  return saveSpatialLayoutDraft(env, event.id, draft);
+}
+
+function buildSpatialLayoutDraft(eventId, items, insightRows, now) {
+  const orderedItems = [...items].sort(compareSpatialItems);
+  const insightsBySubmissionId = new Map();
+  for (const row of insightRows) {
+    const submissionId = row.submissionId || row.submission_id;
+    if (submissionId && !insightsBySubmissionId.has(submissionId)) {
+      insightsBySubmissionId.set(submissionId, row);
+    }
+  }
+
+  const repeatedCue = selectRepeatedSpatialCue(insightRows);
+  const layoutMode = repeatedCue ? 'visual_cluster' : 'timeline_path';
+  const layoutId = crypto.randomUUID();
+  const clusterId = crypto.randomUUID();
+  const label = repeatedCue ? spatialCueLabel(repeatedCue.cue) : 'Story path';
+  const confidenceScore = repeatedCue ? 0.72 : 0.54;
+  const cluster = {
+    id: clusterId,
+    layoutId,
+    label,
+    summary: repeatedCue
+      ? `Moments grouped by the repeated ${repeatedCue.cue} visual cue.`
+      : 'Moments arranged in capsule order.',
+    routeOrder: 1,
+    anchorX: 0,
+    anchorY: 0,
+    anchorZ: 0,
+    confidenceScore,
+    evidenceJson: JSON.stringify({
+      layoutMode,
+      cue: repeatedCue?.cue || '',
+      source: repeatedCue ? repeatedCue.source : 'capsule_order',
+      matchedSubmissionIds: repeatedCue?.submissionIds || [],
+      itemCount: orderedItems.length
+    }),
+    createdAt: now,
+    updatedAt: now
+  };
+
+  const placements = orderedItems.map((item, index) => {
+    const insight = insightsBySubmissionId.get(item.submissionId);
+    const placementCue = insight && repeatedCue && spatialInsightHasCue(insight, repeatedCue.cue) ? repeatedCue.cue : '';
+    const geometry = spatialPlacementGeometry(index, orderedItems.length, layoutMode, item.mediaType);
+    return {
+      id: crypto.randomUUID(),
+      eventId,
+      layoutId,
+      clusterId,
+      itemId: item.id,
+      routeOrder: index + 1,
+      ...geometry,
+      confidenceScore: placementCue ? 0.72 : 0.5,
+      evidenceJson: JSON.stringify({
+        source: placementCue ? 'visual_cue' : 'capsule_order',
+        cue: placementCue,
+        submissionId: item.submissionId,
+        mediaType: item.mediaType || '',
+        sortOrder: Number(item.sortOrder || index + 1)
+      }),
+      createdAt: now,
+      updatedAt: now
+    };
+  });
+
+  return {
+    layout: {
+      id: layoutId,
+      eventId,
+      status: 'draft',
+      version: 1,
+      generationStatus: 'ready',
+      layoutMode,
+      confidenceScore,
+      inputFingerprint: buildSpatialInputFingerprint(orderedItems, insightRows),
+      generatorVersion: 1,
+      errorMessage: '',
+      publishedAt: null,
+      createdAt: now,
+      updatedAt: now
+    },
+    clusters: [cluster],
+    placements
+  };
+}
+
+async function saveSpatialLayoutDraft(env, eventId, draft) {
+  const now = new Date().toISOString();
+  await env.MOMENTS_DB.prepare(`
+    UPDATE time_capsule_spatial_layouts
+    SET status = 'archived', updated_at = ?
+    WHERE event_id = ? AND status = 'draft'
+  `).bind(now, eventId).run();
+
+  const layout = draft.layout;
+  await env.MOMENTS_DB.prepare(`
+    INSERT INTO time_capsule_spatial_layouts (
+      id, event_id, status, version, generation_status, layout_mode, confidence_score,
+      input_fingerprint, generator_version, error_message, published_at, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    layout.id,
+    eventId,
+    layout.status,
+    layout.version,
+    layout.generationStatus,
+    layout.layoutMode,
+    layout.confidenceScore,
+    layout.inputFingerprint,
+    layout.generatorVersion,
+    layout.errorMessage,
+    layout.publishedAt,
+    layout.createdAt || now,
+    layout.updatedAt || now
+  ).run();
+
+  for (const cluster of draft.clusters) {
+    await env.MOMENTS_DB.prepare(`
+      INSERT INTO time_capsule_spatial_clusters (
+        id, layout_id, label, summary, route_order, anchor_x, anchor_y, anchor_z,
+        confidence_score, evidence_json, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      cluster.id,
+      layout.id,
+      cluster.label,
+      cluster.summary,
+      cluster.routeOrder,
+      cluster.anchorX,
+      cluster.anchorY,
+      cluster.anchorZ,
+      cluster.confidenceScore,
+      cluster.evidenceJson,
+      cluster.createdAt || now,
+      cluster.updatedAt || now
+    ).run();
+  }
+
+  for (const placement of draft.placements) {
+    await env.MOMENTS_DB.prepare(`
+      INSERT INTO time_capsule_spatial_placements (
+        id, event_id, layout_id, cluster_id, time_capsule_item_id, route_order,
+        position_x, position_y, position_z, rotation_x, rotation_y, rotation_z,
+        scale, confidence_score, evidence_json, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      placement.id,
+      eventId,
+      layout.id,
+      placement.clusterId,
+      placement.itemId,
+      placement.routeOrder,
+      placement.positionX,
+      placement.positionY,
+      placement.positionZ,
+      placement.rotationX,
+      placement.rotationY,
+      placement.rotationZ,
+      placement.scale,
+      placement.confidenceScore,
+      placement.evidenceJson,
+      placement.createdAt || now,
+      placement.updatedAt || now
+    ).run();
+  }
+
+  return getSpatialLayoutBundleByLayoutId(env, layout.id);
+}
+
+async function publishSpatialLayout(env, layout) {
+  const now = new Date().toISOString();
+  await env.MOMENTS_DB.prepare(`
+    UPDATE time_capsule_spatial_layouts
+    SET status = 'archived', updated_at = ?
+    WHERE event_id = ? AND status = 'published' AND id != ?
+  `).bind(now, layout.eventId, layout.id).run();
+
+  await env.MOMENTS_DB.prepare(`
+    UPDATE time_capsule_spatial_layouts
+    SET status = 'published', published_at = ?, updated_at = ?
+    WHERE id = ?
+  `).bind(now, now, layout.id).run();
+
+  return getSpatialLayoutBundleByLayoutId(env, layout.id);
+}
+
+async function getPublishedSpatialLayoutBundle(env, eventId) {
+  return getSpatialLayoutBundleByStatus(env, eventId, 'published');
+}
+
+async function getSpatialLayoutBundleByStatus(env, eventId, status) {
+  const layout = await env.MOMENTS_DB.prepare(`
+    SELECT
+      id,
+      event_id AS eventId,
+      status,
+      version,
+      generation_status AS generationStatus,
+      layout_mode AS layoutMode,
+      confidence_score AS confidenceScore,
+      input_fingerprint AS inputFingerprint,
+      generator_version AS generatorVersion,
+      error_message AS errorMessage,
+      published_at AS publishedAt,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM time_capsule_spatial_layouts
+    WHERE event_id = ? AND status = ?
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `).bind(eventId, status).first();
+
+  if (!layout) return null;
+  return getSpatialLayoutBundleByLayoutId(env, layout.id, layout);
+}
+
+async function getSpatialLayoutBundleByLayoutId(env, layoutId, layoutRow = null) {
+  const layout = layoutRow || await getSpatialLayoutById(env, layoutId);
+  if (!layout) return null;
+
+  const [clusters, placements] = await Promise.all([
+    getSpatialClustersForLayout(env, layout.id),
+    getSpatialPlacementsForLayout(env, layout.id)
+  ]);
+
+  return { layout, clusters, placements };
+}
+
+async function getSpatialLayoutById(env, layoutId) {
+  return env.MOMENTS_DB.prepare(`
+    SELECT
+      id,
+      event_id AS eventId,
+      status,
+      version,
+      generation_status AS generationStatus,
+      layout_mode AS layoutMode,
+      confidence_score AS confidenceScore,
+      input_fingerprint AS inputFingerprint,
+      generator_version AS generatorVersion,
+      error_message AS errorMessage,
+      published_at AS publishedAt,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM time_capsule_spatial_layouts
+    WHERE id = ?
+  `).bind(layoutId).first();
+}
+
+async function getSpatialLayoutWithEvent(env, layoutId) {
+  return env.MOMENTS_DB.prepare(`
+    SELECT
+      l.id,
+      l.event_id AS eventId,
+      l.status,
+      l.version,
+      l.generation_status AS generationStatus,
+      l.layout_mode AS layoutMode,
+      l.confidence_score AS confidenceScore,
+      l.input_fingerprint AS inputFingerprint,
+      l.generator_version AS generatorVersion,
+      l.error_message AS errorMessage,
+      l.published_at AS publishedAt,
+      l.created_at AS createdAt,
+      l.updated_at AS updatedAt,
+      e.host_token AS hostToken,
+      e.admin_token AS eventAdminToken,
+      e.time_capsule_enabled AS timeCapsuleEnabled
+    FROM time_capsule_spatial_layouts l
+    INNER JOIN events e ON e.id = l.event_id
+    WHERE l.id = ?
+  `).bind(layoutId).first();
+}
+
+async function getSpatialClustersForLayout(env, layoutId) {
+  const result = await env.MOMENTS_DB.prepare(`
+    SELECT
+      id,
+      layout_id AS layoutId,
+      label,
+      summary,
+      route_order AS routeOrder,
+      anchor_x AS anchorX,
+      anchor_y AS anchorY,
+      anchor_z AS anchorZ,
+      confidence_score AS confidenceScore,
+      evidence_json AS evidenceJson,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM time_capsule_spatial_clusters
+    WHERE layout_id = ?
+    ORDER BY route_order ASC, created_at ASC
+  `).bind(layoutId).all();
+
+  return result.results || [];
+}
+
+async function getSpatialClusterById(env, layoutId, clusterId) {
+  return env.MOMENTS_DB.prepare(`
+    SELECT
+      id,
+      layout_id AS layoutId,
+      label,
+      summary,
+      route_order AS routeOrder,
+      anchor_x AS anchorX,
+      anchor_y AS anchorY,
+      anchor_z AS anchorZ,
+      confidence_score AS confidenceScore,
+      evidence_json AS evidenceJson,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM time_capsule_spatial_clusters
+    WHERE layout_id = ? AND id = ?
+  `).bind(layoutId, clusterId).first();
+}
+
+async function getSpatialPlacementsForLayout(env, layoutId) {
+  const result = await env.MOMENTS_DB.prepare(`
+    SELECT
+      id,
+      event_id AS eventId,
+      layout_id AS layoutId,
+      cluster_id AS clusterId,
+      time_capsule_item_id AS itemId,
+      route_order AS routeOrder,
+      position_x AS positionX,
+      position_y AS positionY,
+      position_z AS positionZ,
+      rotation_x AS rotationX,
+      rotation_y AS rotationY,
+      rotation_z AS rotationZ,
+      scale,
+      confidence_score AS confidenceScore,
+      evidence_json AS evidenceJson,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM time_capsule_spatial_placements
+    WHERE layout_id = ?
+    ORDER BY route_order ASC, created_at ASC
+  `).bind(layoutId).all();
+
+  return result.results || [];
+}
+
+async function getSpatialPlacementById(env, layoutId, placementId) {
+  return env.MOMENTS_DB.prepare(`
+    SELECT
+      id,
+      event_id AS eventId,
+      layout_id AS layoutId,
+      cluster_id AS clusterId,
+      time_capsule_item_id AS itemId,
+      route_order AS routeOrder,
+      position_x AS positionX,
+      position_y AS positionY,
+      position_z AS positionZ,
+      rotation_x AS rotationX,
+      rotation_y AS rotationY,
+      rotation_z AS rotationZ,
+      scale,
+      confidence_score AS confidenceScore,
+      evidence_json AS evidenceJson,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM time_capsule_spatial_placements
+    WHERE layout_id = ? AND id = ?
+  `).bind(layoutId, placementId).first();
+}
+
+async function updateSpatialLayoutRecord(env, layoutId, next) {
+  await env.MOMENTS_DB.prepare(`
+    UPDATE time_capsule_spatial_layouts
+    SET layout_mode = ?, confidence_score = ?, error_message = ?, updated_at = ?
+    WHERE id = ?
+  `).bind(
+    next.layoutMode,
+    next.confidenceScore,
+    next.errorMessage,
+    new Date().toISOString(),
+    layoutId
+  ).run();
+}
+
+async function updateSpatialClusterRecord(env, layoutId, clusterId, next) {
+  await env.MOMENTS_DB.prepare(`
+    UPDATE time_capsule_spatial_clusters
+    SET label = ?, summary = ?, route_order = ?, anchor_x = ?, anchor_y = ?, anchor_z = ?,
+      confidence_score = ?, updated_at = ?
+    WHERE layout_id = ? AND id = ?
+  `).bind(
+    next.label || 'Story path',
+    next.summary || '',
+    next.routeOrder,
+    next.anchorX,
+    next.anchorY,
+    next.anchorZ,
+    next.confidenceScore,
+    new Date().toISOString(),
+    layoutId,
+    clusterId
+  ).run();
+}
+
+async function updateSpatialPlacementRecord(env, layoutId, placementId, next) {
+  await env.MOMENTS_DB.prepare(`
+    UPDATE time_capsule_spatial_placements
+    SET cluster_id = ?, route_order = ?, position_x = ?, position_y = ?, position_z = ?,
+      rotation_x = ?, rotation_y = ?, rotation_z = ?, scale = ?, confidence_score = ?, updated_at = ?
+    WHERE layout_id = ? AND id = ?
+  `).bind(
+    next.clusterId,
+    next.routeOrder,
+    next.positionX,
+    next.positionY,
+    next.positionZ,
+    next.rotationX,
+    next.rotationY,
+    next.rotationZ,
+    next.scale,
+    next.confidenceScore,
+    new Date().toISOString(),
+    layoutId,
+    placementId
+  ).run();
+}
+
+async function getAuthorizedSpatialEvent(request, env, url, eventId, corsHeaders) {
+  const event = await getEventById(env, eventId);
+  const token = getHostOrAdminAccessToken(request, url);
+
+  if (!event || !isAuthorizedForSpatialEvent(event, token, env)) {
+    return { response: json({ ok: false, message: 'This host gallery link is not valid.' }, 403, corsHeaders) };
+  }
+
+  if (!isTimeCapsuleEnabled(event)) {
+    return { response: json({ ok: false, message: 'Wallflower Time Capsule is not enabled for this event.' }, 404, corsHeaders) };
+  }
+
+  return { record: event };
+}
+
+async function getAuthorizedSpatialLayout(request, env, url, layoutId, corsHeaders) {
+  const layout = await getSpatialLayoutWithEvent(env, layoutId);
+  const token = getHostOrAdminAccessToken(request, url);
+
+  if (!layout || !isAuthorizedForSpatialLayout(layout, token, env)) {
+    return { response: json({ ok: false, message: 'This host gallery link is not valid.' }, 403, corsHeaders) };
+  }
+
+  if (!isTimeCapsuleEnabled(layout)) {
+    return { response: json({ ok: false, message: 'Wallflower Time Capsule is not enabled for this event.' }, 404, corsHeaders) };
+  }
+
+  return { record: layout };
+}
+
+function toSpatialLayoutBundleClient(bundle, options = {}) {
+  return {
+    spatialLayout: toSpatialLayoutClient(bundle.layout),
+    spatialClusters: bundle.clusters.map((row) => toSpatialClusterClient(row, options)),
+    spatialPlacements: bundle.placements.map((row) => toSpatialPlacementClient(row, options))
+  };
+}
+
+function filterSpatialBundleForGuestItems(bundle, items) {
+  const visibleItemIds = new Set(items.map((item) => item.id));
+  const placements = bundle.placements.filter((row) => visibleItemIds.has(row.itemId || row.timeCapsuleItemId || row.time_capsule_item_id));
+  const visibleClusterIds = new Set(placements.map((row) => row.clusterId || row.cluster_id));
+  return {
+    layout: bundle.layout,
+    clusters: bundle.clusters.filter((row) => visibleClusterIds.has(row.id)),
+    placements
+  };
+}
+
+function toSpatialLayoutClient(row) {
+  return {
+    id: row.id,
+    eventId: row.eventId || row.event_id,
+    status: row.status || 'draft',
+    version: Number(row.version || 1),
+    generationStatus: row.generationStatus || row.generation_status || 'ready',
+    layoutMode: row.layoutMode || row.layout_mode || 'timeline_path',
+    confidenceScore: Number(row.confidenceScore ?? row.confidence_score ?? 0),
+    inputFingerprint: row.inputFingerprint || row.input_fingerprint || '',
+    generatorVersion: Number(row.generatorVersion || row.generator_version || 1),
+    errorMessage: row.errorMessage || row.error_message || '',
+    publishedAt: row.publishedAt || row.published_at || '',
+    createdAt: row.createdAt || row.created_at || '',
+    updatedAt: row.updatedAt || row.updated_at || ''
+  };
+}
+
+function toSpatialClusterClient(row, options = {}) {
+  const client = {
+    id: row.id,
+    layoutId: row.layoutId || row.layout_id,
+    label: row.label || 'Story path',
+    summary: row.summary || '',
+    routeOrder: Number(row.routeOrder ?? row.route_order ?? 0),
+    anchor: {
+      x: Number(row.anchorX ?? row.anchor_x ?? 0),
+      y: Number(row.anchorY ?? row.anchor_y ?? 0),
+      z: Number(row.anchorZ ?? row.anchor_z ?? 0)
+    },
+    confidenceScore: Number(row.confidenceScore ?? row.confidence_score ?? 0)
+  };
+
+  if (options.includeEvidence) {
+    client.evidence = parseJsonObject(row.evidenceJson || row.evidence_json || '{}');
+  }
+
+  return client;
+}
+
+function toSpatialPlacementClient(row, options = {}) {
+  const client = {
+    id: row.id,
+    eventId: row.eventId || row.event_id,
+    layoutId: row.layoutId || row.layout_id,
+    itemId: row.itemId || row.timeCapsuleItemId || row.time_capsule_item_id,
+    clusterId: row.clusterId || row.cluster_id,
+    routeOrder: Number(row.routeOrder ?? row.route_order ?? 0),
+    position: {
+      x: Number(row.positionX ?? row.position_x ?? 0),
+      y: Number(row.positionY ?? row.position_y ?? 0),
+      z: Number(row.positionZ ?? row.position_z ?? 0)
+    },
+    rotation: {
+      x: Number(row.rotationX ?? row.rotation_x ?? 0),
+      y: Number(row.rotationY ?? row.rotation_y ?? 0),
+      z: Number(row.rotationZ ?? row.rotation_z ?? 0)
+    },
+    scale: Number(row.scale || 1),
+    confidenceScore: Number(row.confidenceScore ?? row.confidence_score ?? 0)
+  };
+
+  if (options.includeEvidence) {
+    client.evidence = parseJsonObject(row.evidenceJson || row.evidence_json || '{}');
+  }
+
+  return client;
+}
+
+function selectRepeatedSpatialCue(insightRows) {
+  const counts = new Map();
+  const sourcePriority = {
+    backgroundCues: 0,
+    sceneTags: 1,
+    compositionTags: 2,
+    lightingTags: 3,
+    dominantColors: 4
+  };
+
+  for (const row of insightRows) {
+    const submissionId = row.submissionId || row.submission_id || '';
+    const seenForSubmission = new Set();
+    for (const source of Object.keys(sourcePriority)) {
+      const cues = parseJsonArray(row[source] || row[toSnakeCase(source)]);
+      for (const cue of cues) {
+        const normalized = cleanText(cue, 80).toLowerCase();
+        if (!normalized || seenForSubmission.has(normalized)) continue;
+        seenForSubmission.add(normalized);
+        const current = counts.get(normalized) || {
+          cue: normalized,
+          count: 0,
+          source,
+          priority: sourcePriority[source],
+          submissionIds: []
+        };
+        current.count += 1;
+        if (submissionId) current.submissionIds.push(submissionId);
+        counts.set(normalized, current);
+      }
+    }
+  }
+
+  return [...counts.values()]
+    .filter((entry) => entry.count >= 2)
+    .sort((left, right) => right.count - left.count || left.priority - right.priority || left.cue.localeCompare(right.cue))[0] || null;
+}
+
+function spatialInsightHasCue(insight, cue) {
+  const normalizedCue = cleanText(cue, 80).toLowerCase();
+  return ['backgroundCues', 'sceneTags', 'compositionTags', 'lightingTags', 'dominantColors'].some((key) => (
+    parseJsonArray(insight[key] || insight[toSnakeCase(key)])
+      .some((value) => cleanText(value, 80).toLowerCase() === normalizedCue)
+  ));
+}
+
+function spatialCueLabel(cue) {
+  const normalized = cleanText(cue, 80).toLowerCase();
+  if (!normalized) return 'Moments';
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function compareSpatialItems(left, right) {
+  const leftOrder = Number(left.sortOrder || 0);
+  const rightOrder = Number(right.sortOrder || 0);
+  if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+
+  const leftDate = new Date(left.capturedAt || left.createdAt || 0).getTime();
+  const rightDate = new Date(right.capturedAt || right.createdAt || 0).getTime();
+  if (leftDate !== rightDate) return leftDate - rightDate;
+
+  return String(left.id || '').localeCompare(String(right.id || ''));
+}
+
+function spatialPlacementGeometry(index, total, layoutMode, mediaType) {
+  if (layoutMode === 'visual_cluster') {
+    const angle = index * 2.399963229728653;
+    const radius = 1.15 + Math.floor(index / 8) * 0.42;
+    return {
+      positionX: roundSpatial(Math.cos(angle) * radius),
+      positionY: roundSpatial(((index % 3) - 1) * 0.16),
+      positionZ: roundSpatial(Math.sin(angle) * radius),
+      rotationX: 0,
+      rotationY: roundSpatial(-angle),
+      rotationZ: 0,
+      scale: mediaType === 'audio' ? 0.86 : 1
+    };
+  }
+
+  const center = (Math.max(total, 1) - 1) / 2;
+  const offset = index - center;
+  return {
+    positionX: roundSpatial(offset * 1.28),
+    positionY: roundSpatial(Math.sin(index * 0.9) * 0.12),
+    positionZ: roundSpatial(index * 0.48),
+    rotationX: 0,
+    rotationY: roundSpatial(offset * -0.08),
+    rotationZ: 0,
+    scale: mediaType === 'audio' ? 0.88 : 1
+  };
+}
+
+function buildSpatialInputFingerprint(items, insightRows) {
+  const itemPart = items.map((item) => [
+    item.id,
+    item.submissionId,
+    item.sortOrder,
+    item.updatedAt || item.capturedAt || item.createdAt || ''
+  ].join(':')).join('|');
+  const cuePart = insightRows.map((row) => [
+    row.submissionId || row.submission_id,
+    parseJsonArray(row.backgroundCues || row.background_cues).join(','),
+    parseJsonArray(row.sceneTags || row.scene_tags).join(','),
+    parseJsonArray(row.lightingTags || row.lighting_tags).join(','),
+    parseJsonArray(row.dominantColors || row.dominant_colors).join(',')
+  ].join(':')).sort().join('|');
+  return cleanText(`${itemPart}::${cuePart}`, 700);
+}
+
+function roundSpatial(value) {
+  return Number(Number(value || 0).toFixed(4));
+}
+
+function normalizeSpatialNumber(value, fallback, min, max) {
+  const number = normalizeOptionalNumber(value);
+  if (number === null) return Number(fallback || 0);
+  return Math.max(min, Math.min(max, roundSpatial(number)));
+}
+
+function normalizeSpatialRouteOrder(value, fallback) {
+  const number = normalizeOptionalInteger(value);
+  return number === null ? Number(fallback || 0) : number;
+}
+
+function isTimeCapsuleEnabled(row) {
+  return row?.timeCapsuleEnabled === true
+    || Number(row?.timeCapsuleEnabled || row?.time_capsule_enabled || 0) === 1;
+}
+
+function getHostOrAdminAccessToken(request, url) {
+  const auth = request.headers.get('Authorization') || '';
+  const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7) : '';
+  return request.headers.get('X-Host-Token')
+    || request.headers.get('X-Admin-Token')
+    || bearer
+    || url.searchParams.get('token')
+    || url.searchParams.get('adminToken')
+    || '';
+}
+
+function isAuthorizedForSpatialEvent(event, token, env) {
+  if (!token) return false;
+  return token === event.hostToken || token === event.adminToken || token === env.MOMENTS_ADMIN_TOKEN;
+}
+
+function isAuthorizedForSpatialLayout(layout, token, env) {
+  if (!token) return false;
+  return token === layout.hostToken || token === layout.eventAdminToken || token === env.MOMENTS_ADMIN_TOKEN;
+}
+
+function toSnakeCase(value) {
+  return String(value || '').replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 }
 
 async function updateHostSubmission(request, env, url, corsHeaders, submissionId, ctx) {

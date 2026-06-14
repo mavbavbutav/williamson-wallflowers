@@ -257,6 +257,98 @@ test('host curates approved submissions and publishes a private capsule', async 
   assert.equal(viewerPayload.items[0].title, 'Flower wall smiles');
 });
 
+test('host can generate and publish an adaptive spatial layout', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    submissions: [
+      approvedSubmission({ id: 'photo-1', createdAt: '2026-09-19T20:00:00.000Z' }),
+      approvedSubmission({ id: 'photo-2', createdAt: '2026-09-19T20:10:00.000Z' }),
+      approvedSubmission({ id: 'audio-1', media_type: 'audio', mediaType: 'audio', mime_type: 'audio/mpeg', mimeType: 'audio/mpeg', createdAt: '2026-09-19T20:12:00.000Z' })
+    ],
+    items: [
+      capsuleItem({ id: 'item-1', submissionId: 'photo-1', sortOrder: 1, capturedAt: '2026-09-19T20:00:00.000Z' }),
+      capsuleItem({ id: 'item-2', submissionId: 'photo-2', sortOrder: 2, capturedAt: '2026-09-19T20:10:00.000Z' }),
+      capsuleItem({ id: 'item-3', submissionId: 'audio-1', sortOrder: 3, capturedAt: '2026-09-19T20:12:00.000Z' })
+    ],
+    insights: [
+      mediaInsight({ submissionId: 'photo-1', backgroundCues: ['soft gold backdrop'], lightingTags: ['warm'], dominantColors: ['gold'] }),
+      mediaInsight({ submissionId: 'photo-2', backgroundCues: ['soft gold backdrop'], lightingTags: ['warm'], dominantColors: ['gold'] })
+    ]
+  });
+
+  const generateResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/events/event-1/spatial-layouts/generate',
+    {},
+    { Authorization: 'Bearer host-token' }
+  ), envWithDb(db));
+  const generated = await generateResponse.json();
+
+  assert.equal(generateResponse.status, 201);
+  assert.equal(generated.spatialLayout.status, 'draft');
+  assert.equal(generated.spatialLayout.layoutMode, 'visual_cluster');
+  assert.equal(generated.spatialClusters.length >= 1, true);
+  assert.equal(generated.spatialPlacements.length, 3);
+  assert.ok(generated.spatialPlacements.find((placement) => placement.itemId === 'item-3'));
+
+  const publishResponse = await worker.fetch(jsonRequest(
+    `/moments-api/host/spatial-layouts/${generated.spatialLayout.id}/publish`,
+    {},
+    { Authorization: 'Bearer host-token' }
+  ), envWithDb(db));
+  const published = await publishResponse.json();
+
+  assert.equal(publishResponse.status, 200);
+  assert.equal(published.spatialLayout.status, 'published');
+});
+
+test('published capsule includes guest-safe spatial layout without private evidence', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    submissions: [approvedSubmission({ id: 'photo-1' })],
+    items: [capsuleItem({ id: 'item-1', submissionId: 'photo-1' })],
+    layouts: [spatialLayout({ id: 'layout-published', status: 'published' })],
+    clusters: [spatialCluster({ id: 'cluster-1', layoutId: 'layout-published', evidenceJson: '{"gps":[36,-86]}' })],
+    placements: [spatialPlacement({ id: 'placement-1', layoutId: 'layout-published', clusterId: 'cluster-1', itemId: 'item-1', evidenceJson: '{"rawGps":"secret"}' })]
+  });
+
+  const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/capsules/event-1', {
+    headers: { Authorization: 'Bearer share-token' }
+  }), envWithDb(db));
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.spatialLayout.status, 'published');
+  assert.equal(payload.spatialClusters[0].evidence, undefined);
+  assert.equal(payload.spatialPlacements[0].evidence, undefined);
+  assert.equal(JSON.stringify(payload).includes('rawGps'), false);
+});
+
+test('spatial generator falls back to timeline path when visual evidence is weak', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    submissions: [
+      approvedSubmission({ id: 'photo-1', createdAt: '2026-09-19T20:00:00.000Z' }),
+      approvedSubmission({ id: 'photo-2', createdAt: '2026-09-19T20:25:00.000Z' })
+    ],
+    items: [
+      capsuleItem({ id: 'item-1', submissionId: 'photo-1', sortOrder: 1 }),
+      capsuleItem({ id: 'item-2', submissionId: 'photo-2', sortOrder: 2 })
+    ]
+  });
+
+  const response = await worker.fetch(jsonRequest(
+    '/moments-api/host/events/event-1/spatial-layouts/generate',
+    {},
+    { Authorization: 'Bearer host-token' }
+  ), envWithDb(db));
+  const payload = await response.json();
+
+  assert.equal(response.status, 201);
+  assert.equal(payload.spatialLayout.layoutMode, 'timeline_path');
+  assert.equal(payload.spatialClusters.length, 1);
+  assert.match(payload.spatialClusters[0].label, /Story|Sequence|Moments/);
+});
+
 function jsonRequest(path, body, headers = {}, method = 'POST') {
   return new Request(`https://williamsonwallflowers.com${path}`, {
     method,
@@ -278,6 +370,28 @@ function envWithDb(db) {
       head: async () => null,
       delete: async () => undefined
     }
+  };
+}
+
+function timeCapsuleEvent(overrides = {}) {
+  return {
+    id: 'event-1',
+    name: 'The Smith Wedding',
+    eventDate: '2026-09-19',
+    hostName: 'Taylor',
+    hostEmail: 'taylor@example.com',
+    hostToken: 'host-token',
+    adminToken: 'event-admin-token',
+    status: 'active',
+    retentionExpiresAt: '2027-09-19T23:59:59.000Z',
+    createdAt: '2026-05-01T00:00:00.000Z',
+    updatedAt: '2026-05-01T00:00:00.000Z',
+    timeCapsuleEnabled: true,
+    timeCapsuleStatus: 'published',
+    timeCapsuleTitle: 'The Smith Wedding Time Capsule',
+    timeCapsuleShareToken: 'share-token',
+    timeCapsulePublishedAt: '2026-05-01T00:00:00.000Z',
+    ...overrides
   };
 }
 
@@ -314,6 +428,175 @@ function approvedSubmission(overrides = {}) {
   };
 }
 
+function capsuleItem(overrides = {}) {
+  const eventId = overrides.eventId || overrides.event_id || 'event-1';
+  const submissionId = overrides.submissionId || overrides.submission_id || 'photo-1';
+  return {
+    id: 'item-1',
+    event_id: eventId,
+    eventId,
+    submission_id: submissionId,
+    submissionId,
+    title: 'Flower wall smiles',
+    caption: '',
+    chapter: 'Guest moments',
+    captured_at: '2026-09-19T20:00:00.000Z',
+    capturedAt: '2026-09-19T20:00:00.000Z',
+    location: '',
+    sort_order: 1,
+    sortOrder: 1,
+    is_visible: 1,
+    isVisible: 1,
+    created_at: '2026-09-19T20:00:00.000Z',
+    createdAt: '2026-09-19T20:00:00.000Z',
+    updated_at: '2026-09-19T20:00:00.000Z',
+    updatedAt: '2026-09-19T20:00:00.000Z',
+    ...overrides
+  };
+}
+
+function mediaInsight(overrides = {}) {
+  const eventId = overrides.eventId || overrides.event_id || 'event-1';
+  const submissionId = overrides.submissionId || overrides.submission_id || 'photo-1';
+  const dominantColors = overrides.dominantColors || ['gold'];
+  const sceneTags = overrides.sceneTags || [];
+  const lightingTags = overrides.lightingTags || [];
+  const compositionTags = overrides.compositionTags || [];
+  const backgroundCues = overrides.backgroundCues || [];
+  return {
+    submission_id: submissionId,
+    submissionId,
+    event_id: eventId,
+    eventId,
+    status: 'analyzed',
+    source_kind: 'photo',
+    sourceKind: 'photo',
+    vision_status: 'ready',
+    visionStatus: 'ready',
+    quality_score: 0.9,
+    qualityScore: 0.9,
+    people_count: 2,
+    peopleCount: 2,
+    face_count: 2,
+    faceCount: 2,
+    dominant_colors: JSON.stringify(dominantColors),
+    dominantColors: JSON.stringify(dominantColors),
+    scene_tags: JSON.stringify(sceneTags),
+    sceneTags: JSON.stringify(sceneTags),
+    lighting_tags: JSON.stringify(lightingTags),
+    lightingTags: JSON.stringify(lightingTags),
+    composition_tags: JSON.stringify(compositionTags),
+    compositionTags: JSON.stringify(compositionTags),
+    background_cues: JSON.stringify(backgroundCues),
+    backgroundCues: JSON.stringify(backgroundCues),
+    summary: '',
+    updated_at: '2026-09-19T20:20:00.000Z',
+    updatedAt: '2026-09-19T20:20:00.000Z',
+    ...overrides
+  };
+}
+
+function spatialLayout(overrides = {}) {
+  const eventId = overrides.eventId || overrides.event_id || 'event-1';
+  return {
+    id: 'layout-1',
+    event_id: eventId,
+    eventId,
+    status: 'draft',
+    version: 1,
+    generation_status: 'ready',
+    generationStatus: 'ready',
+    layout_mode: 'timeline_path',
+    layoutMode: 'timeline_path',
+    confidence_score: 0.5,
+    confidenceScore: 0.5,
+    input_fingerprint: 'test',
+    inputFingerprint: 'test',
+    generator_version: 1,
+    generatorVersion: 1,
+    error_message: '',
+    errorMessage: '',
+    published_at: null,
+    publishedAt: null,
+    created_at: '2026-09-19T20:30:00.000Z',
+    createdAt: '2026-09-19T20:30:00.000Z',
+    updated_at: '2026-09-19T20:30:00.000Z',
+    updatedAt: '2026-09-19T20:30:00.000Z',
+    ...overrides
+  };
+}
+
+function spatialCluster(overrides = {}) {
+  const layoutId = overrides.layoutId || overrides.layout_id || 'layout-1';
+  return {
+    id: 'cluster-1',
+    layout_id: layoutId,
+    layoutId,
+    label: 'Story path',
+    summary: '',
+    route_order: 1,
+    routeOrder: 1,
+    anchor_x: 0,
+    anchorX: 0,
+    anchor_y: 0,
+    anchorY: 0,
+    anchor_z: 0,
+    anchorZ: 0,
+    confidence_score: 0.5,
+    confidenceScore: 0.5,
+    evidence_json: '{}',
+    evidenceJson: '{}',
+    created_at: '2026-09-19T20:30:00.000Z',
+    createdAt: '2026-09-19T20:30:00.000Z',
+    updated_at: '2026-09-19T20:30:00.000Z',
+    updatedAt: '2026-09-19T20:30:00.000Z',
+    ...overrides
+  };
+}
+
+function spatialPlacement(overrides = {}) {
+  const eventId = overrides.eventId || overrides.event_id || 'event-1';
+  const layoutId = overrides.layoutId || overrides.layout_id || 'layout-1';
+  const clusterId = overrides.clusterId || overrides.cluster_id || 'cluster-1';
+  const itemId = overrides.itemId || overrides.time_capsule_item_id || overrides.timeCapsuleItemId || 'item-1';
+  return {
+    id: 'placement-1',
+    event_id: eventId,
+    eventId,
+    layout_id: layoutId,
+    layoutId,
+    cluster_id: clusterId,
+    clusterId,
+    time_capsule_item_id: itemId,
+    timeCapsuleItemId: itemId,
+    itemId,
+    route_order: 1,
+    routeOrder: 1,
+    position_x: 0,
+    positionX: 0,
+    position_y: 0,
+    positionY: 0,
+    position_z: 0,
+    positionZ: 0,
+    rotation_x: 0,
+    rotationX: 0,
+    rotation_y: 0,
+    rotationY: 0,
+    rotation_z: 0,
+    rotationZ: 0,
+    scale: 1,
+    confidence_score: 0.5,
+    confidenceScore: 0.5,
+    evidence_json: '{}',
+    evidenceJson: '{}',
+    created_at: '2026-09-19T20:30:00.000Z',
+    createdAt: '2026-09-19T20:30:00.000Z',
+    updated_at: '2026-09-19T20:30:00.000Z',
+    updatedAt: '2026-09-19T20:30:00.000Z',
+    ...overrides
+  };
+}
+
 async function readText(path) {
   const { readFile } = await import('node:fs/promises');
   return readFile(new URL(path, import.meta.url), 'utf8');
@@ -330,6 +613,10 @@ class FakeMomentsDb {
     this.events = seed.events ? seed.events.map((event) => ({ ...event })) : [];
     this.submissions = seed.submissions ? seed.submissions.map((submission) => ({ ...submission })) : [];
     this.items = seed.items ? seed.items.map((item) => ({ ...item })) : [];
+    this.insights = seed.insights ? seed.insights.map((insight) => ({ ...insight })) : [];
+    this.layouts = seed.layouts ? seed.layouts.map((layout) => ({ ...layout })) : [];
+    this.clusters = seed.clusters ? seed.clusters.map((cluster) => ({ ...cluster })) : [];
+    this.placements = seed.placements ? seed.placements.map((placement) => ({ ...placement })) : [];
   }
 
   prepare(sql) {
@@ -380,6 +667,39 @@ class FakeStatement {
       return this.buildCapsuleItem(this.db.items.find((item) => item.id === this.params[0])) || null;
     }
 
+    if (this.sql.includes('FROM time_capsule_spatial_layouts') && this.sql.includes('WHERE l.id = ?')) {
+      const layout = this.db.layouts.find((item) => item.id === this.params[0]);
+      const event = layout && this.db.events.find((item) => item.id === (layout.eventId || layout.event_id));
+      return layout && event
+        ? { ...this.buildSpatialLayout(layout), hostToken: event.hostToken, eventAdminToken: event.adminToken, timeCapsuleEnabled: event.timeCapsuleEnabled }
+        : null;
+    }
+
+    if (this.sql.includes('FROM time_capsule_spatial_layouts') && this.sql.includes('WHERE id = ?')) {
+      return this.buildSpatialLayout(this.db.layouts.find((item) => item.id === this.params[0])) || null;
+    }
+
+    if (this.sql.includes('FROM time_capsule_spatial_layouts') && this.sql.includes('WHERE event_id = ?')) {
+      const eventId = this.params[0];
+      const status = this.params[1] || (this.sql.includes("status = 'published'") ? 'published' : 'draft');
+      return this.db.layouts
+        .filter((layout) => (layout.eventId || layout.event_id) === eventId && layout.status === status)
+        .map((layout) => this.buildSpatialLayout(layout))
+        .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0] || null;
+    }
+
+    if (this.sql.includes('FROM time_capsule_spatial_clusters') && this.sql.includes('WHERE layout_id = ? AND id = ?')) {
+      return this.buildSpatialCluster(this.db.clusters.find((item) => (
+        (item.layoutId || item.layout_id) === this.params[0] && item.id === this.params[1]
+      ))) || null;
+    }
+
+    if (this.sql.includes('FROM time_capsule_spatial_placements') && this.sql.includes('WHERE layout_id = ? AND id = ?')) {
+      return this.buildSpatialPlacement(this.db.placements.find((item) => (
+        (item.layoutId || item.layout_id) === this.params[0] && item.id === this.params[1]
+      ))) || null;
+    }
+
     return null;
   }
 
@@ -399,6 +719,35 @@ class FakeStatement {
       const eventId = this.params[0];
       return {
         results: this.db.submissions.filter((item) => (item.event_id || item.eventId) === eventId && item.status !== 'deleted')
+      };
+    }
+
+    if (this.sql.includes('FROM submission_media_insights')) {
+      const eventId = this.params[0];
+      return {
+        results: this.db.insights
+          .filter((item) => (item.event_id || item.eventId) === eventId)
+          .map((item) => ({ ...item }))
+      };
+    }
+
+    if (this.sql.includes('FROM time_capsule_spatial_clusters')) {
+      const layoutId = this.params[0];
+      return {
+        results: this.db.clusters
+          .filter((item) => (item.layoutId || item.layout_id) === layoutId)
+          .map((item) => this.buildSpatialCluster(item))
+          .sort((a, b) => Number(a.routeOrder || 0) - Number(b.routeOrder || 0))
+      };
+    }
+
+    if (this.sql.includes('FROM time_capsule_spatial_placements')) {
+      const layoutId = this.params[0];
+      return {
+        results: this.db.placements
+          .filter((item) => (item.layoutId || item.layout_id) === layoutId)
+          .map((item) => this.buildSpatialPlacement(item))
+          .sort((a, b) => Number(a.routeOrder || 0) - Number(b.routeOrder || 0))
       };
     }
 
@@ -492,6 +841,261 @@ class FakeStatement {
       });
     }
 
+    if (this.sql.includes('INSERT INTO time_capsule_spatial_layouts')) {
+      const [
+        id,
+        eventId,
+        status,
+        version,
+        generationStatus,
+        layoutMode,
+        confidenceScore,
+        inputFingerprint,
+        generatorVersion,
+        errorMessage,
+        publishedAt,
+        createdAt,
+        updatedAt
+      ] = this.params;
+      this.db.layouts.push(spatialLayout({
+        id,
+        eventId,
+        event_id: eventId,
+        status,
+        version,
+        generationStatus,
+        generation_status: generationStatus,
+        layoutMode,
+        layout_mode: layoutMode,
+        confidenceScore,
+        confidence_score: confidenceScore,
+        inputFingerprint,
+        input_fingerprint: inputFingerprint,
+        generatorVersion,
+        generator_version: generatorVersion,
+        errorMessage,
+        error_message: errorMessage,
+        publishedAt,
+        published_at: publishedAt,
+        createdAt,
+        created_at: createdAt,
+        updatedAt,
+        updated_at: updatedAt
+      }));
+    }
+
+    if (this.sql.includes('INSERT INTO time_capsule_spatial_clusters')) {
+      const [
+        id,
+        layoutId,
+        label,
+        summary,
+        routeOrder,
+        anchorX,
+        anchorY,
+        anchorZ,
+        confidenceScore,
+        evidenceJson,
+        createdAt,
+        updatedAt
+      ] = this.params;
+      this.db.clusters.push(spatialCluster({
+        id,
+        layoutId,
+        layout_id: layoutId,
+        label,
+        summary,
+        routeOrder,
+        route_order: routeOrder,
+        anchorX,
+        anchor_x: anchorX,
+        anchorY,
+        anchor_y: anchorY,
+        anchorZ,
+        anchor_z: anchorZ,
+        confidenceScore,
+        confidence_score: confidenceScore,
+        evidenceJson,
+        evidence_json: evidenceJson,
+        createdAt,
+        created_at: createdAt,
+        updatedAt,
+        updated_at: updatedAt
+      }));
+    }
+
+    if (this.sql.includes('INSERT INTO time_capsule_spatial_placements')) {
+      const [
+        id,
+        eventId,
+        layoutId,
+        clusterId,
+        itemId,
+        routeOrder,
+        positionX,
+        positionY,
+        positionZ,
+        rotationX,
+        rotationY,
+        rotationZ,
+        scale,
+        confidenceScore,
+        evidenceJson,
+        createdAt,
+        updatedAt
+      ] = this.params;
+      this.db.placements.push(spatialPlacement({
+        id,
+        eventId,
+        event_id: eventId,
+        layoutId,
+        layout_id: layoutId,
+        clusterId,
+        cluster_id: clusterId,
+        itemId,
+        timeCapsuleItemId: itemId,
+        time_capsule_item_id: itemId,
+        routeOrder,
+        route_order: routeOrder,
+        positionX,
+        position_x: positionX,
+        positionY,
+        position_y: positionY,
+        positionZ,
+        position_z: positionZ,
+        rotationX,
+        rotation_x: rotationX,
+        rotationY,
+        rotation_y: rotationY,
+        rotationZ,
+        rotation_z: rotationZ,
+        scale,
+        confidenceScore,
+        confidence_score: confidenceScore,
+        evidenceJson,
+        evidence_json: evidenceJson,
+        createdAt,
+        created_at: createdAt,
+        updatedAt,
+        updated_at: updatedAt
+      }));
+    }
+
+    if (this.sql.includes('UPDATE time_capsule_spatial_layouts') && this.sql.includes("status = 'archived'")) {
+      const updatedAt = this.params[0];
+      const eventId = this.params[1];
+      const status = this.sql.includes("status = 'published'") ? 'published' : 'draft';
+      const keepId = this.params[2];
+      for (const layout of this.db.layouts) {
+        if ((layout.eventId || layout.event_id) === eventId && layout.status === status && (!keepId || layout.id !== keepId)) {
+          layout.status = 'archived';
+          layout.updatedAt = updatedAt;
+          layout.updated_at = updatedAt;
+        }
+      }
+    }
+
+    if (this.sql.includes('UPDATE time_capsule_spatial_layouts') && this.sql.includes("SET status = 'published'")) {
+      const [publishedAt, updatedAt, layoutId] = this.params;
+      const layout = this.db.layouts.find((item) => item.id === layoutId);
+      if (layout) {
+        layout.status = 'published';
+        layout.publishedAt = publishedAt;
+        layout.published_at = publishedAt;
+        layout.updatedAt = updatedAt;
+        layout.updated_at = updatedAt;
+      }
+    }
+
+    if (this.sql.includes('UPDATE time_capsule_spatial_layouts') && this.sql.includes('layout_mode = ?')) {
+      const [layoutMode, confidenceScore, errorMessage, updatedAt, layoutId] = this.params;
+      const layout = this.db.layouts.find((item) => item.id === layoutId);
+      if (layout) {
+        layout.layoutMode = layoutMode;
+        layout.layout_mode = layoutMode;
+        layout.confidenceScore = confidenceScore;
+        layout.confidence_score = confidenceScore;
+        layout.errorMessage = errorMessage;
+        layout.error_message = errorMessage;
+        layout.updatedAt = updatedAt;
+        layout.updated_at = updatedAt;
+      }
+    }
+
+    if (this.sql.includes('UPDATE time_capsule_spatial_clusters')) {
+      const [
+        label,
+        summary,
+        routeOrder,
+        anchorX,
+        anchorY,
+        anchorZ,
+        confidenceScore,
+        updatedAt,
+        layoutId,
+        clusterId
+      ] = this.params;
+      const cluster = this.db.clusters.find((item) => (item.layoutId || item.layout_id) === layoutId && item.id === clusterId);
+      if (cluster) {
+        cluster.label = label;
+        cluster.summary = summary;
+        cluster.routeOrder = routeOrder;
+        cluster.route_order = routeOrder;
+        cluster.anchorX = anchorX;
+        cluster.anchor_x = anchorX;
+        cluster.anchorY = anchorY;
+        cluster.anchor_y = anchorY;
+        cluster.anchorZ = anchorZ;
+        cluster.anchor_z = anchorZ;
+        cluster.confidenceScore = confidenceScore;
+        cluster.confidence_score = confidenceScore;
+        cluster.updatedAt = updatedAt;
+        cluster.updated_at = updatedAt;
+      }
+    }
+
+    if (this.sql.includes('UPDATE time_capsule_spatial_placements')) {
+      const [
+        clusterId,
+        routeOrder,
+        positionX,
+        positionY,
+        positionZ,
+        rotationX,
+        rotationY,
+        rotationZ,
+        scale,
+        confidenceScore,
+        updatedAt,
+        layoutId,
+        placementId
+      ] = this.params;
+      const placement = this.db.placements.find((item) => (item.layoutId || item.layout_id) === layoutId && item.id === placementId);
+      if (placement) {
+        placement.clusterId = clusterId;
+        placement.cluster_id = clusterId;
+        placement.routeOrder = routeOrder;
+        placement.route_order = routeOrder;
+        placement.positionX = positionX;
+        placement.position_x = positionX;
+        placement.positionY = positionY;
+        placement.position_y = positionY;
+        placement.positionZ = positionZ;
+        placement.position_z = positionZ;
+        placement.rotationX = rotationX;
+        placement.rotation_x = rotationX;
+        placement.rotationY = rotationY;
+        placement.rotation_y = rotationY;
+        placement.rotationZ = rotationZ;
+        placement.rotation_z = rotationZ;
+        placement.scale = scale;
+        placement.confidenceScore = confidenceScore;
+        placement.confidence_score = confidenceScore;
+        placement.updatedAt = updatedAt;
+        placement.updated_at = updatedAt;
+      }
+    }
+
     return { success: true };
   }
 
@@ -523,6 +1127,62 @@ class FakeStatement {
       deletedAt: submission.deleted_at || submission.deletedAt,
       submissionCreatedAt: submission.created_at || submission.createdAt,
       submissionUpdatedAt: submission.updated_at || submission.updatedAt
+    };
+  }
+
+  buildSpatialLayout(layout) {
+    if (!layout) return null;
+    return {
+      ...layout,
+      eventId: layout.eventId || layout.event_id,
+      generationStatus: layout.generationStatus || layout.generation_status,
+      layoutMode: layout.layoutMode || layout.layout_mode,
+      confidenceScore: layout.confidenceScore ?? layout.confidence_score,
+      inputFingerprint: layout.inputFingerprint || layout.input_fingerprint,
+      generatorVersion: layout.generatorVersion ?? layout.generator_version,
+      errorMessage: layout.errorMessage || layout.error_message || '',
+      publishedAt: layout.publishedAt || layout.published_at,
+      createdAt: layout.createdAt || layout.created_at,
+      updatedAt: layout.updatedAt || layout.updated_at
+    };
+  }
+
+  buildSpatialCluster(cluster) {
+    if (!cluster) return null;
+    return {
+      ...cluster,
+      layoutId: cluster.layoutId || cluster.layout_id,
+      routeOrder: cluster.routeOrder ?? cluster.route_order,
+      anchorX: cluster.anchorX ?? cluster.anchor_x,
+      anchorY: cluster.anchorY ?? cluster.anchor_y,
+      anchorZ: cluster.anchorZ ?? cluster.anchor_z,
+      confidenceScore: cluster.confidenceScore ?? cluster.confidence_score,
+      evidenceJson: cluster.evidenceJson || cluster.evidence_json || '{}',
+      createdAt: cluster.createdAt || cluster.created_at,
+      updatedAt: cluster.updatedAt || cluster.updated_at
+    };
+  }
+
+  buildSpatialPlacement(placement) {
+    if (!placement) return null;
+    return {
+      ...placement,
+      eventId: placement.eventId || placement.event_id,
+      layoutId: placement.layoutId || placement.layout_id,
+      clusterId: placement.clusterId || placement.cluster_id,
+      itemId: placement.itemId || placement.timeCapsuleItemId || placement.time_capsule_item_id,
+      timeCapsuleItemId: placement.timeCapsuleItemId || placement.time_capsule_item_id || placement.itemId,
+      routeOrder: placement.routeOrder ?? placement.route_order,
+      positionX: placement.positionX ?? placement.position_x,
+      positionY: placement.positionY ?? placement.position_y,
+      positionZ: placement.positionZ ?? placement.position_z,
+      rotationX: placement.rotationX ?? placement.rotation_x,
+      rotationY: placement.rotationY ?? placement.rotation_y,
+      rotationZ: placement.rotationZ ?? placement.rotation_z,
+      confidenceScore: placement.confidenceScore ?? placement.confidence_score,
+      evidenceJson: placement.evidenceJson || placement.evidence_json || '{}',
+      createdAt: placement.createdAt || placement.created_at,
+      updatedAt: placement.updatedAt || placement.updated_at
     };
   }
 }
