@@ -53,17 +53,29 @@ test('host Time Capsule includes adaptive 3D walk review controls', async () => 
   ]);
 
   assert.match(hostHtml, /id="spatialLayoutPanel"/);
+  assert.match(hostHtml, /id="spatialLayoutStatusPill"/);
+  assert.match(hostHtml, /id="spatialLayoutHint"/);
   assert.match(hostHtml, /id="generateSpatialLayoutButton"/);
+  assert.match(hostHtml, /id="refreshSpatialLayoutButton"/);
   assert.match(hostHtml, /id="publishSpatialLayoutButton"/);
   assert.match(hostHtml, /id="spatialClusterList"/);
+  assert.match(hostHtml, /id="spatialLayoutEmpty"/);
   assert.match(hostJs, /let spatialLayout = null/);
+  assert.match(hostJs, /let spatialClusters = \[\]/);
+  assert.match(hostJs, /let spatialPlacements = \[\]/);
   assert.match(hostJs, /function loadSpatialLayoutDraft/);
   assert.match(hostJs, /function generateSpatialLayout/);
   assert.match(hostJs, /function publishSpatialLayout/);
   assert.match(hostJs, /function renderSpatialLayoutReview/);
+  assert.match(hostJs, /function renderSpatialClusterCard/);
+  assert.match(hostJs, /function saveSpatialCluster/);
+  assert.match(hostJs, /\/host\/events\/\$\{encodeURIComponent\(eventId\)\}\/spatial-layouts\/draft/);
   assert.match(hostJs, /\/host\/events\/\$\{encodeURIComponent\(eventId\)\}\/spatial-layouts\/generate/);
   assert.match(hostJs, /\/host\/spatial-layouts\/\$\{encodeURIComponent\(spatialLayout\.id\)\}\/publish/);
+  assert.match(hostJs, /\/host\/spatial-layouts\/\$\{encodeURIComponent\(spatialLayout\.id\)\}\/clusters\/\$\{encodeURIComponent\(clusterId\)\}/);
   assert.match(styles, /\.spatial-layout-panel/);
+  assert.match(styles, /\.spatial-layout-actions/);
+  assert.match(styles, /\.spatial-cluster-list/);
   assert.match(styles, /\.spatial-cluster-card/);
 });
 
