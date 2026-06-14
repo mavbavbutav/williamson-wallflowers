@@ -5476,12 +5476,20 @@ tr:last-child td {
 
   .capsule-walk-copy {
     max-width: none;
-    padding: 1rem;
-    padding-bottom: 4.7rem;
+    max-height: min(34%, 232px);
+    overflow: hidden;
+    padding: 0.82rem 0.9rem calc(env(safe-area-inset-bottom) + 2.65rem);
   }
 
   .capsule-walk-copy strong {
-    font-size: 2rem;
+    font-size: 1.75rem;
+  }
+
+  .capsule-walk-copy p {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
   }
 
   .capsule-walk-controls {
