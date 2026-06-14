@@ -15,6 +15,18 @@ let spatialWalkStations = [];
 let spatialActiveStationIndex = 0;
 let spatialHoveredStationIndex = -1;
 let spatialWalkInteractionsBound = false;
+let spatialWalkLastTime = 0;
+let spatialWalkClock = 0;
+let spatialTourPlaying = true;
+let spatialTourProgress = 0;
+let spatialTourTarget = 0;
+let spatialTourHoldMs = 0;
+let spatialScrubProgress = 0;
+let spatialLastInteractionTime = 0;
+let spatialArrivalProgress = 1;
+let spatialWalkQuality = "high";
+const spatialPointerParallax = { x: 0, y: 0 };
+const spatialPointerParallaxTarget = { x: 0, y: 0 };
 let slideIndex = 0;
 let lastFocusedElement = null;
 let currentCapsuleView = "timeline";
@@ -44,6 +56,13 @@ const SPATIAL_CAMERA_PULLBACK = 8.6;
 const SPATIAL_CAMERA_HEIGHT = 2.15;
 const SPATIAL_STATION_FOCUS_HEIGHT = 1.35;
 const SPATIAL_NEAR_STATION_RADIUS = 2.35;
+const SPATIAL_TOUR_DWELL_MS = 2600;
+const SPATIAL_TOUR_TRAVEL_MS = 2600;
+const SPATIAL_TOUR_RESUME_MS = 6000;
+const SPATIAL_ARRIVAL_MS = 1700;
+const SPATIAL_IDLE_FLOAT = 0.07;
+const SPATIAL_PARALLAX_STRENGTH = 0.6;
+const SPATIAL_CAMERA_DAMP = 0.18;
 
 init();
 
@@ -62,8 +81,13 @@ async function init() {
     lastFeedScrollTop = nextScrollTop;
     scheduleFeedAutoplay();
   }, { passive: true });
-  qs("#capsuleWalk")?.addEventListener("scroll", requestSpatialWalkFrame, { passive: true });
+  qs("#capsuleWalk")?.addEventListener("scroll", handleSpatialWalkScroll, { passive: true });
   qs("#capsuleWalkViewButton")?.addEventListener("click", () => openSpatialWalkStation(spatialActiveStationIndex));
+  qs("#capsuleWalkTourToggle")?.addEventListener("click", toggleSpatialTour);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopSpatialWalkLoop();
+    else if (currentCapsuleView === "walk" && spatialWalkScene) startSpatialWalkLoop();
+  });
   qs("#slideClose").addEventListener("click", closeSlide);
   qs("#slidePrev").addEventListener("click", () => changeSlide(-1));
   qs("#slideNext").addEventListener("click", () => changeSlide(1));
@@ -676,6 +700,7 @@ async function startSpatialWalkScene() {
   try {
     const THREE = await import("../vendor/three.module.js");
     buildSpatialWalkScene(THREE);
+    await buildSpatialWalkComposer(THREE);
     hideSpatialWalkFallback();
     resizeSpatialWalkScene();
     requestSpatialWalkFrame();
@@ -690,6 +715,7 @@ function buildSpatialWalkScene(THREE) {
   spatialWalkStations = stations;
   spatialActiveStationIndex = 0;
   spatialHoveredStationIndex = -1;
+  spatialWalkQuality = getWalkQuality();
 
   const renderer = new THREE.WebGLRenderer({
     canvas,
@@ -697,29 +723,42 @@ function buildSpatialWalkScene(THREE) {
     alpha: true,
     powerPreference: "high-performance"
   });
-  renderer.setClearColor(0x171514, 0);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.6));
+  renderer.setClearColor(0x0d0c0b, 1);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, spatialWalkQuality === "lite" ? 1.25 : 1.65));
   if (THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.04;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x171514, 16, Math.max(46, stations.length * 7));
+  scene.background = new THREE.Color(0x0d0c0b);
+  scene.fog = new THREE.Fog(0x0d0c0b, 13, Math.max(48, stations.length * 8));
 
-  const camera = new THREE.PerspectiveCamera(43, 1, 0.1, Math.max(110, stations.length * 14));
-  const ambient = new THREE.AmbientLight(0xfffaf5, 1.2);
-  const key = new THREE.DirectionalLight(0xf7d8c7, 2.45);
-  const rim = new THREE.DirectionalLight(0xc9d7cc, 1.3);
-  key.position.set(4, 7, 8);
-  rim.position.set(-5, 4, -8);
-  scene.add(ambient, key, rim);
+  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, Math.max(120, stations.length * 16));
+
+  // Gallery rig: low fill, warm key, cool rim, plus a moving spotlight pool.
+  const hemi = new THREE.HemisphereLight(0x3a4654, 0x140f0c, 0.55);
+  const key = new THREE.DirectionalLight(0xffe9d6, 0.55);
+  const rim = new THREE.DirectionalLight(0x9fb8c4, 0.45);
+  key.position.set(5, 9, 7);
+  rim.position.set(-6, 5, -9);
+  const spot = new THREE.SpotLight(0xfff2e2, spatialWalkQuality === "lite" ? 3.6 : 4.6, 0, 0.62, 0.55, 0);
+  const spotTarget = new THREE.Object3D();
+  const firstFocus = stations[0]?.focus || { x: 0, y: SPATIAL_STATION_FOCUS_HEIGHT, z: 0 };
+  spotTarget.position.set(firstFocus.x, firstFocus.y, firstFocus.z);
+  spot.position.set(firstFocus.x + 1.2, firstFocus.y + 3.6, firstFocus.z + 2.8);
+  spot.target = spotTarget;
+  scene.add(hemi, key, rim, spot, spotTarget);
 
   const routePoints = stations.map((station) => new THREE.Vector3(
     station.focus.x,
-    0.04,
+    0.02,
     station.focus.z
   ));
   const stationHitMeshes = [];
+  addGalleryFloor(THREE, scene, stations);
   addSpatialRouteRibbon(THREE, scene, routePoints);
   stations.forEach((station) => addSpatialStationMesh(THREE, scene, station, stationHitMeshes));
+  const dust = addGalleryDust(THREE, scene, stations);
 
   spatialWalkScene = {
     THREE,
@@ -730,23 +769,174 @@ function buildSpatialWalkScene(THREE) {
     stations,
     stationHitMeshes,
     raycaster: new THREE.Raycaster(),
-    pointer: new THREE.Vector2()
+    pointer: new THREE.Vector2(),
+    composer: null,
+    bloom: null,
+    spot,
+    spotTarget,
+    dust,
+    currentLookAt: new THREE.Vector3(firstFocus.x, firstFocus.y, firstFocus.z)
   };
+  camera.position.set(firstFocus.x, firstFocus.y + SPATIAL_CAMERA_HEIGHT, firstFocus.z + SPATIAL_CAMERA_PULLBACK);
   bindSpatialWalkInteractions(canvas);
+  playSpatialWalkArrival();
   updateSpatialWalkViewButton();
+  updateSpatialWalkOverlay();
 }
 
 function addSpatialRouteRibbon(THREE, scene, routePoints) {
   if (routePoints.length < 2) return;
 
   const curve = new THREE.CatmullRomCurve3(routePoints);
-  const geometry = new THREE.TubeGeometry(curve, Math.max(24, routePoints.length * 14), 0.018, 8, false);
+  const geometry = new THREE.TubeGeometry(curve, Math.max(24, routePoints.length * 14), 0.014, 8, false);
   const material = new THREE.MeshBasicMaterial({
     color: 0xf7d8c7,
     transparent: true,
-    opacity: 0.42
+    opacity: 0.22
   });
   scene.add(new THREE.Mesh(geometry, material));
+}
+
+let walkShadowTexture = null;
+let walkDustSprite = null;
+
+function getWalkQuality() {
+  const coarse = window.matchMedia?.("(pointer: coarse)")?.matches === true;
+  const small = (window.innerWidth || 1024) < 760;
+  return coarse || small ? "lite" : "high";
+}
+
+function spatialFloorCenterZ(stations) {
+  return -((Math.max(1, stations.length) - 1) * SPATIAL_STATION_SPACING) / 2;
+}
+
+function addGalleryFloor(THREE, scene, stations) {
+  const depth = Math.max(64, stations.length * SPATIAL_STATION_SPACING + 48);
+  const material = new THREE.MeshStandardMaterial({
+    color: 0x100d0c,
+    roughness: 0.44,
+    metalness: 0.2,
+    map: createFloorTexture(THREE)
+  });
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(72, depth), material);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(0, 0, spatialFloorCenterZ(stations));
+  scene.add(floor);
+}
+
+function createFloorTexture(THREE) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#0b0a09";
+  ctx.fillRect(0, 0, 256, 256);
+  const gradient = ctx.createRadialGradient(128, 128, 12, 128, 128, 150);
+  gradient.addColorStop(0, "rgba(64,55,48,0.85)");
+  gradient.addColorStop(1, "rgba(11,10,9,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 256, 256);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace || texture.colorSpace;
+  return texture;
+}
+
+function addStationContactShadow(THREE, scene, station) {
+  const size = Math.max(station.display.width, 1.6) * 1.5;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(size, size * 0.5),
+    new THREE.MeshBasicMaterial({
+      map: getSharedShadowTexture(THREE),
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    })
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(station.focus.x, 0.012, station.focus.z + 0.1);
+  scene.add(mesh);
+  station.contactShadow = mesh;
+}
+
+function addStationReflection(THREE, scene, station) {
+  if (spatialWalkQuality !== "high") return;
+  const material = new THREE.MeshBasicMaterial({
+    map: station.card.material.map,
+    transparent: true,
+    opacity: 0.14,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(station.display.width, station.display.height), material);
+  mesh.position.set(station.focus.x, -station.focus.y, station.focus.z);
+  mesh.rotation.set(station.rotation.x, station.rotation.y, station.rotation.z);
+  mesh.scale.y = -1;
+  scene.add(mesh);
+  station.reflection = mesh;
+}
+
+function addGalleryDust(THREE, scene, stations) {
+  const count = spatialWalkQuality === "lite" ? 120 : 320;
+  const depth = Math.max(40, stations.length * SPATIAL_STATION_SPACING + 20);
+  const positions = new Float32Array(count * 3);
+  for (let index = 0; index < count; index += 1) {
+    positions[index * 3] = (hashUnit(index * 3 + 1) - 0.5) * 22;
+    positions[index * 3 + 1] = hashUnit(index * 3 + 2) * 5.2 + 0.2;
+    positions[index * 3 + 2] = -hashUnit(index * 3 + 3) * depth + 4;
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.PointsMaterial({
+    color: 0xf7e6d2,
+    size: 0.05,
+    map: getSharedDustSprite(THREE),
+    transparent: true,
+    opacity: 0.5,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    sizeAttenuation: true
+  });
+  const points = new THREE.Points(geometry, material);
+  points.userData.baseY = positions.slice();
+  scene.add(points);
+  return points;
+}
+
+function getSharedShadowTexture(THREE) {
+  if (walkShadowTexture) return walkShadowTexture;
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+  const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gradient.addColorStop(0, "rgba(0,0,0,0.7)");
+  gradient.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 128, 128);
+  walkShadowTexture = new THREE.CanvasTexture(canvas);
+  return walkShadowTexture;
+}
+
+function getSharedDustSprite(THREE) {
+  if (walkDustSprite) return walkDustSprite;
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gradient.addColorStop(0, "rgba(255,255,255,1)");
+  gradient.addColorStop(0.4, "rgba(255,255,255,0.5)");
+  gradient.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 64, 64);
+  walkDustSprite = new THREE.CanvasTexture(canvas);
+  return walkDustSprite;
+}
+
+function hashUnit(value) {
+  const x = Math.sin(value * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
 }
 
 function addSpatialStationMesh(THREE, scene, station, stationHitMeshes) {
@@ -758,26 +948,51 @@ function addSpatialStationMesh(THREE, scene, station, stationHitMeshes) {
   const group = new THREE.Group();
   group.userData.stationIndex = station.index;
 
-  const frameGeometry = new THREE.PlaneGeometry(width + 0.16, height + 0.16);
-  const frame = new THREE.Mesh(frameGeometry, new THREE.MeshBasicMaterial({
-    color: station.tint,
-    transparent: true,
-    opacity: 0.24,
-    side: THREE.DoubleSide,
-    depthWrite: false
-  }));
-  frame.position.z = -0.026;
+  // Brushed-metal outer bevel.
+  const bevel = new THREE.Mesh(
+    new THREE.PlaneGeometry(width + 0.34, height + 0.34),
+    new THREE.MeshStandardMaterial({
+      color: station.tint,
+      roughness: 0.34,
+      metalness: 0.62,
+      transparent: true,
+      opacity: 1,
+      side: THREE.DoubleSide
+    })
+  );
+  bevel.position.z = -0.05;
+  bevel.userData.stationIndex = station.index;
+
+  // Matte museum mat.
+  const frame = new THREE.Mesh(
+    new THREE.PlaneGeometry(width + 0.18, height + 0.18),
+    new THREE.MeshStandardMaterial({
+      color: 0xf4ece2,
+      roughness: 0.92,
+      metalness: 0.04,
+      transparent: true,
+      opacity: 1,
+      side: THREE.DoubleSide
+    })
+  );
+  frame.position.z = -0.02;
   frame.userData.stationIndex = station.index;
 
+  // The print itself — lit, with an emissive floor so it reads in a dark room.
   const cardGeometry = new THREE.PlaneGeometry(width, height);
-  const material = new THREE.MeshBasicMaterial({
-    color: isAudio ? 0x3f6d58 : 0xfffaf5,
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.56,
+    metalness: 0,
+    emissive: 0xffffff,
+    emissiveIntensity: isAudio ? 0.3 : 0.4,
     transparent: true,
-    opacity: 0.88,
+    opacity: 1,
     side: THREE.DoubleSide,
     depthWrite: false
   });
   material.map = spatialTextureForItem(THREE, item, isAudio, material, (texture) => updateSpatialStationMediaAspect(THREE, station, texture));
+  material.emissiveMap = material.map;
   material.needsUpdate = true;
   const card = new THREE.Mesh(cardGeometry, material);
   card.userData.stationIndex = station.index;
@@ -790,10 +1005,10 @@ function addSpatialStationMesh(THREE, scene, station, stationHitMeshes) {
     depthWrite: false
   });
   const hitArea = new THREE.Mesh(hitGeometry, hitMaterial);
-  hitArea.position.z = 0.045;
+  hitArea.position.z = 0.06;
   hitArea.userData.stationIndex = station.index;
 
-  group.add(frame, card, hitArea);
+  group.add(bevel, frame, card, hitArea);
   group.position.set(station.focus.x, station.focus.y, station.focus.z);
   group.rotation.set(station.rotation.x, station.rotation.y, station.rotation.z);
   group.userData.frame = frame;
@@ -804,7 +1019,10 @@ function addSpatialStationMesh(THREE, scene, station, stationHitMeshes) {
   station.group = group;
   station.card = card;
   station.frame = frame;
+  station.bevel = bevel;
   stationHitMeshes.push(hitArea);
+  addStationContactShadow(THREE, scene, station);
+  addStationReflection(THREE, scene, station);
 }
 
 function updateSpatialStationMediaAspect(THREE, station, texture) {
@@ -827,9 +1045,19 @@ function updateSpatialStationMediaAspect(THREE, station, texture) {
   station.card.geometry.dispose?.();
   station.card.geometry = new THREE.PlaneGeometry(display.width, display.height);
   station.frame.geometry.dispose?.();
-  station.frame.geometry = new THREE.PlaneGeometry(display.width + 0.16, display.height + 0.16);
+  station.frame.geometry = new THREE.PlaneGeometry(display.width + 0.18, display.height + 0.18);
   station.group.userData.hitArea.geometry.dispose?.();
   station.group.userData.hitArea.geometry = new THREE.PlaneGeometry(display.width + 0.52, display.height + 0.52);
+  if (station.bevel) {
+    station.bevel.geometry.dispose?.();
+    station.bevel.geometry = new THREE.PlaneGeometry(display.width + 0.34, display.height + 0.34);
+  }
+  if (station.reflection) {
+    station.reflection.material.map = texture;
+    station.reflection.material.needsUpdate = true;
+    station.reflection.geometry.dispose?.();
+    station.reflection.geometry = new THREE.PlaneGeometry(display.width, display.height);
+  }
 }
 
 function spatialTextureForItem(THREE, item, isAudio, material, onTextureReady) {
@@ -848,16 +1076,27 @@ function spatialTextureForItem(THREE, item, isAudio, material, onTextureReady) {
   loader.setCrossOrigin?.("anonymous");
   loader.load(textureUrl, (texture) => {
     texture.colorSpace = THREE.SRGBColorSpace || texture.colorSpace;
+    applyWalkTextureQuality(THREE, texture);
     material.map = texture;
+    material.emissiveMap = texture;
     material.needsUpdate = true;
     onTextureReady?.(texture);
     requestSpatialWalkFrame();
   }, undefined, () => {
     material.map = fallbackTexture;
+    material.emissiveMap = fallbackTexture;
     material.needsUpdate = true;
     requestSpatialWalkFrame();
   });
   return fallbackTexture;
+}
+
+function applyWalkTextureQuality(THREE, texture) {
+  if (!texture) return;
+  const maxAnisotropy = spatialWalkScene?.renderer?.capabilities?.getMaxAnisotropy?.() || 1;
+  texture.anisotropy = Math.min(8, maxAnisotropy);
+  texture.generateMipmaps = true;
+  if (THREE.LinearMipmapLinearFilter) texture.minFilter = THREE.LinearMipmapLinearFilter;
 }
 
 function createSpatialCardTexture(THREE, item) {
@@ -918,22 +1157,35 @@ function resizeSpatialWalkScene() {
   const height = Math.max(1, Math.round(rect?.height || walk?.clientHeight || 1));
 
   spatialWalkScene.renderer.setSize(width, height, false);
+  spatialWalkScene.composer?.setSize?.(width, height);
+  spatialWalkScene.bloom?.setSize?.(width, height);
   spatialWalkScene.camera.aspect = width / height;
   spatialWalkScene.camera.updateProjectionMatrix();
   requestSpatialWalkFrame();
 }
 
 function requestSpatialWalkFrame() {
-  if (!spatialWalkScene || spatialWalkFrame) return;
-
-  const requestFrame = window.requestAnimationFrame || ((callback) => window.setTimeout(callback, 16));
-  spatialWalkFrame = requestFrame(() => {
-    spatialWalkFrame = 0;
-    renderSpatialWalkFrame();
-  });
+  if (currentCapsuleView !== "walk" || !spatialWalkScene) return;
+  startSpatialWalkLoop();
 }
 
-function cancelSpatialWalkFrame() {
+function startSpatialWalkLoop() {
+  if (spatialWalkFrame || !spatialWalkScene) return;
+
+  spatialWalkLastTime = 0;
+  const requestFrame = window.requestAnimationFrame || ((callback) => window.setTimeout(() => callback(nowMs()), 16));
+  const step = (timestamp) => {
+    if (currentCapsuleView !== "walk" || !spatialWalkScene) {
+      spatialWalkFrame = 0;
+      return;
+    }
+    renderSpatialWalkLoop(timestamp);
+    spatialWalkFrame = requestFrame(step);
+  };
+  spatialWalkFrame = requestFrame(step);
+}
+
+function stopSpatialWalkLoop() {
   if (!spatialWalkFrame) return;
 
   const cancelFrame = window.cancelAnimationFrame || window.clearTimeout;
@@ -941,37 +1193,229 @@ function cancelSpatialWalkFrame() {
   spatialWalkFrame = 0;
 }
 
-function renderSpatialWalkFrame() {
-  if (!spatialWalkScene || currentCapsuleView !== "walk") return;
-
-  const { THREE, renderer, scene, camera, stations } = spatialWalkScene;
-  const progress = getSpatialScrollProgress();
-  const stationCount = stations.length;
-  const lookAt = new THREE.Vector3(0, SPATIAL_STATION_FOCUS_HEIGHT, -4);
-
-  if (stationCount > 1) {
-    const stationFloat = progress * (stationCount - 1);
-    const routeIndex = Math.min(stationCount - 2, Math.floor(stationFloat));
-    const segmentProgress = stationFloat - routeIndex;
-    const current = stations[routeIndex];
-    const next = stations[routeIndex + 1];
-    const currentCamera = vectorFromPose(THREE, current.cameraPosition);
-    const nextCamera = vectorFromPose(THREE, next.cameraPosition);
-    const currentLookAt = vectorFromPose(THREE, current.lookAt);
-    const nextLookAt = vectorFromPose(THREE, next.lookAt);
-    const eased = easeSpatialStation(segmentProgress);
-    camera.position.lerpVectors(currentCamera, nextCamera, eased);
-    lookAt.lerpVectors(currentLookAt, nextLookAt, Math.min(1, eased + 0.12));
-    updateSpatialStationFocus(stationFloat);
-  } else if (stationCount === 1) {
-    const station = stations[0];
-    camera.position.copy(vectorFromPose(THREE, station.cameraPosition));
-    lookAt.copy(vectorFromPose(THREE, station.lookAt));
-    updateSpatialStationFocus(0);
+async function buildSpatialWalkComposer(THREE) {
+  if (!spatialWalkScene) return;
+  if (spatialWalkQuality !== "high") {
+    spatialWalkScene.composer = null;
+    return;
   }
 
-  camera.lookAt(lookAt);
-  renderer.render(scene, camera);
+  try {
+    const { EffectComposer } = await import("three/addons/postprocessing/EffectComposer.js");
+    const { RenderPass } = await import("three/addons/postprocessing/RenderPass.js");
+    const { UnrealBloomPass } = await import("three/addons/postprocessing/UnrealBloomPass.js");
+    const { OutputPass } = await import("three/addons/postprocessing/OutputPass.js");
+    const { renderer, scene, camera } = spatialWalkScene;
+    const size = renderer.getSize(new THREE.Vector2());
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    const bloom = new UnrealBloomPass(
+      new THREE.Vector2(Math.max(1, size.x), Math.max(1, size.y)),
+      0.32,
+      0.5,
+      0.85
+    );
+    composer.addPass(bloom);
+    composer.addPass(new OutputPass());
+    spatialWalkScene.composer = composer;
+    spatialWalkScene.bloom = bloom;
+  } catch (error) {
+    spatialWalkScene.composer = null;
+  }
+}
+
+function renderSpatialWalkLoop(timestamp) {
+  if (!spatialWalkScene || currentCapsuleView !== "walk") return;
+
+  const time = Number(timestamp) || nowMs();
+  if (!spatialWalkLastTime) spatialWalkLastTime = time;
+  const dt = Math.min(0.05, Math.max(0, (time - spatialWalkLastTime) / 1000));
+  spatialWalkLastTime = time;
+  spatialWalkClock += dt;
+
+  advanceSpatialArrival(dt);
+  const progress = resolveSpatialWalkProgress(dt, time);
+  applySpatialWalkCamera(progress, dt);
+  updateSpatialStationFocus(progress * Math.max(1, spatialWalkStations.length - 1));
+  animateSpatialAtmosphere(dt);
+
+  const { composer, renderer, scene, camera } = spatialWalkScene;
+  if (composer) composer.render(dt);
+  else renderer.render(scene, camera);
+}
+
+function resolveSpatialWalkProgress(dt, time) {
+  const count = spatialWalkStations.length;
+  if (count <= 1) return 0;
+
+  const scrub = getSpatialScrollProgress();
+  if (Math.abs(scrub - spatialScrubProgress) > 0.0009) {
+    spatialScrubProgress = scrub;
+    spatialLastInteractionTime = time;
+    spatialTourProgress = scrub;
+    spatialTourTarget = clamp(Math.round(scrub * (count - 1)), 0, count - 1);
+    spatialTourHoldMs = 0;
+  }
+
+  const tourActive = spatialTourPlaying
+    && spatialArrivalProgress >= 1
+    && (time - spatialLastInteractionTime > SPATIAL_TOUR_RESUME_MS);
+  if (!tourActive) return clamp(spatialScrubProgress, 0, 1);
+
+  const maxFloat = count - 1;
+  const currentFloat = clamp(spatialTourProgress, 0, 1) * maxFloat;
+  if (Math.abs(currentFloat - spatialTourTarget) < 0.012) {
+    spatialTourHoldMs += dt * 1000;
+    if (spatialTourHoldMs >= SPATIAL_TOUR_DWELL_MS && spatialTourTarget < maxFloat) {
+      spatialTourHoldMs = 0;
+      spatialTourTarget += 1;
+    }
+    return clamp(spatialTourProgress, 0, 1);
+  }
+
+  const stationStep = (dt * 1000) / Math.max(1, SPATIAL_TOUR_TRAVEL_MS);
+  const direction = Math.sign(spatialTourTarget - currentFloat);
+  const nextFloat = clamp(currentFloat + direction * stationStep, 0, maxFloat);
+  spatialTourProgress = nextFloat / maxFloat;
+  return spatialTourProgress;
+}
+
+function applySpatialWalkCamera(progress, dt) {
+  const scene = spatialWalkScene;
+  if (!scene) return;
+  const { THREE, camera, stations } = scene;
+  const count = stations.length;
+  if (!count) return;
+
+  const desiredPos = scene._desiredPos || (scene._desiredPos = new THREE.Vector3());
+  const desiredLook = scene._desiredLook || (scene._desiredLook = new THREE.Vector3());
+
+  if (count > 1) {
+    const stationFloat = clamp(progress, 0, 1) * (count - 1);
+    const index = Math.min(count - 2, Math.floor(stationFloat));
+    const eased = easeSpatialStation(stationFloat - index);
+    const a = stations[index];
+    const b = stations[index + 1];
+    desiredPos.set(
+      lerp(a.cameraPosition.x, b.cameraPosition.x, eased),
+      lerp(a.cameraPosition.y, b.cameraPosition.y, eased),
+      lerp(a.cameraPosition.z, b.cameraPosition.z, eased)
+    );
+    desiredLook.set(
+      lerp(a.lookAt.x, b.lookAt.x, eased),
+      lerp(a.lookAt.y, b.lookAt.y, eased),
+      lerp(a.lookAt.z, b.lookAt.z, eased)
+    );
+  } else {
+    const only = stations[0];
+    desiredPos.set(only.cameraPosition.x, only.cameraPosition.y, only.cameraPosition.z);
+    desiredLook.set(only.lookAt.x, only.lookAt.y, only.lookAt.z);
+  }
+
+  // Idle float + breathing keep the room alive when nobody is scrubbing.
+  const t = spatialWalkClock;
+  const float = prefersReducedMotion() ? 0 : SPATIAL_IDLE_FLOAT;
+  desiredPos.x += Math.sin(t * 0.45) * float;
+  desiredPos.y += Math.sin(t * 0.62) * float * 0.8 + Math.sin(t * 0.2) * float * 0.4;
+  desiredLook.x += Math.sin(t * 0.33) * float * 0.6;
+  desiredLook.y += Math.cos(t * 0.5) * float * 0.4;
+
+  // Pointer parallax (damped target).
+  const parallaxK = Math.min(1, dt * 3.2);
+  spatialPointerParallax.x += (spatialPointerParallaxTarget.x - spatialPointerParallax.x) * parallaxK;
+  spatialPointerParallax.y += (spatialPointerParallaxTarget.y - spatialPointerParallax.y) * parallaxK;
+  desiredPos.x += spatialPointerParallax.x * SPATIAL_PARALLAX_STRENGTH;
+  desiredPos.y += spatialPointerParallax.y * SPATIAL_PARALLAX_STRENGTH * 0.6;
+
+  // Cinematic arrival blends from a far, low establishing pose.
+  if (spatialArrivalProgress < 1 && scene._arrivalStart) {
+    const ease = easeSpatialStation(spatialArrivalProgress);
+    desiredPos.x = lerp(scene._arrivalStart.pos.x, desiredPos.x, ease);
+    desiredPos.y = lerp(scene._arrivalStart.pos.y, desiredPos.y, ease);
+    desiredPos.z = lerp(scene._arrivalStart.pos.z, desiredPos.z, ease);
+    desiredLook.x = lerp(scene._arrivalStart.look.x, desiredLook.x, ease);
+    desiredLook.y = lerp(scene._arrivalStart.look.y, desiredLook.y, ease);
+    desiredLook.z = lerp(scene._arrivalStart.look.z, desiredLook.z, ease);
+  }
+
+  // Critically damped follow toward the target pose.
+  const k = 1 - Math.exp(-dt / SPATIAL_CAMERA_DAMP);
+  camera.position.lerp(desiredPos, k);
+  scene.currentLookAt.lerp(desiredLook, k);
+  camera.lookAt(scene.currentLookAt);
+
+  // Spotlight pool tracks the active station.
+  if (scene.spot && scene.spotTarget) {
+    const activeIndex = clamp(Math.round(clamp(progress, 0, 1) * Math.max(1, count - 1)), 0, count - 1);
+    const focus = stations[activeIndex].focus;
+    scene.spotTarget.position.x += (focus.x - scene.spotTarget.position.x) * k;
+    scene.spotTarget.position.y += (focus.y - scene.spotTarget.position.y) * k;
+    scene.spotTarget.position.z += (focus.z - scene.spotTarget.position.z) * k;
+    scene.spot.position.x += (focus.x + 1.2 - scene.spot.position.x) * k;
+    scene.spot.position.y += (focus.y + 3.6 - scene.spot.position.y) * k;
+    scene.spot.position.z += (focus.z + 2.8 - scene.spot.position.z) * k;
+  }
+}
+
+function advanceSpatialArrival(dt) {
+  if (spatialArrivalProgress >= 1) return;
+  spatialArrivalProgress = clamp(spatialArrivalProgress + (dt * 1000) / SPATIAL_ARRIVAL_MS, 0, 1);
+}
+
+function playSpatialWalkArrival() {
+  const scene = spatialWalkScene;
+  if (!scene || prefersReducedMotion()) {
+    spatialArrivalProgress = 1;
+    return;
+  }
+
+  const first = spatialWalkStations[0];
+  if (!first) {
+    spatialArrivalProgress = 1;
+    return;
+  }
+
+  scene._arrivalStart = {
+    pos: new scene.THREE.Vector3(
+      first.cameraPosition.x * 0.3,
+      first.cameraPosition.y + 3.4,
+      first.cameraPosition.z + 13
+    ),
+    look: new scene.THREE.Vector3(first.lookAt.x, first.lookAt.y + 0.6, first.lookAt.z)
+  };
+  spatialArrivalProgress = 0;
+}
+
+function animateSpatialAtmosphere(dt) {
+  const dust = spatialWalkScene?.dust;
+  if (!dust) return;
+
+  dust.rotation.y += dt * 0.015;
+  const positions = dust.geometry?.attributes?.position;
+  const base = dust.userData?.baseY;
+  if (positions && base) {
+    const array = positions.array;
+    const t = spatialWalkClock;
+    for (let index = 1; index < array.length; index += 3) {
+      array[index] = base[index] + Math.sin(t * 0.3 + index) * 0.12;
+    }
+    positions.needsUpdate = true;
+  }
+}
+
+function handleSpatialWalkScroll() {
+  spatialLastInteractionTime = nowMs();
+  requestSpatialWalkFrame();
+}
+
+function nowMs() {
+  return (window.performance && typeof window.performance.now === "function")
+    ? window.performance.now()
+    : Date.now();
+}
+
+function lerp(start, end, factor) {
+  return start + (end - start) * factor;
 }
 
 function getSpatialScrollProgress() {
@@ -997,6 +1441,7 @@ function updateSpatialStationFocus(stationFloat) {
   if (nextActive !== spatialActiveStationIndex) {
     spatialActiveStationIndex = nextActive;
     updateSpatialWalkViewButton();
+    updateSpatialWalkOverlay();
   }
 
   spatialWalkScene.stations.forEach((station) => {
@@ -1005,12 +1450,15 @@ function updateSpatialStationFocus(stationFloat) {
     const near = distance <= SPATIAL_NEAR_STATION_RADIUS;
     const isActive = station.index === spatialActiveStationIndex;
     const isHovered = station.index === spatialHoveredStationIndex;
-    const opacity = isActive ? 1 : near ? Math.max(0.34, 0.74 - distance * 0.16) : 0.12;
-    const scale = isActive ? 1.06 : near ? Math.max(0.78, 0.94 - distance * 0.08) : 0.58;
-    station.group.visible = distance < 4.5;
-    station.group.scale.setScalar(isHovered ? scale + 0.05 : scale);
+    const opacity = isActive ? 1 : near ? Math.max(0.4, 0.85 - distance * 0.16) : 0.12;
+    const scale = isActive ? 1.05 : near ? Math.max(0.8, 0.95 - distance * 0.07) : 0.62;
+    station.group.visible = distance < 5;
+    station.group.scale.setScalar(isHovered ? scale + 0.04 : scale);
     station.card.material.opacity = opacity;
-    station.frame.material.opacity = isHovered ? 0.62 : isActive ? 0.48 : near ? 0.24 : 0.08;
+    station.card.material.emissiveIntensity = isActive ? 0.5 : near ? 0.42 : 0.32;
+    station.frame.material.opacity = opacity;
+    if (station.bevel) station.bevel.material.opacity = opacity;
+    if (station.reflection) station.reflection.material.opacity = opacity * 0.16;
   });
 }
 
@@ -1026,12 +1474,87 @@ function updateSpatialWalkViewButton() {
   button.setAttribute("aria-label", `View ${station.item.title || "Time Capsule moment"} full screen`);
 }
 
+function updateSpatialWalkOverlay() {
+  const station = spatialWalkStations[spatialActiveStationIndex];
+  if (!station) return;
+
+  const item = station.item;
+  const cluster = station.cluster;
+  const chapter = qs("#capsuleWalkChapter");
+  const title = qs("#capsuleWalkTitle");
+  const caption = qs("#capsuleWalkCaption");
+  const date = qs("#capsuleWalkDate");
+  if (chapter) chapter.textContent = cluster?.label || item.chapter || "Wallflower gallery";
+  if (title) title.textContent = item.title || "Time Capsule moment";
+  if (caption) caption.textContent = item.caption || item.guestNote || cluster?.summary || "";
+  if (date) date.textContent = formatDateTime(item.capturedAt);
+
+  const copy = qs("#capsuleWalkCopy");
+  if (copy?.classList) {
+    copy.classList.remove("is-swap");
+    void copy.offsetWidth;
+    copy.classList.add("is-swap");
+  }
+  updateSpatialWalkProgressRail();
+}
+
+function updateSpatialWalkProgressRail() {
+  const rail = qs("#capsuleWalkProgress");
+  if (!rail) return;
+
+  const count = spatialWalkStations.length;
+  if (!count) {
+    rail.innerHTML = "";
+    return;
+  }
+
+  if (rail.childElementCount !== count) {
+    rail.innerHTML = spatialWalkStations
+      .map((station, index) => `<button class="capsule-walk-dot" type="button" data-walk-dot="${index}" aria-label="Go to moment ${index + 1}"></button>`)
+      .join("");
+    qsaWalkDots().forEach((dot) => {
+      dot.addEventListener("click", () => scrollSpatialWalkToStation(Number(dot.dataset.walkDot || 0)));
+    });
+  }
+
+  qsaWalkDots().forEach((dot) => {
+    const isActive = Number(dot.dataset.walkDot || 0) === spatialActiveStationIndex;
+    dot.classList?.toggle("is-active", isActive);
+    dot.setAttribute?.("aria-current", isActive ? "true" : "false");
+  });
+}
+
+function toggleSpatialTour() {
+  spatialTourPlaying = !spatialTourPlaying;
+  if (spatialTourPlaying) {
+    const count = spatialWalkStations.length;
+    if (count > 1 && spatialTourTarget >= count - 1 && clamp(spatialTourProgress, 0, 1) >= 0.999) {
+      spatialTourTarget = 0;
+      spatialTourProgress = 0;
+    }
+    spatialLastInteractionTime = 0;
+  }
+  updateSpatialTourToggle();
+  requestSpatialWalkFrame();
+}
+
+function updateSpatialTourToggle() {
+  const button = qs("#capsuleWalkTourToggle");
+  if (!button) return;
+  button.textContent = spatialTourPlaying ? "Pause tour" : "Play tour";
+  button.setAttribute("aria-pressed", String(spatialTourPlaying));
+}
+
 function scrollSpatialWalkToStation(stationIndex) {
   const walk = qs("#capsuleWalk");
   const nextIndex = clamp(Math.round(Number(stationIndex) || 0), 0, spatialWalkStations.length - 1);
+  spatialLastInteractionTime = nowMs();
+  spatialTourTarget = nextIndex;
+  spatialTourHoldMs = 0;
   if (!walk || spatialWalkStations.length <= 1) {
     spatialActiveStationIndex = nextIndex;
     updateSpatialWalkViewButton();
+    updateSpatialWalkOverlay();
     requestSpatialWalkFrame();
     return;
   }
@@ -1072,11 +1595,18 @@ function handleSpatialWalkPointerMove(event) {
   if (event.currentTarget?.style) {
     event.currentTarget.style.cursor = station ? "pointer" : "";
   }
+  const rect = event.currentTarget?.getBoundingClientRect?.();
+  if (rect?.width && rect?.height && !prefersReducedMotion()) {
+    spatialPointerParallaxTarget.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    spatialPointerParallaxTarget.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
+  }
   requestSpatialWalkFrame();
 }
 
 function clearSpatialWalkHover(event) {
   spatialHoveredStationIndex = -1;
+  spatialPointerParallaxTarget.x = 0;
+  spatialPointerParallaxTarget.y = 0;
   if (event?.currentTarget?.style) event.currentTarget.style.cursor = "";
   requestSpatialWalkFrame();
 }
@@ -1156,7 +1686,7 @@ function setCapsuleView(view, options = {}) {
     renderSpatialWalk();
     startSpatialWalkScene();
   } else {
-    cancelSpatialWalkFrame();
+    stopSpatialWalkLoop();
   }
 
   qsaCapsuleViewButtons().forEach((button) => {
@@ -1952,6 +2482,10 @@ function qsaFeedCards(feed) {
 
 function qsaWalkCards() {
   return document.querySelectorAll("[data-walk-slide]");
+}
+
+function qsaWalkDots() {
+  return Array.from(document.querySelectorAll("[data-walk-dot]"));
 }
 
 function getMediaTypeLabel(mediaType) {

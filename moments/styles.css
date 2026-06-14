@@ -2845,21 +2845,81 @@ textarea:focus-visible {
     radial-gradient(circle at 50% 42%, rgba(255, 250, 245, 0.08), transparent 36rem);
 }
 
-.capsule-walk-view-button {
+.capsule-walk-vignette {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(122% 92% at 50% 42%, transparent 50%, rgba(7, 6, 6, 0.58) 100%),
+    linear-gradient(180deg, rgba(7, 6, 6, 0.42) 0%, transparent 22%, transparent 60%, rgba(7, 6, 6, 0.62) 100%);
+}
+
+.capsule-walk-controls {
   position: absolute;
   z-index: 4;
   right: clamp(0.85rem, 2vw, 1.4rem);
   bottom: clamp(0.85rem, 2vw, 1.4rem);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.capsule-walk-tour-toggle {
+  border-color: rgba(255, 250, 245, 0.32);
+  background: rgba(23, 21, 20, 0.52);
+  color: #fffaf5;
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(14px);
+}
+
+.capsule-walk-view-button {
   min-width: 8.6rem;
   border-color: rgba(255, 250, 245, 0.48);
-  background: rgba(255, 250, 245, 0.92);
+  background: rgba(255, 250, 245, 0.94);
   color: #171514;
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.26);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.32);
   backdrop-filter: blur(16px);
 }
 
 .capsule-walk-view-button[hidden] {
   display: none;
+}
+
+.capsule-walk-progress {
+  position: absolute;
+  z-index: 4;
+  top: 50%;
+  right: clamp(0.7rem, 1.6vw, 1.1rem);
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.45rem 0.3rem;
+}
+
+.capsule-walk-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  padding: 0;
+  border: 1px solid rgba(255, 250, 245, 0.5);
+  border-radius: 999px;
+  background: rgba(255, 250, 245, 0.18);
+  cursor: pointer;
+  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.capsule-walk-dot:hover {
+  border-color: rgba(255, 250, 245, 0.92);
+}
+
+.capsule-walk-dot.is-active {
+  background: #fffaf5;
+  border-color: #fffaf5;
+  transform: scale(1.5);
+  box-shadow: 0 0 12px rgba(255, 244, 230, 0.7);
 }
 
 .capsule-walk-copy {
@@ -2884,6 +2944,35 @@ textarea:focus-visible {
   margin: 0;
   color: rgba(255, 250, 245, 0.82);
   font-weight: 800;
+}
+
+.capsule-walk-copy small {
+  color: rgba(255, 250, 245, 0.62);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.capsule-walk-copy.is-swap {
+  animation: capsuleWalkCopyIn 520ms ease both;
+}
+
+@keyframes capsuleWalkCopyIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .capsule-walk-copy.is-swap {
+    animation: none;
+  }
 }
 
 .capsule-walk-fallback {
@@ -5334,17 +5423,37 @@ tr:last-child td {
   .capsule-walk-copy {
     max-width: none;
     padding: 1rem;
+    padding-bottom: 4.7rem;
   }
 
   .capsule-walk-copy strong {
     font-size: 2rem;
   }
 
+  .capsule-walk-controls {
+    right: 0.7rem;
+    bottom: calc(env(safe-area-inset-bottom) + 0.7rem);
+    gap: 0.4rem;
+  }
+
   .capsule-walk-view-button {
-    right: 0.75rem;
-    bottom: calc(env(safe-area-inset-bottom) + 0.75rem);
-    min-width: 7.5rem;
-    min-height: 2.75rem;
+    min-width: 7rem;
+    min-height: 2.6rem;
+  }
+
+  .capsule-walk-tour-toggle {
+    min-height: 2.6rem;
+  }
+
+  .capsule-walk-progress {
+    top: auto;
+    right: 0.7rem;
+    bottom: calc(env(safe-area-inset-bottom) + 3.9rem);
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 62vw;
+    transform: none;
   }
 
   .capsule-walk-fallback {

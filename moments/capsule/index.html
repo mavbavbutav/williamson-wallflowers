@@ -14,7 +14,15 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../styles.css?v=20260614-cinematic-stations-1" />
+  <link rel="stylesheet" href="../styles.css?v=20260614-luxury-gallery-1" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../vendor/three.module.js",
+      "three/addons/": "../vendor/jsm/"
+    }
+  }
+  </script>
 </head>
 <body class="host-page capsule-viewer">
   <main class="app-shell">
@@ -66,11 +74,17 @@
       <div class="capsule-walk" id="capsuleWalk" aria-label="Move through a spatial memory path" hidden>
         <div class="capsule-walk-viewport">
           <canvas class="capsule-walk-canvas" id="capsuleWalkCanvas" aria-hidden="true"></canvas>
-          <button class="button button-primary capsule-walk-view-button" type="button" id="capsuleWalkViewButton" hidden>View moment</button>
-          <div class="capsule-walk-copy">
-            <span class="status-pill">3D Walk</span>
-            <strong>A spatial path through these moments</strong>
-            <p>Scroll through an adaptive arrangement shaped from the published Time Capsule.</p>
+          <div class="capsule-walk-vignette" aria-hidden="true"></div>
+          <div class="capsule-walk-copy" id="capsuleWalkCopy" aria-live="polite">
+            <span class="status-pill" id="capsuleWalkChapter">3D Walk</span>
+            <strong id="capsuleWalkTitle">A spatial path through these moments</strong>
+            <p id="capsuleWalkCaption">Scroll, or let the gallery tour guide you through each moment.</p>
+            <small id="capsuleWalkDate"></small>
+          </div>
+          <nav class="capsule-walk-progress" id="capsuleWalkProgress" aria-label="Gallery progress"></nav>
+          <div class="capsule-walk-controls">
+            <button class="button button-secondary capsule-walk-tour-toggle" type="button" id="capsuleWalkTourToggle" aria-pressed="true">Pause tour</button>
+            <button class="button button-primary capsule-walk-view-button" type="button" id="capsuleWalkViewButton" hidden>View moment</button>
           </div>
         </div>
         <div class="capsule-walk-fallback" id="capsuleWalkFallback" role="status" aria-live="polite">
@@ -103,6 +117,6 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js" defer></script>
-  <script type="module" src="capsule.js?v=20260614-cinematic-stations-1"></script>
+  <script type="module" src="capsule.js?v=20260614-luxury-gallery-1"></script>
 </body>
 </html>

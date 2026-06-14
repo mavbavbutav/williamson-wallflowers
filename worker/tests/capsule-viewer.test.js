@@ -316,8 +316,8 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(capsuleHtml, /id="capsuleWalk"/);
   assert.match(capsuleHtml, /id="capsuleWalkCanvas"/);
   assert.match(capsuleHtml, /id="capsuleWalkFallback"/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260614-cinematic-stations-1/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260614-cinematic-stations-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260614-luxury-gallery-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260614-luxury-gallery-1/);
 
   assert.match(capsuleJs, /let spatialLayout = null/);
   assert.match(capsuleJs, /let spatialClusters = \[\]/);
@@ -362,8 +362,8 @@ test('capsule 3D Walk uses cinematic stations with safe spacing and camera poses
   ]);
 
   assert.match(capsuleHtml, /id="capsuleWalkViewButton"/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260614-cinematic-stations-1/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260614-cinematic-stations-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260614-luxury-gallery-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260614-luxury-gallery-1/);
 
   assert.match(capsuleJs, /const SPATIAL_STATION_SPACING = 10/);
   assert.match(capsuleJs, /const SPATIAL_CAMERA_PULLBACK = 8\.6/);
@@ -398,6 +398,59 @@ test('capsule 3D Walk stations open the existing full-screen moment viewer', asy
   assert.match(capsuleJs, /event\.key === " "/);
   assert.match(capsuleJs, /scrollSpatialWalkToStation/);
   assert.match(capsuleJs, /data-walk-slide/);
+});
+
+test('capsule 3D Walk renders a lit, post-processed luxury gallery', async () => {
+  const [capsuleHtml, capsuleJs, styles] = await Promise.all([
+    readText('../../moments/capsule/index.html'),
+    readText('../../moments/capsule/capsule.js'),
+    readText('../../moments/styles.css')
+  ]);
+
+  // Import map so vendored addons resolve `three` + `three/addons/`.
+  assert.match(capsuleHtml, /<script type="importmap">/);
+  assert.match(capsuleHtml, /"three":\s*"\.\.\/vendor\/three\.module\.js"/);
+  assert.match(capsuleHtml, /"three\/addons\/":\s*"\.\.\/vendor\/jsm\/"/);
+
+  // Renderer / color science.
+  assert.match(capsuleJs, /ACESFilmicToneMapping/);
+  assert.match(capsuleJs, /toneMappingExposure/);
+  assert.match(capsuleJs, /getMaxAnisotropy/);
+
+  // Real lighting + materials.
+  assert.match(capsuleJs, /MeshStandardMaterial/);
+  assert.match(capsuleJs, /SpotLight/);
+  assert.match(capsuleJs, /emissiveMap/);
+
+  // Environment: floor, reflection, contact shadow, dust.
+  assert.match(capsuleJs, /function addGalleryFloor/);
+  assert.match(capsuleJs, /function addStationReflection/);
+  assert.match(capsuleJs, /function addGalleryDust/);
+
+  // Post-processing.
+  assert.match(capsuleJs, /EffectComposer/);
+  assert.match(capsuleJs, /UnrealBloomPass/);
+  assert.match(capsuleJs, /composer\.render\(/);
+
+  // Living camera + auto-tour.
+  assert.match(capsuleJs, /function startSpatialWalkLoop/);
+  assert.match(capsuleJs, /function renderSpatialWalkLoop/);
+  assert.match(capsuleJs, /spatialTourPlaying/);
+  assert.match(capsuleJs, /function toggleSpatialTour/);
+  assert.match(capsuleJs, /pointerParallax|parallax/);
+  assert.match(capsuleJs, /function playSpatialWalkArrival|arrivalProgress/);
+
+  // Curatorial overlay sync + progress rail.
+  assert.match(capsuleJs, /function updateSpatialWalkOverlay/);
+  assert.match(capsuleHtml, /id="capsuleWalkChapter"/);
+  assert.match(capsuleHtml, /id="capsuleWalkTitle"/);
+  assert.match(capsuleHtml, /id="capsuleWalkCaption"/);
+  assert.match(capsuleHtml, /id="capsuleWalkProgress"/);
+  assert.match(capsuleHtml, /id="capsuleWalkTourToggle"/);
+
+  // Styling hooks.
+  assert.match(styles, /\.capsule-walk-progress/);
+  assert.match(styles, /\.capsule-walk-vignette/);
 });
 
 test('capsule swipe feed becomes fullscreen on mobile and videos use poster art', async () => {
