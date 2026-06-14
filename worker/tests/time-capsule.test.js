@@ -695,6 +695,52 @@ test('spatial publish replaces an existing published layout under the unique sta
   assert.equal(db.layouts.find((layout) => layout.id === 'layout-old').status, 'archived');
 });
 
+test('host spatial review returns the published layout with private evidence after publish', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    layouts: [
+      spatialLayout({ id: 'layout-draft', status: 'draft', generationStatus: 'ready', generation_status: 'ready' })
+    ],
+    clusters: [
+      spatialCluster({
+        id: 'cluster-1',
+        layoutId: 'layout-draft',
+        evidence_json: JSON.stringify({ privateCue: 'family table', sourceSubmissionIds: ['photo-1'] }),
+        evidenceJson: JSON.stringify({ privateCue: 'family table', sourceSubmissionIds: ['photo-1'] })
+      })
+    ],
+    placements: [
+      spatialPlacement({
+        id: 'placement-1',
+        layoutId: 'layout-draft',
+        clusterId: 'cluster-1',
+        evidence_json: JSON.stringify({ sourceSubmissionId: 'photo-1', sourceMediaKey: 'originals/private.jpg' }),
+        evidenceJson: JSON.stringify({ sourceSubmissionId: 'photo-1', sourceMediaKey: 'originals/private.jpg' })
+      })
+    ]
+  });
+  const env = envWithDb(db);
+
+  const publishResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/spatial-layouts/layout-draft/publish',
+    {},
+    { Authorization: 'Bearer host-token' }
+  ), env);
+  assert.equal(publishResponse.status, 200);
+
+  const reviewResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-1/spatial-layouts/review', {
+    headers: { Authorization: 'Bearer host-token' }
+  }), env);
+  const reviewPayload = await reviewResponse.json();
+
+  assert.equal(reviewResponse.status, 200);
+  assert.equal(reviewPayload.spatialLayout.id, 'layout-draft');
+  assert.equal(reviewPayload.spatialLayout.status, 'published');
+  assert.equal(reviewPayload.spatialClusters[0].evidence.privateCue, 'family table');
+  assert.deepEqual(reviewPayload.spatialClusters[0].evidence.sourceSubmissionIds, ['photo-1']);
+  assert.equal(reviewPayload.spatialPlacements[0].evidence.sourceMediaKey, 'originals/private.jpg');
+});
+
 test('spatial publish rejects stale draft readiness at write time', async () => {
   const db = new FakeMomentsDb({
     events: [timeCapsuleEvent()],
@@ -764,7 +810,7 @@ test('layout scoped spatial routes reject wrong token', async () => {
   assert.equal(publishResponse.status, 403);
 });
 
-test('host, event admin, and global admin tokens can access spatial draft routes', async () => {
+test('host, event admin, and global admin tokens can access spatial draft and review routes', async () => {
   const db = new FakeMomentsDb({
     events: [timeCapsuleEvent()],
     layouts: [spatialLayout({ id: 'layout-draft', status: 'draft' })],
@@ -773,10 +819,12 @@ test('host, event admin, and global admin tokens can access spatial draft routes
   });
 
   for (const token of ['host-token', 'event-admin-token', 'admin-token']) {
-    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-1/spatial-layouts/draft', {
-      headers: { Authorization: `Bearer ${token}` }
-    }), envWithDb(db));
-    assert.equal(response.status, 200);
+    for (const path of ['draft', 'review']) {
+      const response = await worker.fetch(new Request(`https://williamsonwallflowers.com/moments-api/host/events/event-1/spatial-layouts/${path}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      }), envWithDb(db));
+      assert.equal(response.status, 200);
+    }
   }
 });
 

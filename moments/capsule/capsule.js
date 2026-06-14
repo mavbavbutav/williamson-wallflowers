@@ -501,7 +501,7 @@ async function startSpatialWalkScene() {
   }
 
   try {
-    const THREE = await import("https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js");
+    const THREE = await import("../vendor/three.module.js");
     buildSpatialWalkScene(THREE);
     hideSpatialWalkFallback();
     resizeSpatialWalkScene();

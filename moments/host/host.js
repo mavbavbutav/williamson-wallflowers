@@ -65,7 +65,7 @@ function init() {
     if (url) window.open(url, "_blank", "noopener,noreferrer");
   });
   qs("#generateSpatialLayoutButton")?.addEventListener("click", generateSpatialLayout);
-  qs("#refreshSpatialLayoutButton")?.addEventListener("click", () => loadSpatialLayoutDraft().then(renderCapsule));
+  qs("#refreshSpatialLayoutButton")?.addEventListener("click", () => loadSpatialLayoutReview().then(renderCapsule));
   qs("#publishSpatialLayoutButton")?.addEventListener("click", publishSpatialLayout);
   qsa("[data-host-post-mode]").forEach((button) => {
     button.addEventListener("click", () => chooseHostPostMode(button.dataset.hostPostMode));
@@ -149,26 +149,26 @@ async function loadCapsule({ silent = false } = {}) {
     const payload = await hostRequest(`/host/events/${encodeURIComponent(eventId)}/time-capsule`);
     timeCapsule = payload.timeCapsule || null;
     capsuleItems = payload.items || [];
-    await loadSpatialLayoutDraft({ silent: true });
+    await loadSpatialLayoutReview({ silent: true });
     if (!silent) setNotice(qs("#capsuleNotice"), "Time Capsule refreshed.", "success");
   } catch (error) {
     if (!silent) setNotice(qs("#capsuleNotice"), error.message || "Could not load the Time Capsule.", "error");
   }
 }
 
-async function loadSpatialLayoutDraft({ silent = false } = {}) {
+async function loadSpatialLayoutReview({ silent = false } = {}) {
   if (!eventRecord?.timeCapsule?.enabled) return;
   try {
-    const payload = await hostRequest(`/host/events/${encodeURIComponent(eventId)}/spatial-layouts/draft`);
+    const payload = await hostRequest(`/host/events/${encodeURIComponent(eventId)}/spatial-layouts/review`);
     spatialLayout = payload.spatialLayout || null;
     spatialClusters = payload.spatialClusters || [];
     spatialPlacements = payload.spatialPlacements || [];
-    if (!silent) setNotice(qs("#capsuleNotice"), "3D walk draft refreshed.", "success");
+    if (!silent) setNotice(qs("#capsuleNotice"), "3D walk refreshed.", "success");
   } catch (error) {
     spatialLayout = null;
     spatialClusters = [];
     spatialPlacements = [];
-    if (!silent) setNotice(qs("#capsuleNotice"), error.message || "Could not load the 3D walk draft.", "error");
+    if (!silent) setNotice(qs("#capsuleNotice"), error.message || "Could not load the 3D walk.", "error");
   }
 }
 
@@ -1810,7 +1810,7 @@ function getLocalDemoHostPayload(path, options = {}) {
     };
   }
 
-  if (path.endsWith("/spatial-layouts/draft") && (!options.method || options.method === "GET")) {
+  if (path.endsWith("/spatial-layouts/review") && (!options.method || options.method === "GET")) {
     return getLocalDemoSpatialPayload();
   }
 

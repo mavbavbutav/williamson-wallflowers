@@ -177,10 +177,11 @@ test('capsule viewer exposes a vertical swipe feed alongside the timeline', asyn
 });
 
 test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', async () => {
-  const [capsuleHtml, capsuleJs, styles] = await Promise.all([
+  const [capsuleHtml, capsuleJs, styles, threeModule] = await Promise.all([
     readText('../../moments/capsule/index.html'),
     readText('../../moments/capsule/capsule.js'),
-    readText('../../moments/styles.css')
+    readText('../../moments/styles.css'),
+    readText('../../moments/vendor/three.module.js')
   ]);
 
   assert.match(capsuleHtml, /<button[^>]*data-capsule-view="walk"[^>]*hidden[^>]*>3D Walk<\/button>/);
@@ -199,7 +200,10 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(capsuleJs, /function canUseWebGl/);
   assert.match(capsuleJs, /async function startSpatialWalkScene/);
   assert.match(capsuleJs, /function getSpatialScrollProgress/);
-  assert.match(capsuleJs, /import\("https:\/\/cdn\.jsdelivr\.net\/npm\/three[^"]*\/three\.module\.js"\)/);
+  assert.match(capsuleJs, /import\("\.\.\/vendor\/three\.module\.js"\)/);
+  assert.doesNotMatch(capsuleJs, /cdn\.jsdelivr\.net/);
+  assert.match(threeModule, /REVISION = '165'/);
+  assert.match(threeModule, /class WebGLRenderer/);
   assert.match(capsuleJs, /prefers-reduced-motion/);
   assert.match(capsuleJs, /if \(view === "walk" && !hasPublishedSpatialWalk\(\)\)[\s\S]*?view = "timeline"/);
   assert.match(capsuleJs, /qs\("#capsuleWalk"\)\.hidden = currentCapsuleView !== "walk"/);

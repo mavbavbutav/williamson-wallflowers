@@ -262,6 +262,10 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
       if (request.method === 'GET' && parts[4] === 'draft' && parts.length === 5) {
         return getHostSpatialLayoutDraft(request, env, url, corsHeaders, parts[2]);
       }
+
+      if (request.method === 'GET' && parts[4] === 'review' && parts.length === 5) {
+        return getHostSpatialLayoutReview(request, env, url, corsHeaders, parts[2]);
+      }
     }
 
     if (parts[0] === 'host' && parts[1] === 'spatial-layouts' && parts[2]) {
@@ -1205,6 +1209,21 @@ async function getHostSpatialLayoutDraft(request, env, url, corsHeaders, eventId
   }, 200, corsHeaders);
 }
 
+async function getHostSpatialLayoutReview(request, env, url, corsHeaders, eventId) {
+  const event = await getAuthorizedSpatialEvent(request, env, url, eventId, corsHeaders);
+  if (event.response) return event.response;
+
+  const bundle = await getSpatialLayoutReviewBundle(env, event.record.id);
+  if (!bundle) {
+    return json({ ok: false, message: 'No spatial layout has been generated for this event yet.' }, 404, corsHeaders);
+  }
+
+  return json({
+    ok: true,
+    ...toSpatialLayoutBundleClient(bundle, { includeEvidence: true })
+  }, 200, corsHeaders);
+}
+
 async function updateHostSpatialLayout(request, env, url, corsHeaders, layoutId) {
   const auth = await getAuthorizedSpatialLayout(request, env, url, layoutId, corsHeaders);
   if (auth.response) return auth.response;
@@ -1587,6 +1606,11 @@ async function runMomentsDbBatch(env, statements) {
 
 async function getPublishedSpatialLayoutBundle(env, eventId) {
   return getSpatialLayoutBundleByStatus(env, eventId, 'published');
+}
+
+async function getSpatialLayoutReviewBundle(env, eventId) {
+  return (await getSpatialLayoutBundleByStatus(env, eventId, 'draft'))
+    || getSpatialLayoutBundleByStatus(env, eventId, 'published');
 }
 
 async function getSpatialLayoutBundleByStatus(env, eventId, status) {
