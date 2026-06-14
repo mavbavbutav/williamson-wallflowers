@@ -204,6 +204,12 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(capsuleJs, /if \(view === "walk" && !hasPublishedSpatialWalk\(\)\)[\s\S]*?view = "timeline"/);
   assert.match(capsuleJs, /qs\("#capsuleWalk"\)\.hidden = currentCapsuleView !== "walk"/);
   assert.match(capsuleJs, /if \(currentCapsuleView === "walk"\)[\s\S]*?startSpatialWalkScene\(\)/);
+  assert.match(capsuleJs, /if \(spatialWalkScene\) \{[\s\S]*?hideSpatialWalkFallback\(\);[\s\S]*?resizeSpatialWalkScene\(\);[\s\S]*?requestSpatialWalkFrame\(\);[\s\S]*?return;/);
+  assert.match(capsuleJs, /fallback\.hidden = Boolean\(spatialWalkScene\)/);
+  assert.match(capsuleJs, /function hideSpatialWalkFallback/);
+  assert.match(capsuleJs, /material\.map = spatialTextureForItem\(THREE, item, isAudio, material\)/);
+  assert.match(capsuleJs, /loader\.load\(textureUrl, \(texture\) => \{[\s\S]*?material\.map = texture[\s\S]*?material\.needsUpdate = true[\s\S]*?\}, undefined, \(\) => \{[\s\S]*?material\.map = fallbackTexture[\s\S]*?material\.needsUpdate = true/);
+  assert.match(capsuleJs, /return fallbackTexture;/);
 
   assert.match(styles, /\.capsule-walk/);
   assert.match(styles, /\.capsule-walk-canvas/);

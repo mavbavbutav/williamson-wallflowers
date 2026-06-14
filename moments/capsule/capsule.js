@@ -358,7 +358,7 @@ function renderSpatialWalk() {
   const summary = capsule?.title || capsule?.name || "this Time Capsule";
 
   if (fallback) {
-    fallback.hidden = false;
+    fallback.hidden = Boolean(spatialWalkScene);
     fallback.innerHTML = `
       <div class="capsule-walk-fallback-head">
         <span class="status-pill">${escapeHtml(pathLabel)}</span>
@@ -477,7 +477,16 @@ function canUseWebGl() {
 }
 
 async function startSpatialWalkScene() {
-  if (spatialWalkStarted || !hasPublishedSpatialWalk()) return;
+  if (!hasPublishedSpatialWalk()) return;
+
+  if (spatialWalkScene) {
+    hideSpatialWalkFallback();
+    resizeSpatialWalkScene();
+    requestSpatialWalkFrame();
+    return;
+  }
+
+  if (spatialWalkStarted) return;
   spatialWalkStarted = true;
   renderSpatialWalk();
 
@@ -494,8 +503,7 @@ async function startSpatialWalkScene() {
   try {
     const THREE = await import("https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js");
     buildSpatialWalkScene(THREE);
-    qs("#capsuleWalkFallback").hidden = true;
-    qs("#capsuleWalk").classList.add("is-webgl-ready");
+    hideSpatialWalkFallback();
     resizeSpatialWalkScene();
     requestSpatialWalkFrame();
   } catch {
@@ -565,10 +573,11 @@ function addSpatialPlacementMesh(THREE, scene, placement) {
   const cardGeometry = new THREE.PlaneGeometry(width * placement.scale, height * placement.scale);
   const material = new THREE.MeshBasicMaterial({
     color: isAudio ? 0x3f6d58 : 0xfffaf5,
-    map: spatialTextureForItem(THREE, item, isAudio),
     transparent: true,
     side: THREE.DoubleSide
   });
+  material.map = spatialTextureForItem(THREE, item, isAudio, material);
+  material.needsUpdate = true;
   const card = new THREE.Mesh(cardGeometry, material);
 
   const frameGeometry = new THREE.PlaneGeometry((width + 0.08) * placement.scale, (height + 0.08) * placement.scale);
@@ -586,7 +595,7 @@ function addSpatialPlacementMesh(THREE, scene, placement) {
   scene.add(group);
 }
 
-function spatialTextureForItem(THREE, item, isAudio) {
+function spatialTextureForItem(THREE, item, isAudio, material) {
   const fallbackTexture = createSpatialCardTexture(THREE, item);
   if (isAudio) return fallbackTexture;
 
@@ -600,12 +609,17 @@ function spatialTextureForItem(THREE, item, isAudio) {
 
   const loader = new THREE.TextureLoader();
   loader.setCrossOrigin?.("anonymous");
-  const texture = loader.load(textureUrl, () => {
+  loader.load(textureUrl, (texture) => {
     texture.colorSpace = THREE.SRGBColorSpace || texture.colorSpace;
+    material.map = texture;
+    material.needsUpdate = true;
     requestSpatialWalkFrame();
-  }, undefined, () => requestSpatialWalkFrame());
-  texture.colorSpace = THREE.SRGBColorSpace || texture.colorSpace;
-  return texture;
+  }, undefined, () => {
+    material.map = fallbackTexture;
+    material.needsUpdate = true;
+    requestSpatialWalkFrame();
+  });
+  return fallbackTexture;
 }
 
 function createSpatialCardTexture(THREE, item) {
@@ -732,6 +746,13 @@ function showSpatialWalkFallback(message) {
   fallback.hidden = false;
   const note = fallback.querySelector?.(".capsule-walk-fallback-note");
   if (note && message) note.textContent = message;
+}
+
+function hideSpatialWalkFallback() {
+  const fallback = qs("#capsuleWalkFallback");
+  const walk = qs("#capsuleWalk");
+  if (fallback) fallback.hidden = true;
+  if (walk) walk.classList.add("is-webgl-ready");
 }
 
 function prefersReducedMotion() {
