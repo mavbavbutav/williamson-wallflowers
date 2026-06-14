@@ -383,6 +383,287 @@ test('spatial generator ignores repeated cues outside visible capsule items', as
   assert.match(payload.spatialClusters[0].label, /Story|Sequence|Moments/);
 });
 
+test('spatial generator ignores repeated cues from failed visual insights', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    submissions: [
+      approvedSubmission({ id: 'photo-1', createdAt: '2026-09-19T20:00:00.000Z' }),
+      approvedSubmission({ id: 'photo-2', createdAt: '2026-09-19T20:25:00.000Z' })
+    ],
+    items: [
+      capsuleItem({ id: 'item-1', submissionId: 'photo-1', sortOrder: 1 }),
+      capsuleItem({ id: 'item-2', submissionId: 'photo-2', sortOrder: 2 })
+    ],
+    insights: [
+      mediaInsight({ submissionId: 'photo-1', status: 'failed', visionStatus: 'failed', vision_status: 'failed', backgroundCues: ['green wall'] }),
+      mediaInsight({ submissionId: 'photo-2', status: 'failed', visionStatus: 'failed', vision_status: 'failed', backgroundCues: ['green wall'] })
+    ]
+  });
+
+  const response = await worker.fetch(jsonRequest(
+    '/moments-api/host/events/event-1/spatial-layouts/generate',
+    {},
+    { Authorization: 'Bearer host-token' }
+  ), envWithDb(db));
+  const payload = await response.json();
+
+  assert.equal(response.status, 201);
+  assert.equal(payload.spatialLayout.layoutMode, 'timeline_path');
+  assert.match(payload.spatialClusters[0].label, /Story|Sequence|Moments/);
+});
+
+test('host can fetch generated draft with private spatial evidence', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    submissions: [
+      approvedSubmission({ id: 'photo-1' }),
+      approvedSubmission({ id: 'photo-2' })
+    ],
+    items: [
+      capsuleItem({ id: 'item-1', submissionId: 'photo-1', sortOrder: 1 }),
+      capsuleItem({ id: 'item-2', submissionId: 'photo-2', sortOrder: 2 })
+    ],
+    insights: [
+      mediaInsight({ submissionId: 'photo-1', backgroundCues: ['soft gold backdrop'] }),
+      mediaInsight({ submissionId: 'photo-2', backgroundCues: ['soft gold backdrop'] })
+    ]
+  });
+
+  const generateResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/events/event-1/spatial-layouts/generate',
+    {},
+    { Authorization: 'Bearer host-token' }
+  ), envWithDb(db));
+  const generated = await generateResponse.json();
+  const draftResponse = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-1/spatial-layouts/draft', {
+    headers: { Authorization: 'Bearer host-token' }
+  }), envWithDb(db));
+  const draft = await draftResponse.json();
+
+  assert.equal(generateResponse.status, 201);
+  assert.equal(draftResponse.status, 200);
+  assert.equal(draft.spatialLayout.id, generated.spatialLayout.id);
+  assert.equal(typeof draft.spatialLayout.inputFingerprint, 'string');
+  assert.ok(draft.spatialLayout.inputFingerprint);
+  assert.equal(draft.spatialClusters[0].evidence.cue, 'soft gold backdrop');
+  assert.equal(draft.spatialPlacements[0].evidence.submissionId, 'photo-1');
+});
+
+test('host can patch draft spatial cluster and placement', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    layouts: [spatialLayout({ id: 'layout-draft', status: 'draft' })],
+    clusters: [
+      spatialCluster({ id: 'cluster-1', layoutId: 'layout-draft', label: 'Story path', routeOrder: 1 }),
+      spatialCluster({ id: 'cluster-2', layoutId: 'layout-draft', label: 'Second path', routeOrder: 2 })
+    ],
+    placements: [
+      spatialPlacement({ id: 'placement-1', layoutId: 'layout-draft', clusterId: 'cluster-1', routeOrder: 1 })
+    ]
+  });
+
+  const clusterResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/spatial-layouts/layout-draft/clusters/cluster-1',
+    { label: 'Reception glow', summary: 'Warm reception moments', routeOrder: 3 },
+    { Authorization: 'Bearer host-token' },
+    'PATCH'
+  ), envWithDb(db));
+  const clusterPayload = await clusterResponse.json();
+  const placementResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/spatial-layouts/layout-draft/placements/placement-1',
+    { clusterId: 'cluster-2', routeOrder: 9 },
+    { Authorization: 'Bearer host-token' },
+    'PATCH'
+  ), envWithDb(db));
+  const placementPayload = await placementResponse.json();
+
+  assert.equal(clusterResponse.status, 200);
+  assert.equal(clusterPayload.spatialCluster.label, 'Reception glow');
+  assert.equal(clusterPayload.spatialCluster.summary, 'Warm reception moments');
+  assert.equal(clusterPayload.spatialCluster.routeOrder, 3);
+  assert.equal(placementResponse.status, 200);
+  assert.equal(placementPayload.spatialPlacement.clusterId, 'cluster-2');
+  assert.equal(placementPayload.spatialPlacement.routeOrder, 9);
+});
+
+test('spatial patch routes reject published layouts', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    layouts: [spatialLayout({ id: 'layout-published', status: 'published' })],
+    clusters: [spatialCluster({ id: 'cluster-1', layoutId: 'layout-published', label: 'Published path' })],
+    placements: [spatialPlacement({ id: 'placement-1', layoutId: 'layout-published', clusterId: 'cluster-1', routeOrder: 1 })]
+  });
+
+  const layoutResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/spatial-layouts/layout-published',
+    { layoutMode: 'timeline_path' },
+    { Authorization: 'Bearer host-token' },
+    'PATCH'
+  ), envWithDb(db));
+  const clusterResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/spatial-layouts/layout-published/clusters/cluster-1',
+    { label: 'Should not save' },
+    { Authorization: 'Bearer host-token' },
+    'PATCH'
+  ), envWithDb(db));
+  const placementResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/spatial-layouts/layout-published/placements/placement-1',
+    { routeOrder: 5 },
+    { Authorization: 'Bearer host-token' },
+    'PATCH'
+  ), envWithDb(db));
+
+  assert.equal(layoutResponse.status, 400);
+  assert.match((await layoutResponse.json()).message, /draft/i);
+  assert.equal(clusterResponse.status, 400);
+  assert.match((await clusterResponse.json()).message, /draft/i);
+  assert.equal(placementResponse.status, 400);
+  assert.match((await placementResponse.json()).message, /draft/i);
+  assert.equal(db.clusters[0].label, 'Published path');
+  assert.equal(db.placements[0].routeOrder, 1);
+});
+
+test('spatial publish rejects drafts that are not ready', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    layouts: [
+      spatialLayout({ id: 'layout-running', status: 'draft', generationStatus: 'running', generation_status: 'running' }),
+      spatialLayout({ id: 'layout-failed', status: 'draft', generationStatus: 'failed', generation_status: 'failed' }),
+      spatialLayout({ id: 'layout-not-ready', status: 'draft', generationStatus: 'not_ready', generation_status: 'not_ready' })
+    ]
+  });
+
+  for (const layoutId of ['layout-running', 'layout-failed', 'layout-not-ready']) {
+    const response = await worker.fetch(jsonRequest(
+      `/moments-api/host/spatial-layouts/${layoutId}/publish`,
+      {},
+      { Authorization: 'Bearer host-token' }
+    ), envWithDb(db));
+    const payload = await response.json();
+    assert.equal(response.status, 400);
+    assert.match(payload.message, /ready/i);
+  }
+  assert.equal(db.layouts.find((layout) => layout.id === 'layout-running').status, 'draft');
+  assert.equal(db.layouts.find((layout) => layout.id === 'layout-failed').status, 'draft');
+  assert.equal(db.layouts.find((layout) => layout.id === 'layout-not-ready').status, 'draft');
+});
+
+test('failed spatial publish keeps the previous published layout usable', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    layouts: [
+      spatialLayout({ id: 'layout-old', status: 'published' }),
+      spatialLayout({ id: 'layout-draft', status: 'draft', generationStatus: 'ready', generation_status: 'ready' })
+    ],
+    failOnSqlIncludes: "SET status = 'published'"
+  });
+
+  const response = await worker.fetch(jsonRequest(
+    '/moments-api/host/spatial-layouts/layout-draft/publish',
+    {},
+    { Authorization: 'Bearer host-token' }
+  ), envWithDb(db));
+
+  assert.equal(response.status, 500);
+  assert.equal(db.layouts.find((layout) => layout.id === 'layout-old').status, 'published');
+  assert.equal(db.layouts.find((layout) => layout.id === 'layout-draft').status, 'draft');
+});
+
+test('unauthorized host spatial route rejects wrong token', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    submissions: [approvedSubmission({ id: 'photo-1' })],
+    items: [capsuleItem({ id: 'item-1', submissionId: 'photo-1' })]
+  });
+
+  const response = await worker.fetch(jsonRequest(
+    '/moments-api/host/events/event-1/spatial-layouts/generate',
+    {},
+    { Authorization: 'Bearer wrong-token' }
+  ), envWithDb(db));
+
+  assert.equal(response.status, 403);
+});
+
+test('host, event admin, and global admin tokens can access spatial draft routes', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    layouts: [spatialLayout({ id: 'layout-draft', status: 'draft' })],
+    clusters: [spatialCluster({ id: 'cluster-1', layoutId: 'layout-draft' })],
+    placements: [spatialPlacement({ id: 'placement-1', layoutId: 'layout-draft', clusterId: 'cluster-1' })]
+  });
+
+  for (const token of ['host-token', 'event-admin-token', 'admin-token']) {
+    const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/host/events/event-1/spatial-layouts/draft', {
+      headers: { Authorization: `Bearer ${token}` }
+    }), envWithDb(db));
+    assert.equal(response.status, 200);
+  }
+});
+
+test('guest capsule filters hidden spatial placements', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    submissions: [
+      approvedSubmission({ id: 'photo-1' }),
+      approvedSubmission({ id: 'photo-hidden' })
+    ],
+    items: [
+      capsuleItem({ id: 'item-visible', submissionId: 'photo-1', is_visible: 1, isVisible: 1 }),
+      capsuleItem({ id: 'item-hidden', submissionId: 'photo-hidden', is_visible: 0, isVisible: 0 })
+    ],
+    layouts: [spatialLayout({ id: 'layout-published', status: 'published' })],
+    clusters: [spatialCluster({ id: 'cluster-1', layoutId: 'layout-published' })],
+    placements: [
+      spatialPlacement({ id: 'placement-visible', layoutId: 'layout-published', clusterId: 'cluster-1', itemId: 'item-visible' }),
+      spatialPlacement({ id: 'placement-hidden', layoutId: 'layout-published', clusterId: 'cluster-1', itemId: 'item-hidden' })
+    ]
+  });
+
+  const response = await worker.fetch(new Request('https://williamsonwallflowers.com/moments-api/capsules/event-1', {
+    headers: { Authorization: 'Bearer share-token' }
+  }), envWithDb(db));
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(payload.spatialPlacements.map((placement) => placement.itemId), ['item-visible']);
+  assert.equal(JSON.stringify(payload).includes('item-hidden'), false);
+});
+
+test('spatial routes reject trailing path segments', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    submissions: [approvedSubmission({ id: 'photo-1' })],
+    items: [capsuleItem({ id: 'item-1', submissionId: 'photo-1' })],
+    layouts: [spatialLayout({ id: 'layout-draft', status: 'draft' })],
+    clusters: [spatialCluster({ id: 'cluster-1', layoutId: 'layout-draft', label: 'Story path' })]
+  });
+
+  const generateResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/events/event-1/spatial-layouts/generate/extra',
+    {},
+    { Authorization: 'Bearer host-token' }
+  ), envWithDb(db));
+  const publishResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/spatial-layouts/layout-draft/publish/extra',
+    {},
+    { Authorization: 'Bearer host-token' }
+  ), envWithDb(db));
+  const clusterResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/spatial-layouts/layout-draft/clusters/cluster-1/extra',
+    { label: 'Should not save' },
+    { Authorization: 'Bearer host-token' },
+    'PATCH'
+  ), envWithDb(db));
+
+  assert.equal(generateResponse.status, 404);
+  assert.equal(publishResponse.status, 404);
+  assert.equal(clusterResponse.status, 404);
+  assert.equal(db.layouts.length, 1);
+  assert.equal(db.layouts[0].status, 'draft');
+  assert.equal(db.clusters[0].label, 'Story path');
+});
+
 function jsonRequest(path, body, headers = {}, method = 'POST') {
   return new Request(`https://williamsonwallflowers.com${path}`, {
     method,
@@ -651,10 +932,47 @@ class FakeMomentsDb {
     this.layouts = seed.layouts ? seed.layouts.map((layout) => ({ ...layout })) : [];
     this.clusters = seed.clusters ? seed.clusters.map((cluster) => ({ ...cluster })) : [];
     this.placements = seed.placements ? seed.placements.map((placement) => ({ ...placement })) : [];
+    this.failOnSqlIncludes = seed.failOnSqlIncludes || '';
   }
 
   prepare(sql) {
     return new FakeStatement(this, sql);
+  }
+
+  async batch(statements) {
+    const snapshot = this.snapshot();
+    try {
+      const results = [];
+      for (const statement of statements) {
+        results.push(await statement.run());
+      }
+      return results;
+    } catch (error) {
+      this.restore(snapshot);
+      throw error;
+    }
+  }
+
+  snapshot() {
+    return {
+      events: this.events.map((item) => ({ ...item })),
+      submissions: this.submissions.map((item) => ({ ...item })),
+      items: this.items.map((item) => ({ ...item })),
+      insights: this.insights.map((item) => ({ ...item })),
+      layouts: this.layouts.map((item) => ({ ...item })),
+      clusters: this.clusters.map((item) => ({ ...item })),
+      placements: this.placements.map((item) => ({ ...item }))
+    };
+  }
+
+  restore(snapshot) {
+    this.events = snapshot.events.map((item) => ({ ...item }));
+    this.submissions = snapshot.submissions.map((item) => ({ ...item }));
+    this.items = snapshot.items.map((item) => ({ ...item }));
+    this.insights = snapshot.insights.map((item) => ({ ...item }));
+    this.layouts = snapshot.layouts.map((item) => ({ ...item }));
+    this.clusters = snapshot.clusters.map((item) => ({ ...item }));
+    this.placements = snapshot.placements.map((item) => ({ ...item }));
   }
 }
 
@@ -789,6 +1107,10 @@ class FakeStatement {
   }
 
   async run() {
+    if (this.db.failOnSqlIncludes && this.sql.includes(this.db.failOnSqlIncludes)) {
+      throw new Error(`Injected D1 failure for ${this.db.failOnSqlIncludes}`);
+    }
+
     if (this.sql.includes('INSERT INTO events')) {
       const [
         id,

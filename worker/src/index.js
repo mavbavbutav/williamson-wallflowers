@@ -255,11 +255,11 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
     }
 
     if (parts[0] === 'host' && parts[1] === 'events' && parts[2] && parts[3] === 'spatial-layouts') {
-      if (request.method === 'POST' && parts[4] === 'generate') {
+      if (request.method === 'POST' && parts[4] === 'generate' && parts.length === 5) {
         return generateHostSpatialLayout(request, env, url, corsHeaders, parts[2]);
       }
 
-      if (request.method === 'GET' && parts[4] === 'draft') {
+      if (request.method === 'GET' && parts[4] === 'draft' && parts.length === 5) {
         return getHostSpatialLayoutDraft(request, env, url, corsHeaders, parts[2]);
       }
     }
@@ -269,15 +269,15 @@ async function handleMomentsApi(request, env, url, corsHeaders, ctx) {
         return updateHostSpatialLayout(request, env, url, corsHeaders, parts[2]);
       }
 
-      if (request.method === 'PATCH' && parts[3] === 'clusters' && parts[4]) {
+      if (request.method === 'PATCH' && parts[3] === 'clusters' && parts[4] && parts.length === 5) {
         return updateHostSpatialCluster(request, env, url, corsHeaders, parts[2], parts[4]);
       }
 
-      if (request.method === 'PATCH' && parts[3] === 'placements' && parts[4]) {
+      if (request.method === 'PATCH' && parts[3] === 'placements' && parts[4] && parts.length === 5) {
         return updateHostSpatialPlacement(request, env, url, corsHeaders, parts[2], parts[4]);
       }
 
-      if (request.method === 'POST' && parts[3] === 'publish') {
+      if (request.method === 'POST' && parts[3] === 'publish' && parts.length === 4) {
         return publishHostSpatialLayout(request, env, url, corsHeaders, parts[2]);
       }
     }
@@ -1208,6 +1208,8 @@ async function getHostSpatialLayoutDraft(request, env, url, corsHeaders, eventId
 async function updateHostSpatialLayout(request, env, url, corsHeaders, layoutId) {
   const auth = await getAuthorizedSpatialLayout(request, env, url, layoutId, corsHeaders);
   if (auth.response) return auth.response;
+  const stateError = assertEditableDraftSpatialLayout(auth.record);
+  if (stateError) return json({ ok: false, message: stateError }, 400, corsHeaders);
 
   const body = await request.json().catch(() => ({}));
   const requestedMode = body.layoutMode === undefined ? auth.record.layoutMode : cleanText(body.layoutMode, 40);
@@ -1231,6 +1233,8 @@ async function updateHostSpatialLayout(request, env, url, corsHeaders, layoutId)
 async function updateHostSpatialCluster(request, env, url, corsHeaders, layoutId, clusterId) {
   const auth = await getAuthorizedSpatialLayout(request, env, url, layoutId, corsHeaders);
   if (auth.response) return auth.response;
+  const stateError = assertEditableDraftSpatialLayout(auth.record);
+  if (stateError) return json({ ok: false, message: stateError }, 400, corsHeaders);
 
   const cluster = await getSpatialClusterById(env, auth.record.id, clusterId);
   if (!cluster) {
@@ -1260,6 +1264,8 @@ async function updateHostSpatialCluster(request, env, url, corsHeaders, layoutId
 async function updateHostSpatialPlacement(request, env, url, corsHeaders, layoutId, placementId) {
   const auth = await getAuthorizedSpatialLayout(request, env, url, layoutId, corsHeaders);
   if (auth.response) return auth.response;
+  const stateError = assertEditableDraftSpatialLayout(auth.record);
+  if (stateError) return json({ ok: false, message: stateError }, 400, corsHeaders);
 
   const placement = await getSpatialPlacementById(env, auth.record.id, placementId);
   if (!placement) {
@@ -1298,16 +1304,39 @@ async function updateHostSpatialPlacement(request, env, url, corsHeaders, layout
 async function publishHostSpatialLayout(request, env, url, corsHeaders, layoutId) {
   const auth = await getAuthorizedSpatialLayout(request, env, url, layoutId, corsHeaders);
   if (auth.response) return auth.response;
+  const stateError = assertPublishableSpatialLayout(auth.record);
+  if (stateError) return json({ ok: false, message: stateError }, 400, corsHeaders);
 
-  if (auth.record.status === 'archived') {
-    return json({ ok: false, message: 'Archived spatial layouts cannot be published.' }, 400, corsHeaders);
+  try {
+    const bundle = await publishSpatialLayout(env, auth.record);
+    return json({
+      ok: true,
+      ...toSpatialLayoutBundleClient(bundle, { includeEvidence: true })
+    }, 200, corsHeaders);
+  } catch (error) {
+    console.error('Spatial layout publish failed', error);
+    return json({ ok: false, message: 'Spatial layout could not be published right now.' }, 500, corsHeaders);
+  }
+}
+
+function assertEditableDraftSpatialLayout(layout) {
+  return layout?.status === 'draft'
+    ? ''
+    : 'Spatial layout must be a draft before it can be edited.';
+}
+
+function assertPublishableSpatialLayout(layout) {
+  if (layout?.status !== 'draft') {
+    return 'Only draft spatial layouts can be published.';
   }
 
-  const bundle = await publishSpatialLayout(env, auth.record);
-  return json({
-    ok: true,
-    ...toSpatialLayoutBundleClient(bundle, { includeEvidence: true })
-  }, 200, corsHeaders);
+  return getSpatialGenerationStatus(layout) === 'ready'
+    ? ''
+    : 'Spatial layout must be ready before it can be published.';
+}
+
+function getSpatialGenerationStatus(layout) {
+  return String(layout?.generationStatus || layout?.generation_status || '').toLowerCase();
 }
 
 async function generateSpatialLayoutDraft(env, event, request) {
@@ -1324,15 +1353,16 @@ function buildSpatialLayoutDraft(eventId, items, insightRows, now) {
   const orderedItems = [...items].sort(compareSpatialItems);
   const placedSubmissionIds = new Set(orderedItems.map((item) => item.submissionId).filter(Boolean));
   const placementInsightRows = insightRows.filter((row) => placedSubmissionIds.has(row.submissionId || row.submission_id));
+  const readyPlacementInsightRows = placementInsightRows.filter(isReadySpatialVisualInsight);
   const insightsBySubmissionId = new Map();
-  for (const row of placementInsightRows) {
+  for (const row of readyPlacementInsightRows) {
     const submissionId = row.submissionId || row.submission_id;
     if (submissionId && !insightsBySubmissionId.has(submissionId)) {
       insightsBySubmissionId.set(submissionId, row);
     }
   }
 
-  const repeatedCue = selectRepeatedSpatialCue(placementInsightRows);
+  const repeatedCue = selectRepeatedSpatialCue(readyPlacementInsightRows);
   const layoutMode = repeatedCue ? 'visual_cluster' : 'timeline_path';
   const layoutId = crypto.randomUUID();
   const clusterId = crypto.randomUUID();
@@ -1409,14 +1439,9 @@ function buildSpatialLayoutDraft(eventId, items, insightRows, now) {
 
 async function saveSpatialLayoutDraft(env, eventId, draft) {
   const now = new Date().toISOString();
-  await env.MOMENTS_DB.prepare(`
-    UPDATE time_capsule_spatial_layouts
-    SET status = 'archived', updated_at = ?
-    WHERE event_id = ? AND status = 'draft'
-  `).bind(now, eventId).run();
-
   const layout = draft.layout;
-  await env.MOMENTS_DB.prepare(`
+  const statements = [
+    env.MOMENTS_DB.prepare(`
     INSERT INTO time_capsule_spatial_layouts (
       id, event_id, status, version, generation_status, layout_mode, confidence_score,
       input_fingerprint, generator_version, error_message, published_at, created_at, updated_at
@@ -1436,10 +1461,11 @@ async function saveSpatialLayoutDraft(env, eventId, draft) {
     layout.publishedAt,
     layout.createdAt || now,
     layout.updatedAt || now
-  ).run();
+    )
+  ];
 
   for (const cluster of draft.clusters) {
-    await env.MOMENTS_DB.prepare(`
+    statements.push(env.MOMENTS_DB.prepare(`
       INSERT INTO time_capsule_spatial_clusters (
         id, layout_id, label, summary, route_order, anchor_x, anchor_y, anchor_z,
         confidence_score, evidence_json, created_at, updated_at
@@ -1458,11 +1484,11 @@ async function saveSpatialLayoutDraft(env, eventId, draft) {
       cluster.evidenceJson,
       cluster.createdAt || now,
       cluster.updatedAt || now
-    ).run();
+    ));
   }
 
   for (const placement of draft.placements) {
-    await env.MOMENTS_DB.prepare(`
+    statements.push(env.MOMENTS_DB.prepare(`
       INSERT INTO time_capsule_spatial_placements (
         id, event_id, layout_id, cluster_id, time_capsule_item_id, route_order,
         position_x, position_y, position_z, rotation_x, rotation_y, rotation_z,
@@ -1487,27 +1513,49 @@ async function saveSpatialLayoutDraft(env, eventId, draft) {
       placement.evidenceJson,
       placement.createdAt || now,
       placement.updatedAt || now
-    ).run();
+    ));
   }
+
+  statements.push(env.MOMENTS_DB.prepare(`
+    UPDATE time_capsule_spatial_layouts
+    SET status = 'archived', updated_at = ?
+    WHERE event_id = ? AND status = 'draft' AND id != ?
+  `).bind(now, eventId, layout.id));
+
+  await runMomentsDbBatch(env, statements);
 
   return getSpatialLayoutBundleByLayoutId(env, layout.id);
 }
 
 async function publishSpatialLayout(env, layout) {
   const now = new Date().toISOString();
-  await env.MOMENTS_DB.prepare(`
-    UPDATE time_capsule_spatial_layouts
-    SET status = 'archived', updated_at = ?
-    WHERE event_id = ? AND status = 'published' AND id != ?
-  `).bind(now, layout.eventId, layout.id).run();
-
-  await env.MOMENTS_DB.prepare(`
+  await runMomentsDbBatch(env, [
+    env.MOMENTS_DB.prepare(`
     UPDATE time_capsule_spatial_layouts
     SET status = 'published', published_at = ?, updated_at = ?
     WHERE id = ?
-  `).bind(now, now, layout.id).run();
+    `).bind(now, now, layout.id),
+    env.MOMENTS_DB.prepare(`
+    UPDATE time_capsule_spatial_layouts
+    SET status = 'archived', updated_at = ?
+    WHERE event_id = ? AND status = 'published' AND id != ?
+    `).bind(now, layout.eventId, layout.id)
+  ]);
 
   return getSpatialLayoutBundleByLayoutId(env, layout.id);
+}
+
+async function runMomentsDbBatch(env, statements) {
+  if (!statements.length) return [];
+  if (typeof env.MOMENTS_DB.batch === 'function') {
+    return env.MOMENTS_DB.batch(statements);
+  }
+
+  const results = [];
+  for (const statement of statements) {
+    results.push(await statement.run());
+  }
+  return results;
 }
 
 async function getPublishedSpatialLayoutBundle(env, eventId) {
@@ -1910,6 +1958,12 @@ function selectRepeatedSpatialCue(insightRows) {
   return [...counts.values()]
     .filter((entry) => entry.count >= 2)
     .sort((left, right) => right.count - left.count || left.priority - right.priority || left.cue.localeCompare(right.cue))[0] || null;
+}
+
+function isReadySpatialVisualInsight(row) {
+  const status = String(row.status || '').toLowerCase();
+  const visionStatus = String(row.visionStatus || row.vision_status || '').toLowerCase();
+  return status === 'analyzed' || visionStatus === 'ready';
 }
 
 function spatialInsightHasCue(insight, cue) {
