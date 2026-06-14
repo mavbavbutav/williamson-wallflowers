@@ -21,6 +21,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_spatial_layout_one_published
 CREATE INDEX IF NOT EXISTS idx_spatial_layouts_event_status
   ON time_capsule_spatial_layouts(event_id, status, updated_at);
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_spatial_layouts_event_id
+  ON time_capsule_spatial_layouts(event_id, id);
+
 CREATE TABLE IF NOT EXISTS time_capsule_spatial_clusters (
   id TEXT PRIMARY KEY,
   layout_id TEXT NOT NULL REFERENCES time_capsule_spatial_layouts(id) ON DELETE CASCADE,
@@ -36,14 +39,21 @@ CREATE TABLE IF NOT EXISTS time_capsule_spatial_clusters (
   updated_at TEXT NOT NULL
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_spatial_clusters_layout_id
+  ON time_capsule_spatial_clusters(layout_id, id);
+
 CREATE INDEX IF NOT EXISTS idx_spatial_clusters_layout_order
   ON time_capsule_spatial_clusters(layout_id, route_order);
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_time_capsule_items_event_id_spatial
+  ON time_capsule_items(event_id, id);
+
 CREATE TABLE IF NOT EXISTS time_capsule_spatial_placements (
   id TEXT PRIMARY KEY,
-  layout_id TEXT NOT NULL REFERENCES time_capsule_spatial_layouts(id) ON DELETE CASCADE,
-  cluster_id TEXT NOT NULL REFERENCES time_capsule_spatial_clusters(id) ON DELETE CASCADE,
-  time_capsule_item_id TEXT NOT NULL REFERENCES time_capsule_items(id) ON DELETE CASCADE,
+  event_id TEXT NOT NULL,
+  layout_id TEXT NOT NULL,
+  cluster_id TEXT NOT NULL,
+  time_capsule_item_id TEXT NOT NULL,
   route_order INTEGER NOT NULL DEFAULT 0,
   position_x REAL NOT NULL DEFAULT 0,
   position_y REAL NOT NULL DEFAULT 0,
@@ -55,7 +65,10 @@ CREATE TABLE IF NOT EXISTS time_capsule_spatial_placements (
   confidence_score REAL NOT NULL DEFAULT 0,
   evidence_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (event_id, layout_id) REFERENCES time_capsule_spatial_layouts(event_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (layout_id, cluster_id) REFERENCES time_capsule_spatial_clusters(layout_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (event_id, time_capsule_item_id) REFERENCES time_capsule_items(event_id, id) ON DELETE CASCADE
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_spatial_placements_layout_item

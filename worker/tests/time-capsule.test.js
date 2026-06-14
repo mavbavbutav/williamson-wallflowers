@@ -16,6 +16,7 @@ const BASE_ENV = {
 
 test('spatial capsule migration creates layout, cluster, and placement tables', async () => {
   const migration = await readText('../migrations/0021_wallflower_spatial_capsule.sql');
+  const compactMigration = migration.replace(/\s+/g, ' ');
   const layoutTable = tableSchema(migration, 'time_capsule_spatial_layouts');
   const clusterTable = tableSchema(migration, 'time_capsule_spatial_clusters');
   const placementTable = tableSchema(migration, 'time_capsule_spatial_placements');
@@ -39,9 +40,10 @@ test('spatial capsule migration creates layout, cluster, and placement tables', 
   assert.match(clusterTable, /anchor_z REAL NOT NULL DEFAULT 0/);
   assert.match(clusterTable, /evidence_json TEXT NOT NULL DEFAULT '\{\}'/);
 
-  assert.match(placementTable, /layout_id TEXT NOT NULL REFERENCES time_capsule_spatial_layouts\(id\) ON DELETE CASCADE/);
-  assert.match(placementTable, /cluster_id TEXT NOT NULL REFERENCES time_capsule_spatial_clusters\(id\) ON DELETE CASCADE/);
-  assert.match(placementTable, /time_capsule_item_id TEXT NOT NULL REFERENCES time_capsule_items\(id\) ON DELETE CASCADE/);
+  assert.match(placementTable, /event_id TEXT NOT NULL/);
+  assert.match(placementTable, /layout_id TEXT NOT NULL/);
+  assert.match(placementTable, /cluster_id TEXT NOT NULL/);
+  assert.match(placementTable, /time_capsule_item_id TEXT NOT NULL/);
   assert.match(placementTable, /position_x REAL NOT NULL DEFAULT 0/);
   assert.match(placementTable, /position_y REAL NOT NULL DEFAULT 0/);
   assert.match(placementTable, /position_z REAL NOT NULL DEFAULT 0/);
@@ -50,9 +52,15 @@ test('spatial capsule migration creates layout, cluster, and placement tables', 
   assert.match(placementTable, /rotation_z REAL NOT NULL DEFAULT 0/);
   assert.match(placementTable, /scale REAL NOT NULL DEFAULT 1/);
   assert.match(placementTable, /evidence_json TEXT NOT NULL DEFAULT '\{\}'/);
+  assert.match(placementTable, /FOREIGN KEY \(event_id, layout_id\) REFERENCES time_capsule_spatial_layouts\(event_id, id\) ON DELETE CASCADE/);
+  assert.match(placementTable, /FOREIGN KEY \(layout_id, cluster_id\) REFERENCES time_capsule_spatial_clusters\(layout_id, id\) ON DELETE CASCADE/);
+  assert.match(placementTable, /FOREIGN KEY \(event_id, time_capsule_item_id\) REFERENCES time_capsule_items\(event_id, id\) ON DELETE CASCADE/);
 
   assert.match(migration, /CREATE UNIQUE INDEX IF NOT EXISTS idx_spatial_layout_one_published/);
   assert.match(migration, /CREATE INDEX IF NOT EXISTS idx_spatial_layouts_event_status/);
+  assert.match(compactMigration, /CREATE UNIQUE INDEX IF NOT EXISTS idx_spatial_layouts_event_id ON time_capsule_spatial_layouts\(event_id, id\)/);
+  assert.match(compactMigration, /CREATE UNIQUE INDEX IF NOT EXISTS idx_spatial_clusters_layout_id ON time_capsule_spatial_clusters\(layout_id, id\)/);
+  assert.match(compactMigration, /CREATE UNIQUE INDEX IF NOT EXISTS idx_time_capsule_items_event_id_spatial ON time_capsule_items\(event_id, id\)/);
   assert.match(migration, /CREATE INDEX IF NOT EXISTS idx_spatial_clusters_layout_order/);
   assert.match(migration, /CREATE UNIQUE INDEX IF NOT EXISTS idx_spatial_placements_layout_item/);
   assert.match(migration, /CREATE INDEX IF NOT EXISTS idx_spatial_placements_layout_order/);
