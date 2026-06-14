@@ -618,40 +618,57 @@ function renderSpatialLayoutReview() {
   const panel = qs("#spatialLayoutPanel");
   if (!panel) return;
 
-  const hasDraft = Boolean(spatialLayout);
-  const modeLabel = hasDraft
-    ? String(spatialLayout.layoutMode || spatialLayout.layout_mode || "draft").replace(/_/g, " ")
+  const hasLayout = Boolean(spatialLayout);
+  const isDraft = isSpatialLayoutDraft();
+  const isPublished = spatialLayout?.status === "published";
+  const modeLabel = isPublished
+    ? "Published"
+    : hasLayout
+      ? String(spatialLayout.layoutMode || spatialLayout.layout_mode || "draft").replace(/_/g, " ")
     : "Not generated";
   qs("#spatialLayoutStatusPill").textContent = modeLabel;
-  qs("#spatialLayoutStatusPill").className = `status-pill${hasDraft ? " is-approved" : ""}`;
-  qs("#spatialLayoutHint").textContent = hasDraft
-    ? "Review the generated adaptive clusters, then publish the 3D walk when it feels right."
-    : "Generate an adaptive spatial walk from this Time Capsule's visible moments.";
-  qs("#publishSpatialLayoutButton").disabled = !hasDraft;
+  qs("#spatialLayoutStatusPill").className = `status-pill${isPublished ? " is-approved" : ""}${isDraft ? " is-pending" : ""}`;
+  qs("#spatialLayoutHint").textContent = isPublished
+    ? "This 3D walk is published. Generate a new draft before making more cluster changes."
+    : isDraft
+      ? "Review the generated adaptive clusters, then publish the 3D walk when it feels right."
+      : "Generate an adaptive spatial walk from this Time Capsule's visible moments.";
+  qs("#publishSpatialLayoutButton").disabled = !isDraft;
   qs("#spatialLayoutEmpty").hidden = spatialClusters.length > 0;
 
   const list = qs("#spatialClusterList");
   list.innerHTML = "";
-  spatialClusters.forEach((cluster) => list.append(renderSpatialClusterCard(cluster)));
+  spatialClusters.forEach((cluster) => list.append(renderSpatialClusterCard(cluster, { isEditable: isDraft })));
 }
 
-function renderSpatialClusterCard(cluster) {
+function isSpatialLayoutDraft() {
+  return spatialLayout?.status === "draft";
+}
+
+function renderSpatialClusterCard(cluster, { isEditable = true } = {}) {
   const card = document.createElement("article");
   card.className = "spatial-cluster-card";
   const count = spatialPlacements.filter((placement) => placement.clusterId === cluster.id || placement.cluster_id === cluster.id).length;
   card.innerHTML = `
     <label>
       Cluster label
-      <input data-spatial-cluster-label="${escapeAttribute(cluster.id)}" value="${escapeAttribute(cluster.label)}" />
+      <input data-spatial-cluster-label="${escapeAttribute(cluster.id)}" value="${escapeAttribute(cluster.label)}"${isEditable ? "" : " disabled"} />
     </label>
     <p class="muted">${escapeHtml(cluster.summary || "Arranged from the available moment data.")}</p>
-    <div class="row-actions">
+    <div class="row-actions" data-spatial-cluster-actions>
       <span class="status-pill">${count} ${count === 1 ? "moment" : "moments"}</span>
       <span class="status-pill">${Math.round(Number(cluster.confidenceScore ?? cluster.confidence_score ?? 0) * 100)}% confidence</span>
-      <button class="small-button" type="button" data-save-spatial-cluster="${escapeAttribute(cluster.id)}">Save label</button>
     </div>
   `;
-  card.querySelector("[data-save-spatial-cluster]")?.addEventListener("click", () => saveSpatialCluster(cluster.id, card));
+  if (!isEditable) return card;
+
+  const saveButton = document.createElement("button");
+  saveButton.className = "small-button";
+  saveButton.type = "button";
+  saveButton.dataset.saveSpatialCluster = cluster.id;
+  saveButton.textContent = "Save label";
+  saveButton.addEventListener("click", () => saveSpatialCluster(cluster.id, card));
+  card.querySelector("[data-spatial-cluster-actions]")?.append(saveButton);
   return card;
 }
 
@@ -1214,7 +1231,7 @@ async function generateSpatialLayout() {
 }
 
 async function publishSpatialLayout() {
-  if (!spatialLayout?.id) return;
+  if (!spatialLayout?.id || !isSpatialLayoutDraft()) return;
   try {
     const payload = await hostRequest(`/host/spatial-layouts/${encodeURIComponent(spatialLayout.id)}/publish`, { method: "POST", body: JSON.stringify({}) });
     spatialLayout = payload.spatialLayout || spatialLayout;
@@ -1228,16 +1245,19 @@ async function publishSpatialLayout() {
 }
 
 async function saveSpatialCluster(clusterId, card) {
-  if (!spatialLayout?.id) return;
+  if (!spatialLayout?.id || !isSpatialLayoutDraft()) return;
   const label = card.querySelector(`[data-spatial-cluster-label="${cssEscape(clusterId)}"]`)?.value || "";
   try {
     const payload = await hostRequest(`/host/spatial-layouts/${encodeURIComponent(spatialLayout.id)}/clusters/${encodeURIComponent(clusterId)}`, {
       method: "PATCH",
       body: JSON.stringify({ label })
     });
-    spatialClusters = payload.spatialClusters || spatialClusters.map((cluster) => (
-      cluster.id === clusterId ? { ...cluster, label } : cluster
-    ));
+    const updatedCluster = payload.spatialCluster || null;
+    spatialClusters = updatedCluster
+      ? spatialClusters.map((cluster) => cluster.id === updatedCluster.id ? updatedCluster : cluster)
+      : (payload.spatialClusters || spatialClusters.map((cluster) => (
+        cluster.id === clusterId ? { ...cluster, label } : cluster
+      )));
     renderCapsule();
     setNotice(qs("#capsuleNotice"), "3D walk cluster saved.", "success");
   } catch (error) {
@@ -1816,7 +1836,10 @@ function getLocalDemoHostPayload(path, options = {}) {
     localDemoHostState.spatialClusters = (localDemoHostState.spatialClusters || []).map((cluster) => (
       cluster.id === clusterId ? { ...cluster, label: form.label ?? cluster.label } : cluster
     ));
-    return getLocalDemoSpatialPayload();
+    return {
+      ...getLocalDemoSpatialPayload(),
+      spatialCluster: localDemoHostState.spatialClusters.find((cluster) => cluster.id === clusterId) || null
+    };
   }
 
   if (path.endsWith("/countdown") && options.method === "PATCH") {

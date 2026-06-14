@@ -69,10 +69,16 @@ test('host Time Capsule includes adaptive 3D walk review controls', async () => 
   assert.match(hostJs, /function renderSpatialLayoutReview/);
   assert.match(hostJs, /function renderSpatialClusterCard/);
   assert.match(hostJs, /function saveSpatialCluster/);
+  assert.match(hostJs, /function isSpatialLayoutDraft/);
+  assert.match(hostJs, /spatialLayout\?\.status === "draft"/);
   assert.match(hostJs, /qs\("#generateSpatialLayoutButton"\)\?\.addEventListener\("click", generateSpatialLayout\)/);
   assert.match(hostJs, /qs\("#refreshSpatialLayoutButton"\)\?\.addEventListener\("click", \(\) => loadSpatialLayoutDraft\(\)\.then\(renderCapsule\)\)/);
   assert.match(hostJs, /qs\("#publishSpatialLayoutButton"\)\?\.addEventListener\("click", publishSpatialLayout\)/);
   assert.match(hostJs, /function renderCapsule\(\) \{[\s\S]*renderSpatialLayoutReview\(\);/);
+  assert.match(hostJs, /#publishSpatialLayoutButton"\)\.disabled = !isDraft/);
+  assert.match(hostJs, /renderSpatialClusterCard\(cluster, \{ isEditable: isDraft \}\)/);
+  assert.match(hostJs, /if \(!isEditable\) return card/);
+  assert.match(hostJs, /if \(!spatialLayout\?\.id \|\| !isSpatialLayoutDraft\(\)\) return/);
   assert.match(hostJs, /\/host\/events\/\$\{encodeURIComponent\(eventId\)\}\/spatial-layouts\/draft/);
   assert.match(hostJs, /\/host\/events\/\$\{encodeURIComponent\(eventId\)\}\/spatial-layouts\/generate/);
   assert.match(hostJs, /\/host\/spatial-layouts\/\$\{encodeURIComponent\(spatialLayout\.id\)\}\/publish/);
@@ -82,6 +88,7 @@ test('host Time Capsule includes adaptive 3D walk review controls', async () => 
   assert.match(hostJs, /spatial-layouts\\\/\[\^\/\]\+\\\/publish/);
   assert.match(hostJs, /spatial-layouts\\\/\[\^\/\]\+\\\/clusters\\\/\(\[\^\/\]\+\)/);
   assert.match(hostJs, /spatialClusterMatch && options\.method === "PATCH"/);
+  assert.match(hostJs, /payload\.spatialCluster/);
   assert.match(`${hostHtml}\n${hostJs}`, /adaptive spatial walk/);
   assert.match(hostJs, /adaptive clusters/);
   assert.doesNotMatch(`${hostHtml}\n${hostJs}`, /\b(?:Dance floor|Bar|Photo booth|Ceremony|Lounge)\b/);
