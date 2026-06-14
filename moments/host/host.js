@@ -15,6 +15,9 @@ let submissions = [];
 let eventRecord = null;
 let timeCapsule = null;
 let capsuleItems = [];
+let spatialLayout = null;
+let spatialClusters = [];
+let spatialPlacements = [];
 let lastFocusedElement = null;
 let localDemoHostState = null;
 let pendingFocusSubmissionId = focusSubmissionId;
@@ -61,6 +64,9 @@ function init() {
     const url = qs("#capsuleShareUrl").value;
     if (url) window.open(url, "_blank", "noopener,noreferrer");
   });
+  qs("#generateSpatialLayoutButton")?.addEventListener("click", generateSpatialLayout);
+  qs("#refreshSpatialLayoutButton")?.addEventListener("click", () => loadSpatialLayoutDraft().then(renderCapsule));
+  qs("#publishSpatialLayoutButton")?.addEventListener("click", publishSpatialLayout);
   qsa("[data-host-post-mode]").forEach((button) => {
     button.addEventListener("click", () => chooseHostPostMode(button.dataset.hostPostMode));
   });
@@ -114,6 +120,9 @@ async function loadGallery() {
       currentView = "submissions";
       timeCapsule = null;
       capsuleItems = [];
+      spatialLayout = null;
+      spatialClusters = [];
+      spatialPlacements = [];
     }
 
     applySubmissionDeepLink();
@@ -140,9 +149,26 @@ async function loadCapsule({ silent = false } = {}) {
     const payload = await hostRequest(`/host/events/${encodeURIComponent(eventId)}/time-capsule`);
     timeCapsule = payload.timeCapsule || null;
     capsuleItems = payload.items || [];
+    await loadSpatialLayoutDraft({ silent: true });
     if (!silent) setNotice(qs("#capsuleNotice"), "Time Capsule refreshed.", "success");
   } catch (error) {
     if (!silent) setNotice(qs("#capsuleNotice"), error.message || "Could not load the Time Capsule.", "error");
+  }
+}
+
+async function loadSpatialLayoutDraft({ silent = false } = {}) {
+  if (!eventRecord?.timeCapsule?.enabled) return;
+  try {
+    const payload = await hostRequest(`/host/events/${encodeURIComponent(eventId)}/spatial-layouts/draft`);
+    spatialLayout = payload.spatialLayout || null;
+    spatialClusters = payload.spatialClusters || [];
+    spatialPlacements = payload.spatialPlacements || [];
+    if (!silent) setNotice(qs("#capsuleNotice"), "3D walk draft refreshed.", "success");
+  } catch (error) {
+    spatialLayout = null;
+    spatialClusters = [];
+    spatialPlacements = [];
+    if (!silent) setNotice(qs("#capsuleNotice"), error.message || "Could not load the 3D walk draft.", "error");
   }
 }
 
@@ -585,6 +611,48 @@ function renderCapsule() {
   capsuleItems.forEach((item) => {
     grid.append(renderCapsuleCard(item));
   });
+  renderSpatialLayoutReview();
+}
+
+function renderSpatialLayoutReview() {
+  const panel = qs("#spatialLayoutPanel");
+  if (!panel) return;
+
+  const hasDraft = Boolean(spatialLayout);
+  const modeLabel = hasDraft
+    ? String(spatialLayout.layoutMode || spatialLayout.layout_mode || "draft").replace(/_/g, " ")
+    : "Not generated";
+  qs("#spatialLayoutStatusPill").textContent = modeLabel;
+  qs("#spatialLayoutStatusPill").className = `status-pill${hasDraft ? " is-approved" : ""}`;
+  qs("#spatialLayoutHint").textContent = hasDraft
+    ? "Review the generated adaptive clusters, then publish the 3D walk when it feels right."
+    : "Generate an adaptive spatial walk from this Time Capsule's visible moments.";
+  qs("#publishSpatialLayoutButton").disabled = !hasDraft;
+  qs("#spatialLayoutEmpty").hidden = spatialClusters.length > 0;
+
+  const list = qs("#spatialClusterList");
+  list.innerHTML = "";
+  spatialClusters.forEach((cluster) => list.append(renderSpatialClusterCard(cluster)));
+}
+
+function renderSpatialClusterCard(cluster) {
+  const card = document.createElement("article");
+  card.className = "spatial-cluster-card";
+  const count = spatialPlacements.filter((placement) => placement.clusterId === cluster.id || placement.cluster_id === cluster.id).length;
+  card.innerHTML = `
+    <label>
+      Cluster label
+      <input data-spatial-cluster-label="${escapeAttribute(cluster.id)}" value="${escapeAttribute(cluster.label)}" />
+    </label>
+    <p class="muted">${escapeHtml(cluster.summary || "Arranged from the available moment data.")}</p>
+    <div class="row-actions">
+      <span class="status-pill">${count} ${count === 1 ? "moment" : "moments"}</span>
+      <span class="status-pill">${Math.round(Number(cluster.confidenceScore ?? cluster.confidence_score ?? 0) * 100)}% confidence</span>
+      <button class="small-button" type="button" data-save-spatial-cluster="${escapeAttribute(cluster.id)}">Save label</button>
+    </div>
+  `;
+  card.querySelector("[data-save-spatial-cluster]")?.addEventListener("click", () => saveSpatialCluster(cluster.id, card));
+  return card;
 }
 
 function renderCapsuleCard(item) {
@@ -1132,6 +1200,51 @@ function createCapsuleItem(submission) {
   });
 }
 
+async function generateSpatialLayout() {
+  try {
+    const payload = await hostRequest(`/host/events/${encodeURIComponent(eventId)}/spatial-layouts/generate`, { method: "POST", body: JSON.stringify({}) });
+    spatialLayout = payload.spatialLayout || null;
+    spatialClusters = payload.spatialClusters || [];
+    spatialPlacements = payload.spatialPlacements || [];
+    renderCapsule();
+    showHostCelebration("3D walk draft generated.", qs("#capsuleNotice"));
+  } catch (error) {
+    setNotice(qs("#capsuleNotice"), error.message || "Could not generate the 3D walk.", "error");
+  }
+}
+
+async function publishSpatialLayout() {
+  if (!spatialLayout?.id) return;
+  try {
+    const payload = await hostRequest(`/host/spatial-layouts/${encodeURIComponent(spatialLayout.id)}/publish`, { method: "POST", body: JSON.stringify({}) });
+    spatialLayout = payload.spatialLayout || spatialLayout;
+    spatialClusters = payload.spatialClusters || spatialClusters;
+    spatialPlacements = payload.spatialPlacements || spatialPlacements;
+    renderCapsule();
+    showHostCelebration("3D walk published.", qs("#capsuleNotice"));
+  } catch (error) {
+    setNotice(qs("#capsuleNotice"), error.message || "Could not publish the 3D walk.", "error");
+  }
+}
+
+async function saveSpatialCluster(clusterId, card) {
+  if (!spatialLayout?.id) return;
+  const label = card.querySelector(`[data-spatial-cluster-label="${cssEscape(clusterId)}"]`)?.value || "";
+  try {
+    const payload = await hostRequest(`/host/spatial-layouts/${encodeURIComponent(spatialLayout.id)}/clusters/${encodeURIComponent(clusterId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ label })
+    });
+    spatialClusters = payload.spatialClusters || spatialClusters.map((cluster) => (
+      cluster.id === clusterId ? { ...cluster, label } : cluster
+    ));
+    renderCapsule();
+    setNotice(qs("#capsuleNotice"), "3D walk cluster saved.", "success");
+  } catch (error) {
+    setNotice(qs("#capsuleNotice"), error.message || "Could not save the cluster.", "error");
+  }
+}
+
 async function setSubmissionPartyView(submission, visible, { reload = true, celebrate = true, notify = true, throwOnError = false } = {}) {
   try {
     await hostRequest(`/host/submissions/${encodeURIComponent(submission.id)}/party-view`, {
@@ -1677,6 +1790,35 @@ function getLocalDemoHostPayload(path, options = {}) {
     };
   }
 
+  if (path.endsWith("/spatial-layouts/draft") && (!options.method || options.method === "GET")) {
+    return getLocalDemoSpatialPayload();
+  }
+
+  if (path.endsWith("/spatial-layouts/generate") && options.method === "POST") {
+    createLocalDemoSpatialDraft();
+    return getLocalDemoSpatialPayload();
+  }
+
+  if (/\/spatial-layouts\/[^/]+\/publish$/.test(path) && options.method === "POST") {
+    if (!localDemoHostState.spatialLayout) createLocalDemoSpatialDraft();
+    localDemoHostState.spatialLayout = {
+      ...localDemoHostState.spatialLayout,
+      status: "published",
+      publishedAt: new Date().toISOString()
+    };
+    return getLocalDemoSpatialPayload();
+  }
+
+  const spatialClusterMatch = path.match(/\/spatial-layouts\/[^/]+\/clusters\/([^/]+)$/);
+  if (spatialClusterMatch && options.method === "PATCH") {
+    const form = JSON.parse(options.body || "{}");
+    const clusterId = decodeURIComponent(spatialClusterMatch[1]);
+    localDemoHostState.spatialClusters = (localDemoHostState.spatialClusters || []).map((cluster) => (
+      cluster.id === clusterId ? { ...cluster, label: form.label ?? cluster.label } : cluster
+    ));
+    return getLocalDemoSpatialPayload();
+  }
+
   if (path.endsWith("/countdown") && options.method === "PATCH") {
     const form = JSON.parse(options.body || "{}");
     localDemoHostState.event = {
@@ -1788,8 +1930,53 @@ function createLocalDemoHostState(id) {
     event,
     submissions,
     timeCapsule: { status: "draft", shareToken: "demo-capsule-token" },
-    items
+    items,
+    spatialLayout: null,
+    spatialClusters: [],
+    spatialPlacements: []
   };
+}
+
+function getLocalDemoSpatialPayload() {
+  return {
+    spatialLayout: localDemoHostState.spatialLayout || null,
+    spatialClusters: localDemoHostState.spatialClusters || [],
+    spatialPlacements: localDemoHostState.spatialPlacements || []
+  };
+}
+
+function createLocalDemoSpatialDraft() {
+  const now = new Date().toISOString();
+  const clusterId = `${eventId}-spatial-cluster`;
+  localDemoHostState.spatialLayout = {
+    id: `${eventId}-spatial-layout`,
+    eventId,
+    status: "draft",
+    generationStatus: "ready",
+    layoutMode: "visual_cluster",
+    confidenceScore: 0.82,
+    createdAt: now,
+    updatedAt: now
+  };
+  localDemoHostState.spatialClusters = [{
+    id: clusterId,
+    layoutId: localDemoHostState.spatialLayout.id,
+    label: "Story path",
+    summary: "A simple adaptive walk through visible Time Capsule moments.",
+    routeOrder: 1,
+    confidenceScore: 0.76,
+    createdAt: now,
+    updatedAt: now
+  }];
+  localDemoHostState.spatialPlacements = (localDemoHostState.items || []).map((item, index) => ({
+    id: `${eventId}-spatial-placement-${index + 1}`,
+    layoutId: localDemoHostState.spatialLayout.id,
+    clusterId,
+    itemId: item.id,
+    routeOrder: index + 1,
+    createdAt: now,
+    updatedAt: now
+  }));
 }
 
 function createLocalDemoSubmission(overrides = {}) {

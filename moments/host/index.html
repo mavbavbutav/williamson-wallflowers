@@ -328,6 +328,22 @@
             <button class="small-button is-primary" type="button" id="openCapsuleLinkButton">Open capsule</button>
           </div>
         </div>
+        <div class="panel spatial-layout-panel" id="spatialLayoutPanel">
+          <div class="panel-heading">
+            <div>
+              <span class="status-pill" id="spatialLayoutStatusPill">Not generated</span>
+              <h2>3D Walk</h2>
+              <p class="muted" id="spatialLayoutHint">Generate an adaptive spatial walk from this Time Capsule's visible moments.</p>
+            </div>
+          </div>
+          <div class="row-actions spatial-layout-actions">
+            <button class="small-button is-primary" type="button" id="generateSpatialLayoutButton">Generate 3D walk</button>
+            <button class="small-button" type="button" id="refreshSpatialLayoutButton">Refresh draft</button>
+            <button class="small-button is-success" type="button" id="publishSpatialLayoutButton" disabled>Publish 3D walk</button>
+          </div>
+          <div class="spatial-cluster-list" id="spatialClusterList"></div>
+          <div class="empty-state" id="spatialLayoutEmpty">No 3D walk draft yet.</div>
+        </div>
         <div class="media-grid capsule-grid" id="capsuleGrid"></div>
         <div class="empty-state" id="capsuleEmpty" hidden>No moments in the Time Capsule yet. Use the Review approval options to add moments here.</div>
       </section>

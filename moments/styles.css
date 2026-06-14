@@ -2419,6 +2419,30 @@ textarea:focus-visible {
   font-weight: 800;
 }
 
+.spatial-layout-panel {
+  margin-top: 18px;
+}
+
+.spatial-layout-actions {
+  margin: 0 0 14px;
+}
+
+.spatial-cluster-list {
+  display: grid;
+  gap: 12px;
+}
+
+.spatial-cluster-card {
+  border: 1px solid var(--border, #eadfd6);
+  border-radius: 8px;
+  background: #fffaf5;
+  padding: 14px;
+}
+
+.spatial-cluster-card input {
+  width: 100%;
+}
+
 .share-actions .small-button {
   min-height: 42px;
   padding-inline: 0.9rem;

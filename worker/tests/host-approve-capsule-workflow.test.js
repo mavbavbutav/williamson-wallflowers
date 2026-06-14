@@ -45,6 +45,28 @@ test('host can choose approval destinations in one step from a guest submission 
   assert.match(hostHtml, /<link rel="stylesheet" href="\.\.\/styles\.css\?v=[^"]+" \/>/);
 });
 
+test('host Time Capsule includes adaptive 3D walk review controls', async () => {
+  const [hostHtml, hostJs, styles] = await Promise.all([
+    readText('../../moments/host/index.html'),
+    readText('../../moments/host/host.js'),
+    readText('../../moments/styles.css')
+  ]);
+
+  assert.match(hostHtml, /id="spatialLayoutPanel"/);
+  assert.match(hostHtml, /id="generateSpatialLayoutButton"/);
+  assert.match(hostHtml, /id="publishSpatialLayoutButton"/);
+  assert.match(hostHtml, /id="spatialClusterList"/);
+  assert.match(hostJs, /let spatialLayout = null/);
+  assert.match(hostJs, /function loadSpatialLayoutDraft/);
+  assert.match(hostJs, /function generateSpatialLayout/);
+  assert.match(hostJs, /function publishSpatialLayout/);
+  assert.match(hostJs, /function renderSpatialLayoutReview/);
+  assert.match(hostJs, /\/host\/events\/\$\{encodeURIComponent\(eventId\)\}\/spatial-layouts\/generate/);
+  assert.match(hostJs, /\/host\/spatial-layouts\/\$\{encodeURIComponent\(spatialLayout\.id\)\}\/publish/);
+  assert.match(styles, /\.spatial-layout-panel/);
+  assert.match(styles, /\.spatial-cluster-card/);
+});
+
 async function readText(path) {
   return readFile(new URL(path, import.meta.url), 'utf8');
 }
