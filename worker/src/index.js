@@ -1532,14 +1532,14 @@ async function publishSpatialLayout(env, layout) {
   await runMomentsDbBatch(env, [
     env.MOMENTS_DB.prepare(`
     UPDATE time_capsule_spatial_layouts
-    SET status = 'published', published_at = ?, updated_at = ?
-    WHERE id = ?
-    `).bind(now, now, layout.id),
-    env.MOMENTS_DB.prepare(`
-    UPDATE time_capsule_spatial_layouts
     SET status = 'archived', updated_at = ?
     WHERE event_id = ? AND status = 'published' AND id != ?
-    `).bind(now, layout.eventId, layout.id)
+    `).bind(now, layout.eventId, layout.id),
+    env.MOMENTS_DB.prepare(`
+    UPDATE time_capsule_spatial_layouts
+    SET status = 'published', published_at = ?, updated_at = ?
+    WHERE id = ?
+    `).bind(now, now, layout.id)
   ]);
 
   return getSpatialLayoutBundleByLayoutId(env, layout.id);

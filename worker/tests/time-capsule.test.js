@@ -569,6 +569,32 @@ test('failed spatial publish keeps the previous published layout usable', async 
   assert.equal(db.layouts.find((layout) => layout.id === 'layout-draft').status, 'draft');
 });
 
+test('spatial publish replaces an existing published layout under the unique status constraint', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    layouts: [
+      spatialLayout({ id: 'layout-old', status: 'published' }),
+      spatialLayout({ id: 'layout-draft', status: 'draft', generationStatus: 'ready', generation_status: 'ready' })
+    ],
+    clusters: [spatialCluster({ id: 'cluster-1', layoutId: 'layout-draft' })],
+    placements: [spatialPlacement({ id: 'placement-1', layoutId: 'layout-draft', clusterId: 'cluster-1' })]
+  });
+
+  const response = await worker.fetch(jsonRequest(
+    '/moments-api/host/spatial-layouts/layout-draft/publish',
+    {},
+    { Authorization: 'Bearer host-token' }
+  ), envWithDb(db));
+  const payload = await response.json();
+  const publishedLayouts = db.layouts.filter((layout) => layout.status === 'published');
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.spatialLayout.id, 'layout-draft');
+  assert.equal(publishedLayouts.length, 1);
+  assert.equal(publishedLayouts[0].id, 'layout-draft');
+  assert.equal(db.layouts.find((layout) => layout.id === 'layout-old').status, 'archived');
+});
+
 test('unauthorized host spatial route rejects wrong token', async () => {
   const db = new FakeMomentsDb({
     events: [timeCapsuleEvent()],
@@ -1355,6 +1381,15 @@ class FakeStatement {
       const [publishedAt, updatedAt, layoutId] = this.params;
       const layout = this.db.layouts.find((item) => item.id === layoutId);
       if (layout) {
+        const eventId = layout.eventId || layout.event_id;
+        const existingPublished = this.db.layouts.find((item) => (
+          item.id !== layout.id
+          && (item.eventId || item.event_id) === eventId
+          && item.status === 'published'
+        ));
+        if (existingPublished) {
+          throw new Error('UNIQUE constraint failed: time_capsule_spatial_layouts.event_id, published status');
+        }
         layout.status = 'published';
         layout.publishedAt = publishedAt;
         layout.published_at = publishedAt;
