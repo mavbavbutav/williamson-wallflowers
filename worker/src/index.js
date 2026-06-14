@@ -1177,7 +1177,7 @@ async function getPublishedTimeCapsule(request, env, url, corsHeaders, eventId) 
   };
 
   if (spatialBundle) {
-    Object.assign(payload, toSpatialLayoutBundleClient(filterSpatialBundleForGuestItems(spatialBundle, items), { includeEvidence: false }));
+    Object.assign(payload, toSpatialLayoutBundleClient(filterSpatialBundleForGuestItems(spatialBundle, items), { includeEvidence: "public" }));
   }
 
   return json(payload, 200, corsHeaders);
@@ -1924,7 +1924,7 @@ function toSpatialLayoutClient(row, options = {}) {
     updatedAt: row.updatedAt || row.updated_at || ''
   };
 
-  if (options.includeEvidence) {
+  if (options.includeEvidence && options.includeEvidence !== "public") {
     client.generationStatus = row.generationStatus || row.generation_status || 'ready';
     client.inputFingerprint = row.inputFingerprint || row.input_fingerprint || '';
     client.generatorVersion = Number(row.generatorVersion || row.generator_version || 1);
@@ -1949,7 +1949,10 @@ function toSpatialClusterClient(row, options = {}) {
     confidenceScore: Number(row.confidenceScore ?? row.confidence_score ?? 0)
   };
 
-  if (options.includeEvidence) {
+  if (options.includeEvidence === "public") {
+    const evidence = toPublicSpatialEvidence(row.evidenceJson || row.evidence_json || '{}');
+    if (evidence) client.evidence = evidence;
+  } else if (options.includeEvidence) {
     client.evidence = parseJsonObject(row.evidenceJson || row.evidence_json || '{}');
   }
 
@@ -1978,11 +1981,30 @@ function toSpatialPlacementClient(row, options = {}) {
     confidenceScore: Number(row.confidenceScore ?? row.confidence_score ?? 0)
   };
 
-  if (options.includeEvidence) {
+  if (options.includeEvidence === "public") {
+    const evidence = toPublicSpatialEvidence(row.evidenceJson || row.evidence_json || '{}');
+    if (evidence) client.evidence = evidence;
+  } else if (options.includeEvidence) {
     client.evidence = parseJsonObject(row.evidenceJson || row.evidence_json || '{}');
   }
 
   return client;
+}
+
+function toPublicSpatialEvidence(value) {
+  const evidence = parseJsonObject(value);
+  const source = cleanText(evidence.source, 40);
+  const cue = cleanText(evidence.cue || evidence.visualCue || evidence.backgroundCue, 80);
+  const mediaType = cleanText(evidence.mediaType, 40);
+  const sortOrder = normalizeOptionalInteger(evidence.sortOrder);
+  const client = {};
+
+  if (source) client.source = source;
+  if (cue) client.cue = cue;
+  if (mediaType) client.mediaType = mediaType;
+  if (sortOrder !== null) client.sortOrder = sortOrder;
+
+  return Object.keys(client).length ? client : null;
 }
 
 function selectRepeatedSpatialCue(insightRows) {
@@ -9461,9 +9483,20 @@ async function getTimeCapsuleItems(env, eventId, request, options = {}) {
       s.status AS submissionStatus,
       s.deleted_at AS deletedAt,
       s.created_at AS submissionCreatedAt,
-      s.updated_at AS submissionUpdatedAt
+      s.updated_at AS submissionUpdatedAt,
+      mi.vision_status AS mediaInsightVisionStatus,
+      mi.summary AS mediaInsightSummary,
+      mi.scene_tags AS mediaInsightSceneTags,
+      mi.lighting_tags AS mediaInsightLightingTags,
+      mi.composition_tags AS mediaInsightCompositionTags,
+      mi.background_cues AS mediaInsightBackgroundCues,
+      mi.dominant_colors AS mediaInsightDominantColors,
+      mi.people_count AS mediaInsightPeopleCount,
+      mi.face_count AS mediaInsightFaceCount,
+      mi.quality_score AS mediaInsightQualityScore
     FROM time_capsule_items i
     INNER JOIN submissions s ON s.id = i.submission_id
+    LEFT JOIN submission_media_insights mi ON mi.submission_id = i.submission_id
     WHERE i.event_id = ? AND s.status = 'approved' AND s.deleted_at IS NULL ${visibilityFilter} ${sourceFilter}
     ORDER BY i.sort_order ASC, i.created_at ASC
   `).bind(eventId).all();
@@ -9583,9 +9616,20 @@ async function getTimeCapsuleItemById(env, itemId) {
       s.status AS submissionStatus,
       s.deleted_at AS deletedAt,
       s.created_at AS submissionCreatedAt,
-      s.updated_at AS submissionUpdatedAt
+      s.updated_at AS submissionUpdatedAt,
+      mi.vision_status AS mediaInsightVisionStatus,
+      mi.summary AS mediaInsightSummary,
+      mi.scene_tags AS mediaInsightSceneTags,
+      mi.lighting_tags AS mediaInsightLightingTags,
+      mi.composition_tags AS mediaInsightCompositionTags,
+      mi.background_cues AS mediaInsightBackgroundCues,
+      mi.dominant_colors AS mediaInsightDominantColors,
+      mi.people_count AS mediaInsightPeopleCount,
+      mi.face_count AS mediaInsightFaceCount,
+      mi.quality_score AS mediaInsightQualityScore
     FROM time_capsule_items i
     INNER JOIN submissions s ON s.id = i.submission_id
+    LEFT JOIN submission_media_insights mi ON mi.submission_id = i.submission_id
     WHERE i.id = ?
   `).bind(itemId).first();
 }
@@ -10182,6 +10226,7 @@ async function toTimeCapsuleItemClient(row, request, env) {
     durationSeconds: row.durationSeconds,
     guestName: row.guestName || '',
     guestNote: row.guestNote || '',
+    aiVision: toTimeCapsuleAiVisionClient(row),
     mediaUrl,
     downloadUrl: mediaUrl,
     streamUrl: stream.url,
@@ -10191,6 +10236,21 @@ async function toTimeCapsuleItemClient(row, request, env) {
     thumbnailUploadUrl: thumbnail.uploadUrl,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
+  };
+}
+
+function toTimeCapsuleAiVisionClient(row = {}) {
+  return {
+    status: row.mediaInsightVisionStatus || 'not_requested',
+    summary: row.mediaInsightSummary || '',
+    sceneTags: parseJsonArray(row.mediaInsightSceneTags),
+    lightingTags: parseJsonArray(row.mediaInsightLightingTags),
+    compositionTags: parseJsonArray(row.mediaInsightCompositionTags),
+    backgroundCues: parseJsonArray(row.mediaInsightBackgroundCues),
+    dominantColors: parseJsonArray(row.mediaInsightDominantColors),
+    peopleCount: normalizeOptionalInteger(row.mediaInsightPeopleCount),
+    faceCount: normalizeOptionalInteger(row.mediaInsightFaceCount),
+    qualityScore: normalizeOptionalNumber(row.mediaInsightQualityScore)
   };
 }
 

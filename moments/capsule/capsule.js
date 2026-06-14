@@ -56,6 +56,7 @@ const SPATIAL_CAMERA_PULLBACK = 8.6;
 const SPATIAL_CAMERA_HEIGHT = 2.15;
 const SPATIAL_STATION_FOCUS_HEIGHT = 1.35;
 const SPATIAL_NEAR_STATION_RADIUS = 2.35;
+const SPATIAL_VIDEO_PLAY_RADIUS = 0.72;
 const SPATIAL_TOUR_DWELL_MS = 2600;
 const SPATIAL_TOUR_TRAVEL_MS = 2600;
 const SPATIAL_TOUR_RESUME_MS = 6000;
@@ -85,7 +86,10 @@ async function init() {
   qs("#capsuleWalkViewButton")?.addEventListener("click", () => openSpatialWalkStation(spatialActiveStationIndex));
   qs("#capsuleWalkTourToggle")?.addEventListener("click", toggleSpatialTour);
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) stopSpatialWalkLoop();
+    if (document.hidden) {
+      pauseSpatialWalkVideos();
+      stopSpatialWalkLoop();
+    }
     else if (currentCapsuleView === "walk" && spatialWalkScene) startSpatialWalkLoop();
   });
   qs("#slideClose").addEventListener("click", closeSlide);
@@ -428,7 +432,7 @@ function renderSpatialWalkFallbackCard(placement, index) {
   const item = placement.item;
   const cluster = placement.cluster;
   const label = cluster?.label || item.chapter || "Memory path";
-  const caption = item.caption || item.guestNote || cluster?.summary || "";
+  const caption = getSpatialMomentCaption(placement);
   const itemIndex = stationItemIndex(item);
 
   return `
@@ -445,6 +449,103 @@ function renderSpatialWalkFallbackCard(placement, index) {
       </div>
     </button>
   `;
+}
+
+function getSpatialMomentCaption(placement) {
+  const item = placement?.item || {};
+  const cluster = placement?.cluster || placement?.placement?.cluster || null;
+  const evidence = placement ? (placement.evidence || placement.placement?.evidence || null) : null;
+  const explicitCaption = cleanCaptionText(item.caption || item.guestNote);
+  const visionCaption = buildGalleryVisionCaption(item, cluster, { ...(placement || {}), evidence });
+
+  if (explicitCaption && visionCaption && !captionsShareMeaning(explicitCaption, visionCaption)) {
+    return `${explicitCaption} ${visionCaption}`;
+  }
+
+  return explicitCaption || visionCaption || "A polished stop in this Time Capsule path, held in the order it was captured.";
+}
+
+function buildGalleryVisionCaption(item = {}, cluster = null, placement = null) {
+  const aiVision = item.aiVision || {};
+  const summary = cleanCaptionText(aiVision.summary);
+  if (summary) return summary;
+
+  const cues = pickGalleryVisionCues(aiVision, placement?.evidence);
+  if (cues.length) {
+    const mediaType = String(item.mediaType || "").toLowerCase();
+    const opening = mediaType === "video"
+      ? "This clip brings"
+      : mediaType === "audio"
+        ? "This memory carries"
+        : "This frame brings";
+    const cueText = formatNaturalList(cues.slice(0, 3));
+    const peopleText = galleryPeoplePhrase(aiVision);
+    return `${opening} ${cueText} into focus${peopleText}, giving this moment its own little spark.`;
+  }
+
+  const clusterSummary = cleanCaptionText(cluster?.summary);
+  if (clusterSummary && !/arranged in capsule order/i.test(clusterSummary)) return clusterSummary;
+
+  const source = cleanCaptionText(placement?.evidence?.source);
+  if (source === "visual_cue") {
+    return "The gallery grouped this stop by a repeated visual thread running through the party.";
+  }
+
+  return "";
+}
+
+function pickGalleryVisionCues(aiVision = {}, evidence = {}) {
+  const candidates = [
+    evidence?.cue,
+    ...(Array.isArray(aiVision.backgroundCues) ? aiVision.backgroundCues : []),
+    ...(Array.isArray(aiVision.sceneTags) ? aiVision.sceneTags : []),
+    ...(Array.isArray(aiVision.lightingTags) ? aiVision.lightingTags : []),
+    ...(Array.isArray(aiVision.compositionTags) ? aiVision.compositionTags : [])
+  ];
+  const seen = new Set();
+  return candidates
+    .map(friendlyVisionCue)
+    .filter((cue) => {
+      if (!cue || seen.has(cue)) return false;
+      seen.add(cue);
+      return true;
+    })
+    .slice(0, 4);
+}
+
+function friendlyVisionCue(value) {
+  const cue = String(value || "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+  if (!cue || cue.length < 3 || cue.length > 46) return "";
+  if (/^#[0-9a-f]{3,8}$/i.test(cue)) return "";
+  if (["photo", "video", "image", "unknown", "none", "person", "people"].includes(cue)) return "";
+  return cue;
+}
+
+function galleryPeoplePhrase(aiVision = {}) {
+  const peopleCount = Number(aiVision.peopleCount || aiVision.faceCount || 0);
+  if (!Number.isFinite(peopleCount) || peopleCount <= 0) return "";
+  if (peopleCount === 1) return " with one person at the center";
+  if (peopleCount <= 3) return " with a small group in the energy";
+  return " with the room feeling full and lively";
+}
+
+function formatNaturalList(values) {
+  const list = values.filter(Boolean);
+  if (!list.length) return "the party atmosphere";
+  if (list.length === 1) return list[0];
+  if (list.length === 2) return `${list[0]} and ${list[1]}`;
+  return `${list.slice(0, -1).join(", ")}, and ${list[list.length - 1]}`;
+}
+
+function cleanCaptionText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function captionsShareMeaning(left, right) {
+  const normalize = (value) => cleanCaptionText(value).toLowerCase().replace(/[^a-z0-9 ]+/g, "");
+  const a = normalize(left);
+  const b = normalize(right);
+  return Boolean(a && b && (a.includes(b) || b.includes(a)));
 }
 
 function renderSpatialWalkFallbackMedia(item) {
@@ -597,6 +698,7 @@ function buildSpatialStation(placement, index, total) {
     id: placement.id || `station-${index}`,
     item,
     itemIndex: stationItemIndex(placement.item),
+    placement,
     cluster: placement.cluster || null,
     index,
     total,
@@ -991,7 +1093,7 @@ function addSpatialStationMesh(THREE, scene, station, stationHitMeshes) {
     side: THREE.DoubleSide,
     depthWrite: false
   });
-  material.map = spatialTextureForItem(THREE, item, isAudio, material, (texture) => updateSpatialStationMediaAspect(THREE, station, texture));
+  material.map = spatialTextureForItem(THREE, station, isAudio, material, (texture) => updateSpatialStationMediaAspect(THREE, station, texture));
   material.emissiveMap = material.map;
   material.needsUpdate = true;
   const card = new THREE.Mesh(cardGeometry, material);
@@ -1060,18 +1162,26 @@ function updateSpatialStationMediaAspect(THREE, station, texture) {
   }
 }
 
-function spatialTextureForItem(THREE, item, isAudio, material, onTextureReady) {
+function spatialTextureForItem(THREE, station, isAudio, material, onTextureReady) {
+  const item = station.item;
   const fallbackTexture = createSpatialCardTexture(THREE, item);
   if (isAudio) return fallbackTexture;
 
   const mediaType = String(item.mediaType || "").toLowerCase();
-  const textureUrl = mediaType === "video"
-    ? item.thumbnailUrl || videoPosterUrl(item)
-    : item.mediaUrl
-      ? inlineMediaUrl(item.mediaUrl)
-      : "";
+  if (mediaType === "video") {
+    createSpatialVideoTexture(THREE, station, fallbackTexture, material, onTextureReady);
+    return item.thumbnailUrl
+      ? loadSpatialStillTexture(THREE, item.thumbnailUrl, fallbackTexture, material, onTextureReady)
+      : fallbackTexture;
+  }
+
+  const textureUrl = item.mediaUrl ? inlineMediaUrl(item.mediaUrl) : "";
   if (!textureUrl) return fallbackTexture;
 
+  return loadSpatialStillTexture(THREE, textureUrl, fallbackTexture, material, onTextureReady);
+}
+
+function loadSpatialStillTexture(THREE, textureUrl, fallbackTexture, material, onTextureReady) {
   const loader = new THREE.TextureLoader();
   loader.setCrossOrigin?.("anonymous");
   loader.load(textureUrl, (texture) => {
@@ -1097,6 +1207,97 @@ function applyWalkTextureQuality(THREE, texture) {
   texture.anisotropy = Math.min(8, maxAnisotropy);
   texture.generateMipmaps = true;
   if (THREE.LinearMipmapLinearFilter) texture.minFilter = THREE.LinearMipmapLinearFilter;
+}
+
+function createSpatialVideoTexture(THREE, station, fallbackTexture, material, onTextureReady) {
+  const item = station.item;
+  const video = document.createElement("video");
+  video.crossOrigin = "anonymous";
+  video.muted = true;
+  video.defaultMuted = true;
+  video.loop = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.setAttribute("playsinline", "");
+  video.setAttribute("webkit-playsinline", "");
+  video.setAttribute("muted", "");
+
+  if (!configureSpatialVideoSource(video, item)) return null;
+
+  const texture = new THREE.VideoTexture(video);
+  texture.colorSpace = THREE.SRGBColorSpace || texture.colorSpace;
+  texture.generateMipmaps = false;
+  if (THREE.LinearFilter) {
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+  }
+
+  station.video = {
+    element: video,
+    texture,
+    material,
+    fallbackTexture,
+    ready: false,
+    playRequested: false
+  };
+
+  video.addEventListener("loadedmetadata", () => {
+    onTextureReady?.(texture);
+    requestSpatialWalkFrame();
+  }, { once: true });
+
+  video.addEventListener("loadeddata", () => {
+    station.video.ready = true;
+    material.map = texture;
+    material.emissiveMap = texture;
+    material.needsUpdate = true;
+    texture.needsUpdate = true;
+    requestSpatialWalkFrame();
+  }, { once: true });
+
+  video.addEventListener("error", () => {
+    material.map = fallbackTexture;
+    material.emissiveMap = fallbackTexture;
+    material.needsUpdate = true;
+    station.video.ready = false;
+    requestSpatialWalkFrame();
+  }, { once: true });
+
+  video.load?.();
+  return texture;
+}
+
+function configureSpatialVideoSource(video, item) {
+  const directUrl = item.mediaUrl ? inlineMediaUrl(item.mediaUrl) : "";
+  if (directUrl) {
+    video.src = directUrl;
+    video.dataset.spatialVideoSource = "media";
+    return true;
+  }
+
+  const streamUrl = item.streamUrl || "";
+  if (!streamUrl) return false;
+
+  if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    video.src = streamUrl;
+    video.dataset.spatialVideoSource = "stream-native";
+    return true;
+  }
+
+  if (window.Hls && window.Hls.isSupported()) {
+    const hls = new window.Hls({
+      maxBufferLength: 10,
+      maxMaxBufferLength: 18,
+      startFragPrefetch: true
+    });
+    hls.loadSource(streamUrl);
+    hls.attachMedia(video);
+    video.wallflowerSpatialHls = hls;
+    video.dataset.spatialVideoSource = "stream-hls";
+    return true;
+  }
+
+  return false;
 }
 
 function createSpatialCardTexture(THREE, item) {
@@ -1459,6 +1660,45 @@ function updateSpatialStationFocus(stationFloat) {
     station.frame.material.opacity = opacity;
     if (station.bevel) station.bevel.material.opacity = opacity;
     if (station.reflection) station.reflection.material.opacity = opacity * 0.16;
+    syncSpatialVideoPlayback(station, distance, isActive);
+  });
+}
+
+function syncSpatialVideoPlayback(station, distance, isActive) {
+  const videoState = station.video;
+  const video = videoState?.element;
+  const texture = videoState?.texture;
+  if (!video || !texture) return;
+
+  const shouldPlay = currentCapsuleView === "walk"
+    && station.group?.visible
+    && (isActive || distance <= SPATIAL_VIDEO_PLAY_RADIUS);
+
+  if (!shouldPlay) {
+    videoState.playRequested = false;
+    if (typeof video.pause === "function" && !video.paused) video.pause();
+    return;
+  }
+
+  texture.needsUpdate = true;
+  if (!video.paused || videoState.playRequested || typeof video.play !== "function") return;
+
+  videoState.playRequested = true;
+  video.play().then(() => {
+    videoState.playRequested = false;
+    texture.needsUpdate = true;
+    requestSpatialWalkFrame();
+  }).catch(() => {
+    videoState.playRequested = false;
+  });
+}
+
+function pauseSpatialWalkVideos() {
+  spatialWalkStations.forEach((station) => {
+    const video = station.video?.element;
+    if (!video || typeof video.pause !== "function") return;
+    station.video.playRequested = false;
+    video.pause();
   });
 }
 
@@ -1486,7 +1726,7 @@ function updateSpatialWalkOverlay() {
   const date = qs("#capsuleWalkDate");
   if (chapter) chapter.textContent = cluster?.label || item.chapter || "Wallflower gallery";
   if (title) title.textContent = item.title || "Time Capsule moment";
-  if (caption) caption.textContent = item.caption || item.guestNote || cluster?.summary || "";
+  if (caption) caption.textContent = getSpatialMomentCaption(station);
   if (date) date.textContent = formatDateTime(item.capturedAt);
 
   const copy = qs("#capsuleWalkCopy");
@@ -1633,6 +1873,7 @@ function stationFromSpatialPointer(event) {
 function openSpatialWalkStation(stationIndex) {
   const station = spatialWalkStations[clamp(Math.round(Number(stationIndex) || 0), 0, spatialWalkStations.length - 1)];
   if (!station) return;
+  pauseSpatialWalkVideos();
   openSlide(station.itemIndex, { autoPlay: false });
 }
 
@@ -1686,6 +1927,7 @@ function setCapsuleView(view, options = {}) {
     renderSpatialWalk();
     startSpatialWalkScene();
   } else {
+    pauseSpatialWalkVideos();
     stopSpatialWalkLoop();
   }
 

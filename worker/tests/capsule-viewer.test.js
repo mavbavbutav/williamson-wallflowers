@@ -317,7 +317,7 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(capsuleHtml, /id="capsuleWalkCanvas"/);
   assert.match(capsuleHtml, /id="capsuleWalkFallback"/);
   assert.match(capsuleHtml, /styles\.css\?v=20260614-luxury-gallery-1/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260614-luxury-gallery-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260614-walk-video-captions-1/);
 
   assert.match(capsuleJs, /let spatialLayout = null/);
   assert.match(capsuleJs, /let spatialClusters = \[\]/);
@@ -342,7 +342,7 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(capsuleJs, /if \(spatialWalkScene\) \{[\s\S]*?hideSpatialWalkFallback\(\);[\s\S]*?resizeSpatialWalkScene\(\);[\s\S]*?requestSpatialWalkFrame\(\);[\s\S]*?return;/);
   assert.match(capsuleJs, /fallback\.hidden = Boolean\(spatialWalkScene\)/);
   assert.match(capsuleJs, /function hideSpatialWalkFallback/);
-  assert.match(capsuleJs, /material\.map = spatialTextureForItem\(THREE, item, isAudio, material, \(texture\) => updateSpatialStationMediaAspect\(THREE, station, texture\)\)/);
+  assert.match(capsuleJs, /material\.map = spatialTextureForItem\(THREE, station, isAudio, material, \(texture\) => updateSpatialStationMediaAspect\(THREE, station, texture\)\)/);
   assert.match(capsuleJs, /loader\.load\(textureUrl, \(texture\) => \{[\s\S]*?material\.map = texture[\s\S]*?material\.needsUpdate = true[\s\S]*?\}, undefined, \(\) => \{[\s\S]*?material\.map = fallbackTexture[\s\S]*?material\.needsUpdate = true/);
   assert.match(capsuleJs, /return fallbackTexture;/);
 
@@ -362,7 +362,7 @@ test('capsule 3D Walk uses cinematic stations with safe spacing and camera poses
   ]);
 
   assert.match(capsuleHtml, /id="capsuleWalkViewButton"/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260614-luxury-gallery-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260614-walk-video-captions-1/);
   assert.match(capsuleHtml, /styles\.css\?v=20260614-luxury-gallery-1/);
 
   assert.match(capsuleJs, /const SPATIAL_STATION_SPACING = 10/);
@@ -451,6 +451,44 @@ test('capsule 3D Walk renders a lit, post-processed luxury gallery', async () =>
   // Styling hooks.
   assert.match(styles, /\.capsule-walk-progress/);
   assert.match(styles, /\.capsule-walk-vignette/);
+});
+
+test('capsule 3D Walk captions include AI vision and public spatial evidence', async () => {
+  const [capsuleJs, workerJs] = await Promise.all([
+    readText('../../moments/capsule/capsule.js'),
+    readText('../src/index.js')
+  ]);
+
+  assert.match(workerJs, /LEFT JOIN submission_media_insights mi ON mi\.submission_id = i\.submission_id/);
+  assert.match(workerJs, /aiVision:/);
+  assert.match(workerJs, /summary: row\.mediaInsightSummary/);
+  assert.match(workerJs, /sceneTags: parseJsonArray\(row\.mediaInsightSceneTags/);
+  assert.match(workerJs, /backgroundCues: parseJsonArray\(row\.mediaInsightBackgroundCues/);
+  assert.match(workerJs, /toSpatialLayoutBundleClient\(filterSpatialBundleForGuestItems\(spatialBundle, items\), \{ includeEvidence: "public" \}\)/);
+  assert.match(workerJs, /function toPublicSpatialEvidence/);
+
+  assert.match(capsuleJs, /function getSpatialMomentCaption/);
+  assert.match(capsuleJs, /function buildGalleryVisionCaption/);
+  assert.match(capsuleJs, /item\.aiVision/);
+  assert.match(capsuleJs, /placement\.evidence/);
+  assert.match(capsuleJs, /const caption = getSpatialMomentCaption\(placement\)/);
+  assert.match(capsuleJs, /caption\.textContent = getSpatialMomentCaption\(station\)/);
+});
+
+test('capsule 3D Walk plays videos as WebGL video textures near the active station', async () => {
+  const capsuleJs = await readText('../../moments/capsule/capsule.js');
+
+  assert.match(capsuleJs, /new THREE\.VideoTexture\(video\)/);
+  assert.match(capsuleJs, /function createSpatialVideoTexture/);
+  assert.match(capsuleJs, /function configureSpatialVideoSource/);
+  assert.match(capsuleJs, /window\.Hls/);
+  assert.match(capsuleJs, /station\.video/);
+  assert.match(capsuleJs, /function syncSpatialVideoPlayback/);
+  assert.match(capsuleJs, /video\.play\(\)/);
+  assert.match(capsuleJs, /video\.pause\(\)/);
+  assert.match(capsuleJs, /pauseSpatialWalkVideos\(\)/);
+  assert.match(capsuleJs, /texture\.needsUpdate = true/);
+  assert.match(capsuleJs, /spatialTextureForItem\(THREE, station, isAudio, material/);
 });
 
 test('capsule swipe feed becomes fullscreen on mobile and videos use poster art', async () => {
