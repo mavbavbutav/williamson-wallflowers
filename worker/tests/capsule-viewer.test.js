@@ -8,6 +8,13 @@ function createElement() {
     innerHTML: '',
     textContent: '',
     dataset: {},
+    parentElement: null,
+    style: {
+      setProperty() {},
+      getPropertyValue() {
+        return '';
+      }
+    },
     classList: {
       add() {},
       remove() {},
@@ -52,6 +59,7 @@ function installCapsuleDom() {
     '#capsuleWalk',
     '#capsuleWalkCanvas',
     '#capsuleWalkFallback',
+    '#capsuleWalkScrollSpacer',
     '#capsuleNotice',
     '#slideStage',
     '#slideTitle',
@@ -60,6 +68,14 @@ function installCapsuleDom() {
   ];
 
   selectors.forEach((selector) => elements.set(selector, createElement()));
+  const viewButtons = ['timeline', 'feed', 'walk'].map((view) => {
+    const element = createElement();
+    element.dataset.capsuleView = view;
+    element.hidden = view === 'walk';
+    element.parentElement = createElement();
+    elements.set(`[data-capsule-view="${view}"]`, element);
+    return element;
+  });
 
   globalThis.document = {
     activeElement: createElement(),
@@ -69,7 +85,8 @@ function installCapsuleDom() {
     querySelector(selector) {
       return elements.get(selector) || null;
     },
-    querySelectorAll() {
+    querySelectorAll(selector) {
+      if (selector === '[data-capsule-view]') return viewButtons;
       return [];
     },
     createElement() {
@@ -156,6 +173,83 @@ test('capsule viewer keeps the share token in the address bar for copy/share', a
   }
 });
 
+test('capsule viewer offers a 3D Walk fallback when a published capsule has no spatial layout yet', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousFetch = globalThis.fetch;
+  const previousResponse = globalThis.Response;
+  const elements = installCapsuleDom();
+  const storage = createStorage();
+
+  globalThis.window = {
+    location: {
+      search: '?event=event-no-layout',
+      hash: '#token=share-token',
+      href: 'https://williamsonwallflowers.com/moments/capsule/?event=event-no-layout#token=share-token',
+      hostname: 'williamsonwallflowers.com',
+      origin: 'https://williamsonwallflowers.com'
+    },
+    localStorage: storage,
+    sessionStorage: storage,
+    setTimeout,
+    clearTimeout,
+    addEventListener() {},
+    getComputedStyle() {
+      return {};
+    },
+    history: {
+      replaceState() {}
+    }
+  };
+
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: true,
+    event: {
+      title: 'Published Capsule',
+      eventDate: '2026-06-14',
+      publishedAt: '2026-06-14T12:00:00.000Z'
+    },
+    items: [
+      {
+        id: 'item-1',
+        title: 'Cake table',
+        chapter: 'First memory',
+        mediaType: 'photo',
+        mediaUrl: 'https://example.com/photo-1.jpg',
+        capturedAt: '2026-06-14T12:01:00.000Z'
+      },
+      {
+        id: 'item-2',
+        title: 'Gift moment',
+        chapter: 'Second memory',
+        mediaType: 'photo',
+        mediaUrl: 'https://example.com/photo-2.jpg',
+        capturedAt: '2026-06-14T12:02:00.000Z'
+      }
+    ]
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' }
+  });
+
+  const moduleUrl = new URL('../../moments/capsule/capsule.js', import.meta.url);
+  moduleUrl.search = `?case=${Date.now()}-${Math.random()}`;
+
+  try {
+    await import(moduleUrl.href);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    assert.equal(elements.get('#capsuleTitle').textContent, 'Published Capsule', elements.get('#capsuleNotice').textContent);
+    assert.equal(elements.get('[data-capsule-view="walk"]').hidden, false);
+    assert.match(elements.get('#capsuleWalkFallback').innerHTML, /Cinematic memory path/);
+  } finally {
+    globalThis.window = previousWindow;
+    globalThis.document = previousDocument;
+    globalThis.fetch = previousFetch;
+    globalThis.Response = previousResponse;
+  }
+});
+
 test('capsule viewer exposes a vertical swipe feed alongside the timeline', async () => {
   const [capsuleHtml, capsuleJs, styles] = await Promise.all([
     readText('../../moments/capsule/index.html'),
@@ -188,6 +282,8 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(capsuleHtml, /id="capsuleWalk"/);
   assert.match(capsuleHtml, /id="capsuleWalkCanvas"/);
   assert.match(capsuleHtml, /id="capsuleWalkFallback"/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260614-spatial-walk-fallback-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260614-spatial-walk-fallback-1/);
 
   assert.match(capsuleJs, /let spatialLayout = null/);
   assert.match(capsuleJs, /let spatialClusters = \[\]/);
@@ -197,6 +293,7 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(capsuleJs, /spatialClusters = Array\.isArray\(payload\.spatialClusters\) \? payload\.spatialClusters : \[\]/);
   assert.match(capsuleJs, /spatialPlacements = Array\.isArray\(payload\.spatialPlacements\) \? payload\.spatialPlacements : \[\]/);
   assert.match(capsuleJs, /function renderSpatialWalk/);
+  assert.match(capsuleJs, /function buildFallbackSpatialPlacements/);
   assert.match(capsuleJs, /function canUseWebGl/);
   assert.match(capsuleJs, /async function startSpatialWalkScene/);
   assert.match(capsuleJs, /function getSpatialScrollProgress/);
@@ -205,7 +302,7 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(threeModule, /REVISION = '165'/);
   assert.match(threeModule, /class WebGLRenderer/);
   assert.match(capsuleJs, /prefers-reduced-motion/);
-  assert.match(capsuleJs, /if \(view === "walk" && !hasPublishedSpatialWalk\(\)\)[\s\S]*?view = "timeline"/);
+  assert.match(capsuleJs, /if \(view === "walk" && !hasSpatialWalk\(\)\)[\s\S]*?view = "timeline"/);
   assert.match(capsuleJs, /qs\("#capsuleWalk"\)\.hidden = currentCapsuleView !== "walk"/);
   assert.match(capsuleJs, /if \(currentCapsuleView === "walk"\)[\s\S]*?startSpatialWalkScene\(\)/);
   assert.match(capsuleJs, /if \(spatialWalkScene\) \{[\s\S]*?hideSpatialWalkFallback\(\);[\s\S]*?resizeSpatialWalkScene\(\);[\s\S]*?requestSpatialWalkFrame\(\);[\s\S]*?return;/);

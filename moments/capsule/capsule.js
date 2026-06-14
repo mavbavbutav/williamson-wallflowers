@@ -329,7 +329,7 @@ function renderSpatialWalk() {
   const spacer = qs("#capsuleWalkScrollSpacer");
   const walkButton = qs('[data-capsule-view="walk"]');
   const placements = getSpatialWalkPlacements();
-  const hasWalk = spatialLayout?.status === "published" && placements.length > 0;
+  const hasWalk = placements.length > 0;
 
   if (walkButton) {
     walkButton.hidden = !hasWalk;
@@ -350,7 +350,7 @@ function renderSpatialWalk() {
     spacer.style.setProperty("--walk-spacer-height", `${spacerHeight}px`);
   }
 
-  const pathLabel = spatialLayout.layoutMode === "timeline_path"
+  const pathLabel = spatialLayout?.layoutMode === "timeline_path" || !spatialLayout
     ? "Cinematic memory path"
     : spatialLayout.layoutMode === "visual_cluster"
       ? "Adaptive memory path"
@@ -417,12 +417,14 @@ function renderSpatialWalkFallbackMedia(item) {
   `;
 }
 
-function hasPublishedSpatialWalk() {
-  return spatialLayout?.status === "published" && getSpatialWalkPlacements().length > 0;
+function hasSpatialWalk() {
+  return getSpatialWalkPlacements().length > 0;
 }
 
 function getSpatialWalkPlacements() {
-  if (!spatialLayout || !Array.isArray(spatialPlacements) || !spatialPlacements.length) return [];
+  if (!spatialLayout || !Array.isArray(spatialPlacements) || !spatialPlacements.length) {
+    return buildFallbackSpatialPlacements();
+  }
 
   const itemMap = new Map(items.map((item) => [String(item.id || ""), item]));
   const clusterMap = new Map(spatialClusters.map((cluster) => [String(cluster.id || ""), cluster]));
@@ -431,6 +433,48 @@ function getSpatialWalkPlacements() {
     .map((placement, index) => normalizeSpatialPlacement(placement, index, itemMap, clusterMap))
     .filter(Boolean)
     .sort((left, right) => left.routeOrder - right.routeOrder);
+}
+
+function buildFallbackSpatialPlacements() {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.item.capturedAt || left.item.createdAt || "");
+      const rightTime = Date.parse(right.item.capturedAt || right.item.createdAt || "");
+      if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+        return leftTime - rightTime;
+      }
+      if (Number.isFinite(leftTime) !== Number.isFinite(rightTime)) {
+        return Number.isFinite(leftTime) ? -1 : 1;
+      }
+      return left.index - right.index;
+    })
+    .map(({ item }, routeOrder) => {
+      const x = Math.sin(routeOrder * 0.9) * Math.min(3.2, 1.35 + items.length * 0.08);
+      const y = 0.1 + (routeOrder % 3) * 0.16;
+
+      return {
+        id: `fallback-${item.id || routeOrder}`,
+        item,
+        cluster: {
+          id: `fallback-cluster-${routeOrder}`,
+          label: item.chapter || "Memory path",
+          summary: "Arranged by the order this Time Capsule was captured."
+        },
+        routeOrder,
+        position: {
+          x,
+          y,
+          z: -routeOrder * 2.2
+        },
+        rotation: {
+          x: 0,
+          y: -x * 0.08,
+          z: 0
+        },
+        scale: 1
+      };
+    });
 }
 
 function normalizeSpatialPlacement(placement, index, itemMap, clusterMap) {
@@ -477,7 +521,7 @@ function canUseWebGl() {
 }
 
 async function startSpatialWalkScene() {
-  if (!hasPublishedSpatialWalk()) return;
+  if (!hasSpatialWalk()) return;
 
   if (spatialWalkScene) {
     hideSpatialWalkFallback();
@@ -770,7 +814,7 @@ function clamp(value, min, max) {
 }
 
 function setCapsuleView(view, options = {}) {
-  if (view === "walk" && !hasPublishedSpatialWalk()) {
+  if (view === "walk" && !hasSpatialWalk()) {
     view = "timeline";
   }
 
