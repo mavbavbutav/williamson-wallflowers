@@ -14,6 +14,19 @@ const BASE_ENV = {
   ALLOWED_ORIGINS: 'https://williamsonwallflowers.com'
 };
 
+test('spatial capsule migration creates layout, cluster, and placement tables', async () => {
+  const migration = await readText('../migrations/0021_wallflower_spatial_capsule.sql');
+
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS time_capsule_spatial_layouts/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS time_capsule_spatial_clusters/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS time_capsule_spatial_placements/);
+  assert.match(migration, /layout_mode TEXT NOT NULL/);
+  assert.match(migration, /evidence_json TEXT NOT NULL DEFAULT '\{\}'/);
+  assert.match(migration, /CREATE UNIQUE INDEX IF NOT EXISTS idx_spatial_layout_one_published/);
+  assert.match(migration, /CREATE INDEX IF NOT EXISTS idx_spatial_clusters_layout_order/);
+  assert.match(migration, /CREATE INDEX IF NOT EXISTS idx_spatial_placements_layout_order/);
+});
+
 test('inquiry emails include Wallflower Time Capsule interest', async () => {
   const sentEmails = [];
   const originalFetch = globalThis.fetch;
@@ -260,6 +273,11 @@ function approvedSubmission(overrides = {}) {
     updatedAt: '2026-09-19T20:15:00.000Z',
     ...overrides
   };
+}
+
+async function readText(path) {
+  const { readFile } = await import('node:fs/promises');
+  return readFile(new URL(path, import.meta.url), 'utf8');
 }
 
 class FakeMomentsDb {
