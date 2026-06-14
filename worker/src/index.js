@@ -1217,11 +1217,14 @@ async function updateHostSpatialLayout(request, env, url, corsHeaders, layoutId)
     return json({ ok: false, message: 'Spatial layout mode is not supported.' }, 400, corsHeaders);
   }
 
-  await updateSpatialLayoutRecord(env, auth.record.id, {
+  const result = await updateSpatialLayoutRecord(env, auth.record.id, {
     layoutMode: requestedMode,
     confidenceScore: normalizeSpatialNumber(body.confidenceScore ?? body.confidence, auth.record.confidenceScore, 0, 1),
     errorMessage: body.errorMessage === undefined ? auth.record.errorMessage : cleanText(body.errorMessage, 500)
   });
+  if (getD1ChangedRows(result) === 0) {
+    return json({ ok: false, message: 'Spatial layout is no longer an editable draft.' }, 409, corsHeaders);
+  }
 
   const bundle = await getSpatialLayoutBundleByLayoutId(env, auth.record.id);
   return json({
@@ -1244,7 +1247,7 @@ async function updateHostSpatialCluster(request, env, url, corsHeaders, layoutId
   const body = await request.json().catch(() => ({}));
   const anchor = body.anchor && typeof body.anchor === 'object' ? body.anchor : {};
 
-  await updateSpatialClusterRecord(env, auth.record.id, cluster.id, {
+  const result = await updateSpatialClusterRecord(env, auth.record.id, cluster.id, {
     label: body.label === undefined ? cluster.label : cleanText(body.label, 100),
     summary: body.summary === undefined ? cluster.summary : cleanText(body.summary, 260),
     routeOrder: normalizeSpatialRouteOrder(body.routeOrder, cluster.routeOrder),
@@ -1253,6 +1256,9 @@ async function updateHostSpatialCluster(request, env, url, corsHeaders, layoutId
     anchorZ: normalizeSpatialNumber(body.anchorZ ?? body.anchor_z ?? anchor.z, cluster.anchorZ, -100, 100),
     confidenceScore: normalizeSpatialNumber(body.confidenceScore ?? body.confidence, cluster.confidenceScore, 0, 1)
   });
+  if (getD1ChangedRows(result) === 0) {
+    return json({ ok: false, message: 'Spatial layout is no longer an editable draft.' }, 409, corsHeaders);
+  }
 
   const updated = await getSpatialClusterById(env, auth.record.id, cluster.id);
   return json({
@@ -1281,7 +1287,7 @@ async function updateHostSpatialPlacement(request, env, url, corsHeaders, layout
 
   const position = body.position && typeof body.position === 'object' ? body.position : {};
   const rotation = body.rotation && typeof body.rotation === 'object' ? body.rotation : {};
-  await updateSpatialPlacementRecord(env, auth.record.id, placement.id, {
+  const result = await updateSpatialPlacementRecord(env, auth.record.id, placement.id, {
     clusterId: cluster.id,
     routeOrder: normalizeSpatialRouteOrder(body.routeOrder, placement.routeOrder),
     positionX: normalizeSpatialNumber(body.positionX ?? body.position_x ?? position.x, placement.positionX, -100, 100),
@@ -1293,6 +1299,9 @@ async function updateHostSpatialPlacement(request, env, url, corsHeaders, layout
     scale: normalizeSpatialNumber(body.scale, placement.scale, 0.1, 4),
     confidenceScore: normalizeSpatialNumber(body.confidenceScore ?? body.confidence, placement.confidenceScore, 0, 1)
   });
+  if (getD1ChangedRows(result) === 0) {
+    return json({ ok: false, message: 'Spatial layout is no longer an editable draft.' }, 409, corsHeaders);
+  }
 
   const updated = await getSpatialPlacementById(env, auth.record.id, placement.id);
   return json({
@@ -1314,8 +1323,18 @@ async function publishHostSpatialLayout(request, env, url, corsHeaders, layoutId
       ...toSpatialLayoutBundleClient(bundle, { includeEvidence: true })
     }, 200, corsHeaders);
   } catch (error) {
+    if (error instanceof SpatialStateConflict) {
+      return json({ ok: false, message: error.message }, 409, corsHeaders);
+    }
     console.error('Spatial layout publish failed', error);
     return json({ ok: false, message: 'Spatial layout could not be published right now.' }, 500, corsHeaders);
+  }
+}
+
+class SpatialStateConflict extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'SpatialStateConflict';
   }
 }
 
@@ -1529,18 +1548,26 @@ async function saveSpatialLayoutDraft(env, eventId, draft) {
 
 async function publishSpatialLayout(env, layout) {
   const now = new Date().toISOString();
-  await runMomentsDbBatch(env, [
+  const results = await runMomentsDbBatch(env, [
     env.MOMENTS_DB.prepare(`
     UPDATE time_capsule_spatial_layouts
     SET status = 'archived', updated_at = ?
     WHERE event_id = ? AND status = 'published' AND id != ?
-    `).bind(now, layout.eventId, layout.id),
+      AND EXISTS (
+        SELECT 1
+        FROM time_capsule_spatial_layouts
+        WHERE id = ? AND event_id = ? AND status = 'draft' AND generation_status = 'ready'
+      )
+    `).bind(now, layout.eventId, layout.id, layout.id, layout.eventId),
     env.MOMENTS_DB.prepare(`
     UPDATE time_capsule_spatial_layouts
     SET status = 'published', published_at = ?, updated_at = ?
-    WHERE id = ?
-    `).bind(now, now, layout.id)
+    WHERE id = ? AND event_id = ? AND status = 'draft' AND generation_status = 'ready'
+    `).bind(now, now, layout.id, layout.eventId)
   ]);
+  if (getD1ChangedRows(results[1]) === 0) {
+    throw new SpatialStateConflict('Spatial layout is no longer a ready draft.');
+  }
 
   return getSpatialLayoutBundleByLayoutId(env, layout.id);
 }
@@ -1743,10 +1770,10 @@ async function getSpatialPlacementById(env, layoutId, placementId) {
 }
 
 async function updateSpatialLayoutRecord(env, layoutId, next) {
-  await env.MOMENTS_DB.prepare(`
+  return env.MOMENTS_DB.prepare(`
     UPDATE time_capsule_spatial_layouts
     SET layout_mode = ?, confidence_score = ?, error_message = ?, updated_at = ?
-    WHERE id = ?
+    WHERE id = ? AND status = 'draft'
   `).bind(
     next.layoutMode,
     next.confidenceScore,
@@ -1757,11 +1784,16 @@ async function updateSpatialLayoutRecord(env, layoutId, next) {
 }
 
 async function updateSpatialClusterRecord(env, layoutId, clusterId, next) {
-  await env.MOMENTS_DB.prepare(`
+  return env.MOMENTS_DB.prepare(`
     UPDATE time_capsule_spatial_clusters
     SET label = ?, summary = ?, route_order = ?, anchor_x = ?, anchor_y = ?, anchor_z = ?,
       confidence_score = ?, updated_at = ?
     WHERE layout_id = ? AND id = ?
+      AND EXISTS (
+        SELECT 1
+        FROM time_capsule_spatial_layouts
+        WHERE id = ? AND status = 'draft'
+      )
   `).bind(
     next.label || 'Story path',
     next.summary || '',
@@ -1772,16 +1804,22 @@ async function updateSpatialClusterRecord(env, layoutId, clusterId, next) {
     next.confidenceScore,
     new Date().toISOString(),
     layoutId,
-    clusterId
+    clusterId,
+    layoutId
   ).run();
 }
 
 async function updateSpatialPlacementRecord(env, layoutId, placementId, next) {
-  await env.MOMENTS_DB.prepare(`
+  return env.MOMENTS_DB.prepare(`
     UPDATE time_capsule_spatial_placements
     SET cluster_id = ?, route_order = ?, position_x = ?, position_y = ?, position_z = ?,
       rotation_x = ?, rotation_y = ?, rotation_z = ?, scale = ?, confidence_score = ?, updated_at = ?
     WHERE layout_id = ? AND id = ?
+      AND EXISTS (
+        SELECT 1
+        FROM time_capsule_spatial_layouts
+        WHERE id = ? AND status = 'draft'
+      )
   `).bind(
     next.clusterId,
     next.routeOrder,
@@ -1795,7 +1833,8 @@ async function updateSpatialPlacementRecord(env, layoutId, placementId, next) {
     next.confidenceScore,
     new Date().toISOString(),
     layoutId,
-    placementId
+    placementId,
+    layoutId
   ).run();
 }
 
@@ -1963,6 +2002,8 @@ function selectRepeatedSpatialCue(insightRows) {
 function isReadySpatialVisualInsight(row) {
   const status = String(row.status || '').toLowerCase();
   const visionStatus = String(row.visionStatus || row.vision_status || '').toLowerCase();
+  if (status && status !== 'analyzed') return false;
+  if (visionStatus && visionStatus !== 'ready') return false;
   return status === 'analyzed' || visionStatus === 'ready';
 }
 

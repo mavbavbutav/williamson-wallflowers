@@ -412,6 +412,35 @@ test('spatial generator ignores repeated cues from failed visual insights', asyn
   assert.match(payload.spatialClusters[0].label, /Story|Sequence|Moments/);
 });
 
+test('spatial generator ignores analyzed insights when vision status failed', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    submissions: [
+      approvedSubmission({ id: 'photo-1', createdAt: '2026-09-19T20:00:00.000Z' }),
+      approvedSubmission({ id: 'photo-2', createdAt: '2026-09-19T20:25:00.000Z' })
+    ],
+    items: [
+      capsuleItem({ id: 'item-1', submissionId: 'photo-1', sortOrder: 1 }),
+      capsuleItem({ id: 'item-2', submissionId: 'photo-2', sortOrder: 2 })
+    ],
+    insights: [
+      mediaInsight({ submissionId: 'photo-1', status: 'analyzed', visionStatus: 'failed', vision_status: 'failed', backgroundCues: ['green wall'] }),
+      mediaInsight({ submissionId: 'photo-2', status: 'analyzed', visionStatus: 'failed', vision_status: 'failed', backgroundCues: ['green wall'] })
+    ]
+  });
+
+  const response = await worker.fetch(jsonRequest(
+    '/moments-api/host/events/event-1/spatial-layouts/generate',
+    {},
+    { Authorization: 'Bearer host-token' }
+  ), envWithDb(db));
+  const payload = await response.json();
+
+  assert.equal(response.status, 201);
+  assert.equal(payload.spatialLayout.layoutMode, 'timeline_path');
+  assert.match(payload.spatialClusters[0].label, /Story|Sequence|Moments/);
+});
+
 test('host can fetch generated draft with private spatial evidence', async () => {
   const db = new FakeMomentsDb({
     events: [timeCapsuleEvent()],
@@ -523,6 +552,77 @@ test('spatial patch routes reject published layouts', async () => {
   assert.equal(db.placements[0].routeOrder, 1);
 });
 
+test('spatial patch routes reject stale draft transitions at write time', async () => {
+  const layoutDb = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    layouts: [spatialLayout({ id: 'layout-draft', status: 'draft', layoutMode: 'timeline_path', layout_mode: 'timeline_path' })]
+  });
+  layoutDb.beforeRun = (statement) => {
+    if (statement.sql.includes('layout_mode = ?')) {
+      layoutDb.layouts[0].status = 'published';
+      layoutDb.beforeRun = null;
+    }
+  };
+
+  const layoutResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/spatial-layouts/layout-draft',
+    { layoutMode: 'visual_cluster' },
+    { Authorization: 'Bearer host-token' },
+    'PATCH'
+  ), envWithDb(layoutDb));
+
+  assert.equal(layoutResponse.status, 409);
+  assert.match((await layoutResponse.json()).message, /draft|changed|stale/i);
+  assert.equal(layoutDb.layouts[0].layoutMode, 'timeline_path');
+
+  const clusterDb = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    layouts: [spatialLayout({ id: 'layout-draft', status: 'draft' })],
+    clusters: [spatialCluster({ id: 'cluster-1', layoutId: 'layout-draft', label: 'Story path' })]
+  });
+  clusterDb.beforeRun = (statement) => {
+    if (statement.sql.includes('UPDATE time_capsule_spatial_clusters')) {
+      clusterDb.layouts[0].status = 'archived';
+      clusterDb.beforeRun = null;
+    }
+  };
+
+  const clusterResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/spatial-layouts/layout-draft/clusters/cluster-1',
+    { label: 'Changed label' },
+    { Authorization: 'Bearer host-token' },
+    'PATCH'
+  ), envWithDb(clusterDb));
+
+  assert.equal(clusterResponse.status, 409);
+  assert.match((await clusterResponse.json()).message, /draft|changed|stale/i);
+  assert.equal(clusterDb.clusters[0].label, 'Story path');
+
+  const placementDb = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    layouts: [spatialLayout({ id: 'layout-draft', status: 'draft' })],
+    clusters: [spatialCluster({ id: 'cluster-1', layoutId: 'layout-draft' })],
+    placements: [spatialPlacement({ id: 'placement-1', layoutId: 'layout-draft', clusterId: 'cluster-1', routeOrder: 1 })]
+  });
+  placementDb.beforeRun = (statement) => {
+    if (statement.sql.includes('UPDATE time_capsule_spatial_placements')) {
+      placementDb.layouts[0].status = 'published';
+      placementDb.beforeRun = null;
+    }
+  };
+
+  const placementResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/spatial-layouts/layout-draft/placements/placement-1',
+    { routeOrder: 7 },
+    { Authorization: 'Bearer host-token' },
+    'PATCH'
+  ), envWithDb(placementDb));
+
+  assert.equal(placementResponse.status, 409);
+  assert.match((await placementResponse.json()).message, /draft|changed|stale/i);
+  assert.equal(placementDb.placements[0].routeOrder, 1);
+});
+
 test('spatial publish rejects drafts that are not ready', async () => {
   const db = new FakeMomentsDb({
     events: [timeCapsuleEvent()],
@@ -595,6 +695,37 @@ test('spatial publish replaces an existing published layout under the unique sta
   assert.equal(db.layouts.find((layout) => layout.id === 'layout-old').status, 'archived');
 });
 
+test('spatial publish rejects stale draft readiness at write time', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    layouts: [
+      spatialLayout({ id: 'layout-old', status: 'published' }),
+      spatialLayout({ id: 'layout-draft', status: 'draft', generationStatus: 'ready', generation_status: 'ready' })
+    ]
+  });
+  db.beforeRun = (statement) => {
+    if (statement.sql.includes("status = 'archived'")) {
+      const draft = db.layouts.find((layout) => layout.id === 'layout-draft');
+      draft.generationStatus = 'running';
+      draft.generation_status = 'running';
+      db.beforeRun = null;
+    }
+  };
+
+  const response = await worker.fetch(jsonRequest(
+    '/moments-api/host/spatial-layouts/layout-draft/publish',
+    {},
+    { Authorization: 'Bearer host-token' }
+  ), envWithDb(db));
+  const payload = await response.json();
+
+  assert.equal(response.status, 409);
+  assert.match(payload.message, /ready|draft|changed|stale/i);
+  assert.equal(db.layouts.find((layout) => layout.id === 'layout-old').status, 'published');
+  assert.equal(db.layouts.find((layout) => layout.id === 'layout-draft').status, 'draft');
+  assert.equal(db.layouts.find((layout) => layout.id === 'layout-draft').generationStatus, 'running');
+});
+
 test('unauthorized host spatial route rejects wrong token', async () => {
   const db = new FakeMomentsDb({
     events: [timeCapsuleEvent()],
@@ -609,6 +740,28 @@ test('unauthorized host spatial route rejects wrong token', async () => {
   ), envWithDb(db));
 
   assert.equal(response.status, 403);
+});
+
+test('layout scoped spatial routes reject wrong token', async () => {
+  const db = new FakeMomentsDb({
+    events: [timeCapsuleEvent()],
+    layouts: [spatialLayout({ id: 'layout-draft', status: 'draft' })]
+  });
+
+  const patchResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/spatial-layouts/layout-draft',
+    { layoutMode: 'visual_cluster' },
+    { Authorization: 'Bearer wrong-token' },
+    'PATCH'
+  ), envWithDb(db));
+  const publishResponse = await worker.fetch(jsonRequest(
+    '/moments-api/host/spatial-layouts/layout-draft/publish',
+    {},
+    { Authorization: 'Bearer wrong-token' }
+  ), envWithDb(db));
+
+  assert.equal(patchResponse.status, 403);
+  assert.equal(publishResponse.status, 403);
 });
 
 test('host, event admin, and global admin tokens can access spatial draft routes', async () => {
@@ -959,6 +1112,7 @@ class FakeMomentsDb {
     this.clusters = seed.clusters ? seed.clusters.map((cluster) => ({ ...cluster })) : [];
     this.placements = seed.placements ? seed.placements.map((placement) => ({ ...placement })) : [];
     this.failOnSqlIncludes = seed.failOnSqlIncludes || '';
+    this.beforeRun = seed.beforeRun || null;
   }
 
   prepare(sql) {
@@ -1136,6 +1290,11 @@ class FakeStatement {
     if (this.db.failOnSqlIncludes && this.sql.includes(this.db.failOnSqlIncludes)) {
       throw new Error(`Injected D1 failure for ${this.db.failOnSqlIncludes}`);
     }
+    if (typeof this.db.beforeRun === 'function') {
+      await this.db.beforeRun(this);
+    }
+
+    let changes = 0;
 
     if (this.sql.includes('INSERT INTO events')) {
       const [
@@ -1368,19 +1527,35 @@ class FakeStatement {
       const eventId = this.params[1];
       const status = this.sql.includes("status = 'published'") ? 'published' : 'draft';
       const keepId = this.params[2];
+      const requiresPublishableDraft = this.sql.includes("generation_status = 'ready'");
+      const canArchive = !requiresPublishableDraft || this.db.layouts.some((layout) => (
+        layout.id === this.params[3]
+        && (layout.eventId || layout.event_id) === this.params[4]
+        && layout.status === 'draft'
+        && (layout.generationStatus || layout.generation_status) === 'ready'
+      ));
       for (const layout of this.db.layouts) {
-        if ((layout.eventId || layout.event_id) === eventId && layout.status === status && (!keepId || layout.id !== keepId)) {
+        if (canArchive && (layout.eventId || layout.event_id) === eventId && layout.status === status && (!keepId || layout.id !== keepId)) {
           layout.status = 'archived';
           layout.updatedAt = updatedAt;
           layout.updated_at = updatedAt;
+          changes += 1;
         }
       }
     }
 
     if (this.sql.includes('UPDATE time_capsule_spatial_layouts') && this.sql.includes("SET status = 'published'")) {
-      const [publishedAt, updatedAt, layoutId] = this.params;
+      const [publishedAt, updatedAt, layoutId, eventId] = this.params;
       const layout = this.db.layouts.find((item) => item.id === layoutId);
-      if (layout) {
+      const canPublish = layout && (
+        !this.sql.includes('generation_status =')
+        || (
+          (layout.eventId || layout.event_id) === eventId
+          && layout.status === 'draft'
+          && (layout.generationStatus || layout.generation_status) === 'ready'
+        )
+      );
+      if (canPublish) {
         const eventId = layout.eventId || layout.event_id;
         const existingPublished = this.db.layouts.find((item) => (
           item.id !== layout.id
@@ -1395,13 +1570,15 @@ class FakeStatement {
         layout.published_at = publishedAt;
         layout.updatedAt = updatedAt;
         layout.updated_at = updatedAt;
+        changes += 1;
       }
     }
 
     if (this.sql.includes('UPDATE time_capsule_spatial_layouts') && this.sql.includes('layout_mode = ?')) {
       const [layoutMode, confidenceScore, errorMessage, updatedAt, layoutId] = this.params;
       const layout = this.db.layouts.find((item) => item.id === layoutId);
-      if (layout) {
+      const canUpdate = layout && (!this.sql.includes("status = 'draft'") || layout.status === 'draft');
+      if (canUpdate) {
         layout.layoutMode = layoutMode;
         layout.layout_mode = layoutMode;
         layout.confidenceScore = confidenceScore;
@@ -1410,6 +1587,7 @@ class FakeStatement {
         layout.error_message = errorMessage;
         layout.updatedAt = updatedAt;
         layout.updated_at = updatedAt;
+        changes += 1;
       }
     }
 
@@ -1424,10 +1602,13 @@ class FakeStatement {
         confidenceScore,
         updatedAt,
         layoutId,
-        clusterId
+        clusterId,
+        parentLayoutId
       ] = this.params;
       const cluster = this.db.clusters.find((item) => (item.layoutId || item.layout_id) === layoutId && item.id === clusterId);
-      if (cluster) {
+      const parentLayout = this.db.layouts.find((item) => item.id === parentLayoutId);
+      const canUpdate = cluster && (!this.sql.includes('EXISTS') || parentLayout?.status === 'draft');
+      if (canUpdate) {
         cluster.label = label;
         cluster.summary = summary;
         cluster.routeOrder = routeOrder;
@@ -1442,6 +1623,7 @@ class FakeStatement {
         cluster.confidence_score = confidenceScore;
         cluster.updatedAt = updatedAt;
         cluster.updated_at = updatedAt;
+        changes += 1;
       }
     }
 
@@ -1459,10 +1641,13 @@ class FakeStatement {
         confidenceScore,
         updatedAt,
         layoutId,
-        placementId
+        placementId,
+        parentLayoutId
       ] = this.params;
       const placement = this.db.placements.find((item) => (item.layoutId || item.layout_id) === layoutId && item.id === placementId);
-      if (placement) {
+      const parentLayout = this.db.layouts.find((item) => item.id === parentLayoutId);
+      const canUpdate = placement && (!this.sql.includes('EXISTS') || parentLayout?.status === 'draft');
+      if (canUpdate) {
         placement.clusterId = clusterId;
         placement.cluster_id = clusterId;
         placement.routeOrder = routeOrder;
@@ -1484,10 +1669,11 @@ class FakeStatement {
         placement.confidence_score = confidenceScore;
         placement.updatedAt = updatedAt;
         placement.updated_at = updatedAt;
+        changes += 1;
       }
     }
 
-    return { success: true };
+    return { success: true, meta: { changes } };
   }
 
   buildCapsuleItem(item) {
