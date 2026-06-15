@@ -316,8 +316,8 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(capsuleHtml, /id="capsuleWalk"/);
   assert.match(capsuleHtml, /id="capsuleWalkCanvas"/);
   assert.match(capsuleHtml, /id="capsuleWalkFallback"/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-placards-1/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-placards-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-fs-mobile-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-fs-mobile-1/);
 
   assert.match(capsuleJs, /let spatialLayout = null/);
   assert.match(capsuleJs, /let spatialClusters = \[\]/);
@@ -362,8 +362,8 @@ test('capsule 3D Walk uses cinematic stations with safe spacing and camera poses
   ]);
 
   assert.match(capsuleHtml, /id="capsuleWalkViewButton"/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-placards-1/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-placards-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-fs-mobile-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-fs-mobile-1/);
 
   assert.match(capsuleJs, /const SPATIAL_STATION_SPACING = 10/);
   assert.match(capsuleJs, /const SPATIAL_CAMERA_PULLBACK = 7/);
@@ -476,7 +476,7 @@ test('capsule 3D Walk adds event-title world art, richer atmosphere, and fullscr
     readText('../../moments/styles.css')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-placards-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-fs-mobile-1/);
   assert.match(capsuleHtml, /id="capsuleWalkFullscreenButton"/);
   assert.match(capsuleJs, /qs\("#capsuleWalkFullscreenButton"\)\?\.addEventListener\("click", toggleSpatialWalkFullscreen\)/);
   assert.match(capsuleJs, /let nativeSpatialWalkFullscreenActive = false/);
@@ -491,6 +491,16 @@ test('capsule 3D Walk adds event-title world art, richer atmosphere, and fullscr
   assert.match(styles, /\.capsule-walk-controls \{[\s\S]*?top: clamp\(0\.85rem, 2vw, 1\.4rem\);[\s\S]*?bottom: auto;/);
   assert.match(styles, /\.capsule-walk:fullscreen/);
   assert.match(styles, /\.is-native-spatial-walk/);
+
+  // Mobile / iOS fallback: a CSS pseudo-fullscreen when the element
+  // Fullscreen API is unavailable.
+  assert.match(capsuleJs, /function enterSpatialWalkCssFullscreen/);
+  assert.match(capsuleJs, /function exitSpatialWalkCssFullscreen/);
+  assert.match(capsuleJs, /function isSpatialWalkFullscreen/);
+  assert.match(capsuleJs, /if \(!requestFullscreen\) \{[\s\S]*?enterSpatialWalkCssFullscreen\(\)/);
+  assert.match(capsuleJs, /classList\.add\("is-spatial-walk-fullscreen"\)/);
+  assert.match(styles, /\.capsule-viewer\.is-spatial-walk-fullscreen \.dashboard \{[\s\S]*?position: fixed/);
+  assert.match(styles, /\.capsule-viewer\.is-spatial-walk-fullscreen \.capsule-walk \{[\s\S]*?height: 100dvh/);
 });
 
 test('capsule 3D Walk captions use only the guest\'s own words (no machine descriptions)', async () => {
@@ -552,7 +562,7 @@ test('capsule 3D Walk auto tour holds videos for their playback duration', async
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-placards-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-fs-mobile-1/);
   assert.match(capsuleJs, /const SPATIAL_TOUR_VIDEO_MIN_DWELL_MS = 8000/);
   assert.match(capsuleJs, /const SPATIAL_TOUR_VIDEO_FALLBACK_DWELL_MS = 31000/);
   assert.match(capsuleJs, /const SPATIAL_TOUR_VIDEO_MAX_DWELL_MS = 34000/);
@@ -570,8 +580,8 @@ test('capsule 3D Walk lets guests enable audio for WebGL video moments', async (
     readText('../../moments/styles.css')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-placards-1/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-placards-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-fs-mobile-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-fs-mobile-1/);
   assert.match(capsuleHtml, /id="capsuleWalkSoundButton"/);
   assert.match(capsuleJs, /let spatialWalkSoundUnlocked = false/);
   assert.match(capsuleJs, /qs\("#capsuleWalkSoundButton"\)\?\.addEventListener\("click", enableSpatialWalkSound\)/);

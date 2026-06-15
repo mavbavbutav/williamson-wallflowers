@@ -38,6 +38,7 @@ let lastFeedScrollTop = 0;
 let feedSoundUnlocked = false;
 let nativeSwipeFullscreenActive = false;
 let nativeSpatialWalkFullscreenActive = false;
+let spatialWalkCssFullscreen = false;
 let nativeSlideshowFullscreenActive = false;
 let slideAutoPlaying = true;
 let slideAdvanceTimer = 0;
@@ -121,6 +122,10 @@ async function init() {
     if (event.key === "Escape" && currentCapsuleView === "feed") setCapsuleView("timeline", { userInitiated: true });
     if (event.key === "Escape" && !qs("#slideshowModal").hidden) closeSlide();
     if (currentCapsuleView === "walk" && qs("#slideshowModal").hidden) {
+      if (event.key === "Escape" && spatialWalkCssFullscreen) {
+        event.preventDefault();
+        exitSpatialWalkCssFullscreen();
+      }
       if (event.key === "ArrowRight" || event.key === "ArrowDown") {
         event.preventDefault();
         scrollSpatialWalkToStation(spatialActiveStationIndex + 1);
@@ -2118,8 +2123,7 @@ function updateSpatialWalkFullscreenButton() {
   const button = qs("#capsuleWalkFullscreenButton");
   const walk = qs("#capsuleWalk");
   if (!button || !walk) return;
-  const activeElement = activeFullscreenElement();
-  const isWalkFullscreen = activeElement === walk || Boolean(activeElement && walk.contains?.(activeElement));
+  const isWalkFullscreen = isSpatialWalkFullscreen();
   button.hidden = currentCapsuleView !== "walk";
   button.textContent = isWalkFullscreen ? "Exit full screen" : "Full screen";
   button.setAttribute("aria-pressed", String(isWalkFullscreen));
@@ -2274,6 +2278,7 @@ function setCapsuleView(view, options = {}) {
   } else {
     pauseSpatialWalkVideos();
     stopSpatialWalkLoop();
+    exitSpatialWalkCssFullscreen();
   }
 
   qsaCapsuleViewButtons().forEach((button) => {
@@ -2311,9 +2316,11 @@ async function toggleSpatialWalkFullscreen() {
   const target = qs("#capsuleWalk");
   if (!target) return;
 
-  const activeElement = activeFullscreenElement();
-  const isWalkFullscreen = activeElement === target || Boolean(activeElement && target.contains?.(activeElement));
-  if (isWalkFullscreen) {
+  if (isSpatialWalkFullscreen()) {
+    if (spatialWalkCssFullscreen) {
+      exitSpatialWalkCssFullscreen();
+      return;
+    }
     try {
       await exitNativeFullscreen();
     } catch {
@@ -2323,9 +2330,11 @@ async function toggleSpatialWalkFullscreen() {
     return;
   }
 
+  // iOS Safari (and some in-app/WebViews) expose no element Fullscreen API, so
+  // fall back to a CSS pseudo-fullscreen that pins the walk to the viewport.
   const requestFullscreen = target.requestFullscreen || target.webkitRequestFullscreen || target.msRequestFullscreen;
   if (!requestFullscreen) {
-    updateSpatialWalkFullscreenButton();
+    enterSpatialWalkCssFullscreen();
     return;
   }
 
@@ -2335,10 +2344,38 @@ async function toggleSpatialWalkFullscreen() {
     try {
       await requestFullscreen.call(target);
     } catch {
-      nativeSpatialWalkFullscreenActive = false;
-      updateSpatialWalkFullscreenButton();
+      enterSpatialWalkCssFullscreen();
     }
   }
+}
+
+function isSpatialWalkFullscreen() {
+  if (spatialWalkCssFullscreen) return true;
+  const walk = qs("#capsuleWalk");
+  const activeElement = activeFullscreenElement();
+  return Boolean(walk && activeElement && (activeElement === walk || walk.contains?.(activeElement)));
+}
+
+function enterSpatialWalkCssFullscreen() {
+  if (spatialWalkCssFullscreen) return;
+  spatialWalkCssFullscreen = true;
+  document.body.classList.add("is-spatial-walk-fullscreen");
+  updateSpatialWalkFullscreenButton();
+  window.setTimeout(() => {
+    resizeSpatialWalkScene();
+    requestSpatialWalkFrame();
+  }, 90);
+}
+
+function exitSpatialWalkCssFullscreen() {
+  if (!spatialWalkCssFullscreen) return;
+  spatialWalkCssFullscreen = false;
+  document.body.classList.remove("is-spatial-walk-fullscreen");
+  updateSpatialWalkFullscreenButton();
+  window.setTimeout(() => {
+    resizeSpatialWalkScene();
+    requestSpatialWalkFrame();
+  }, 90);
 }
 
 async function exitNativeFullscreen() {

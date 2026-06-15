@@ -3018,6 +3018,60 @@ textarea:focus-visible {
   overflow: hidden;
 }
 
+/* CSS pseudo-fullscreen for browsers with no element Fullscreen API
+   (notably iOS Safari, which only fullscreens <video>). Pins the walk to the
+   full viewport and hides the surrounding page chrome. */
+.capsule-viewer.is-spatial-walk-fullscreen {
+  overflow: hidden;
+}
+
+.capsule-viewer.is-spatial-walk-fullscreen .site-topbar {
+  display: none;
+}
+
+.capsule-viewer.is-spatial-walk-fullscreen .app-shell {
+  max-width: none;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 0;
+}
+
+.capsule-viewer.is-spatial-walk-fullscreen .dashboard {
+  position: fixed;
+  z-index: 200;
+  inset: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: #0d0c0b;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.capsule-viewer.is-spatial-walk-fullscreen .dashboard-header,
+.capsule-viewer.is-spatial-walk-fullscreen #capsuleNotice,
+.capsule-viewer.is-spatial-walk-fullscreen .cast-tv-panel {
+  display: none;
+}
+
+.capsule-viewer.is-spatial-walk-fullscreen .capsule-walk {
+  min-height: 100vh;
+  min-height: 100dvh;
+  max-height: 100vh;
+  max-height: 100dvh;
+  height: 100dvh;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.capsule-viewer.is-spatial-walk-fullscreen .capsule-walk-viewport {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
 @keyframes capsuleWalkCopyIn {
   from {
     opacity: 0;
