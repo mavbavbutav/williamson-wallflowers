@@ -1802,7 +1802,6 @@ function resolveSpatialWalkProgress(dt, time) {
     // no extra buffer — falling back to the dwell cap for stills or stalls.
     if ((dwellElapsed || isSpatialMediaFinished(targetStation)) && spatialTourTarget < maxFloat) {
       spatialTourHoldMs = 0;
-      resetSpatialStationPlayback(targetStation);
       spatialTourTarget += 1;
     }
     return clamp(spatialTourProgress, 0, 1);
@@ -2110,14 +2109,16 @@ function syncSpatialAudioPlayback(station, distance, isActive) {
   if (!shouldPlay) {
     audioState.playRequested = false;
     if (typeof element.pause === "function" && !element.paused) element.pause();
+    if (audioState.ended) resetSpatialStationPlayback(station);
     return;
   }
 
   if (!element.paused || audioState.playRequested || typeof element.play !== "function") return;
 
   if (audioState.ended) {
-    audioState.ended = false;
-    try { element.currentTime = 0; } catch {}
+    // During the tour a finished memo does not replay; the tour advances.
+    if (spatialTourActive) return;
+    resetSpatialStationPlayback(station);
   }
   audioState.playRequested = true;
   element.play().then(() => {
@@ -2185,18 +2186,22 @@ function syncSpatialVideoPlayback(station, distance, isActive) {
   if (!shouldPlay) {
     videoState.playRequested = false;
     if (typeof video.pause === "function" && !video.paused) video.pause();
+    // Once the camera has moved past it, rewind a finished clip so a later
+    // visit starts fresh — never while it is still on screen.
+    if (videoState.ended) resetSpatialStationPlayback(station);
     return;
   }
 
   texture.needsUpdate = true;
-  // Loop only when the guest is parked on the clip; during the tour it plays
-  // once and the tour advances on "ended".
+  // Never loop during the auto-tour; only loop when the guest is parked on it.
   video.loop = !spatialTourActive;
   if (!video.paused || videoState.playRequested || typeof video.play !== "function") return;
 
   if (videoState.ended) {
-    videoState.ended = false;
-    try { video.currentTime = 0; } catch {}
+    // During the tour a finished clip holds on its last frame and the tour
+    // advances — it must not replay from the start.
+    if (spatialTourActive) return;
+    resetSpatialStationPlayback(station);
   }
   videoState.playRequested = true;
   video.play().then(() => {
