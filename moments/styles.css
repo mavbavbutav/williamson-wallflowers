@@ -2884,11 +2884,21 @@ textarea:focus-visible {
 }
 
 .capsule-walk-sound-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 2.9rem;
+  min-width: 0;
+  padding-left: 0;
+  padding-right: 0;
   border-color: rgba(255, 250, 245, 0.32);
   background: rgba(23, 21, 20, 0.54);
   color: #fffaf5;
   box-shadow: 0 14px 38px rgba(0, 0, 0, 0.3);
   backdrop-filter: blur(14px);
+}
+
+.capsule-walk-sound-toggle svg {
+  display: block;
 }
 
 .capsule-walk-sound-toggle[aria-pressed="true"] {

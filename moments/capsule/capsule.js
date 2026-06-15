@@ -26,6 +26,7 @@ let spatialLastInteractionTime = 0;
 let spatialArrivalProgress = 1;
 let spatialWalkQuality = "high";
 let spatialWalkSoundUnlocked = false;
+let spatialTourActive = false;
 const spatialPointerParallax = { x: 0, y: 0 };
 const spatialPointerParallaxTarget = { x: 0, y: 0 };
 let slideIndex = 0;
@@ -71,7 +72,7 @@ const SPATIAL_TOUR_DWELL_MS = 2600;
 const SPATIAL_TOUR_VIDEO_MIN_DWELL_MS = 8000;
 const SPATIAL_TOUR_VIDEO_FALLBACK_DWELL_MS = 31000;
 const SPATIAL_TOUR_VIDEO_MAX_DWELL_MS = 34000;
-const SPATIAL_TOUR_VIDEO_END_BUFFER_MS = 1200;
+const SPATIAL_TOUR_VIDEO_END_BUFFER_MS = 0;
 const SPATIAL_TOUR_TRAVEL_MS = 2600;
 const SPATIAL_TOUR_RESUME_MS = 6000;
 const SPATIAL_ARRIVAL_MS = 2600;
@@ -99,7 +100,7 @@ async function init() {
   qs("#capsuleWalk")?.addEventListener("scroll", handleSpatialWalkScroll, { passive: true });
   qs("#capsuleWalkViewButton")?.addEventListener("click", () => openSpatialWalkStation(spatialActiveStationIndex));
   qs("#capsuleWalkTourToggle")?.addEventListener("click", toggleSpatialTour);
-  qs("#capsuleWalkSoundButton")?.addEventListener("click", enableSpatialWalkSound);
+  qs("#capsuleWalkSoundButton")?.addEventListener("click", toggleSpatialWalkSound);
   qs("#capsuleWalkFullscreenButton")?.addEventListener("click", toggleSpatialWalkFullscreen);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
@@ -1518,7 +1519,10 @@ function createSpatialVideoTexture(THREE, station, fallbackTexture, material, on
   const item = station.item;
   const video = document.createElement("video");
   video.crossOrigin = "anonymous";
-  video.loop = true;
+  // No looping by default: during the auto-tour the clip should play once and
+  // hand off to the next station. syncSpatialVideoPlayback re-enables looping
+  // only when the guest is parked on a clip (tour paused / scrubbing).
+  video.loop = false;
   video.playsInline = true;
   video.preload = "auto";
   video.setAttribute("playsinline", "");
@@ -1541,7 +1545,8 @@ function createSpatialVideoTexture(THREE, station, fallbackTexture, material, on
     material,
     fallbackTexture,
     ready: false,
-    playRequested: false
+    playRequested: false,
+    ended: false
   };
 
   video.addEventListener("loadedmetadata", () => {
@@ -1565,6 +1570,11 @@ function createSpatialVideoTexture(THREE, station, fallbackTexture, material, on
     station.video.ready = false;
     requestSpatialWalkFrame();
   }, { once: true });
+
+  video.addEventListener("ended", () => {
+    if (station.video) station.video.ended = true;
+    requestSpatialWalkFrame();
+  });
 
   video.load?.();
   return texture;
@@ -1779,14 +1789,20 @@ function resolveSpatialWalkProgress(dt, time) {
   const tourActive = spatialTourPlaying
     && spatialArrivalProgress >= 1
     && (time - spatialLastInteractionTime > SPATIAL_TOUR_RESUME_MS);
+  spatialTourActive = tourActive;
   if (!tourActive) return clamp(spatialScrubProgress, 0, 1);
 
   const maxFloat = count - 1;
   const currentFloat = clamp(spatialTourProgress, 0, 1) * maxFloat;
   if (Math.abs(currentFloat - spatialTourTarget) < 0.012) {
     spatialTourHoldMs += dt * 1000;
-    if (spatialTourHoldMs >= spatialTourDwellMsForStation(spatialWalkStations[spatialTourTarget]) && spatialTourTarget < maxFloat) {
+    const targetStation = spatialWalkStations[spatialTourTarget];
+    const dwellElapsed = spatialTourHoldMs >= spatialTourDwellMsForStation(spatialWalkStations[spatialTourTarget]);
+    // Advance the moment a video/voice memo finishes playing — no looping,
+    // no extra buffer — falling back to the dwell cap for stills or stalls.
+    if ((dwellElapsed || isSpatialMediaFinished(targetStation)) && spatialTourTarget < maxFloat) {
       spatialTourHoldMs = 0;
+      resetSpatialStationPlayback(targetStation);
       spatialTourTarget += 1;
     }
     return clamp(spatialTourProgress, 0, 1);
@@ -1800,7 +1816,22 @@ function resolveSpatialWalkProgress(dt, time) {
 }
 
 function spatialTourDwellMsForStation(station) {
-  if (String(station?.item?.mediaType || "").toLowerCase() !== "video") return SPATIAL_TOUR_DWELL_MS;
+  const type = String(station?.item?.mediaType || "").toLowerCase();
+
+  // Voice memos only play once sound is enabled; until then, hold the normal
+  // short dwell instead of lingering silently for the clip's length.
+  if (type === "audio") {
+    if (!spatialWalkSoundUnlocked) return SPATIAL_TOUR_DWELL_MS;
+    const audioSeconds = getSpatialAudioDurationSeconds(station);
+    if (!audioSeconds) return SPATIAL_TOUR_VIDEO_FALLBACK_DWELL_MS;
+    return clamp(
+      Math.round(audioSeconds * 1000 + SPATIAL_TOUR_VIDEO_END_BUFFER_MS),
+      SPATIAL_TOUR_VIDEO_MIN_DWELL_MS,
+      SPATIAL_TOUR_VIDEO_MAX_DWELL_MS
+    );
+  }
+
+  if (type !== "video") return SPATIAL_TOUR_DWELL_MS;
 
   const durationSeconds = getSpatialVideoDurationSeconds(station);
   if (!durationSeconds) return SPATIAL_TOUR_VIDEO_FALLBACK_DWELL_MS;
@@ -1810,6 +1841,37 @@ function spatialTourDwellMsForStation(station) {
     SPATIAL_TOUR_VIDEO_MIN_DWELL_MS,
     SPATIAL_TOUR_VIDEO_MAX_DWELL_MS
   );
+}
+
+function isSpatialMediaFinished(station) {
+  return Boolean(station?.video?.ended || station?.audio?.ended);
+}
+
+function resetSpatialStationPlayback(station) {
+  const video = station?.video;
+  if (video) {
+    video.ended = false;
+    if (video.element) {
+      try { video.element.currentTime = 0; } catch {}
+    }
+  }
+  const audio = station?.audio;
+  if (audio) {
+    audio.ended = false;
+    if (audio.element) {
+      try { audio.element.currentTime = 0; } catch {}
+    }
+  }
+}
+
+function getSpatialAudioDurationSeconds(station) {
+  const itemDuration = Number(station.item?.durationSeconds || station.item?.duration_seconds || 0);
+  if (Number.isFinite(itemDuration) && itemDuration > 0) return itemDuration;
+
+  const mediaDuration = Number(station.audio?.element?.duration || 0);
+  if (Number.isFinite(mediaDuration) && mediaDuration > 0) return mediaDuration;
+
+  return 0;
 }
 
 function getSpatialVideoDurationSeconds(station) {
@@ -2022,6 +2084,75 @@ function updateSpatialStationFocus(stationFloat) {
     if (station.placard) station.placard.material.opacity = opacity;
     if (distance <= SPATIAL_MEDIA_WARM_RADIUS) warmSpatialStationMedia(station);
     syncSpatialVideoPlayback(station, distance, isActive);
+    syncSpatialAudioPlayback(station, distance, isActive);
+  });
+}
+
+function syncSpatialAudioPlayback(station, distance, isActive) {
+  if (!station) return;
+  if (String(station.item?.mediaType || "").toLowerCase() !== "audio") return;
+
+  // Voice memos are audio-only, so they only make sense once sound is on and the
+  // station is the active one.
+  const shouldPlay = currentCapsuleView === "walk"
+    && spatialWalkSoundUnlocked
+    && isActive
+    && station.group?.visible;
+
+  if (shouldPlay && !station.audio) {
+    attachSpatialStationAudio(station);
+  }
+
+  const audioState = station.audio;
+  const element = audioState?.element;
+  if (!element) return;
+
+  if (!shouldPlay) {
+    audioState.playRequested = false;
+    if (typeof element.pause === "function" && !element.paused) element.pause();
+    return;
+  }
+
+  if (!element.paused || audioState.playRequested || typeof element.play !== "function") return;
+
+  if (audioState.ended) {
+    audioState.ended = false;
+    try { element.currentTime = 0; } catch {}
+  }
+  audioState.playRequested = true;
+  element.play().then(() => {
+    audioState.playRequested = false;
+  }).catch(() => {
+    audioState.playRequested = false;
+  });
+}
+
+function attachSpatialStationAudio(station) {
+  const item = station.item;
+  const url = item?.mediaUrl ? inlineMediaUrl(item.mediaUrl) : "";
+  if (!url) return;
+
+  const element = document.createElement("audio");
+  element.crossOrigin = "anonymous";
+  element.preload = "auto";
+  element.loop = false;
+  element.src = url;
+
+  station.audio = { element, playRequested: false, ended: false };
+
+  element.addEventListener("ended", () => {
+    if (station.audio) station.audio.ended = true;
+    requestSpatialWalkFrame();
+  });
+  element.load?.();
+}
+
+function pauseSpatialWalkAudios() {
+  spatialWalkStations.forEach((station) => {
+    const element = station.audio?.element;
+    if (!element || typeof element.pause !== "function") return;
+    station.audio.playRequested = false;
+    element.pause();
   });
 }
 
@@ -2058,8 +2189,15 @@ function syncSpatialVideoPlayback(station, distance, isActive) {
   }
 
   texture.needsUpdate = true;
+  // Loop only when the guest is parked on the clip; during the tour it plays
+  // once and the tour advances on "ended".
+  video.loop = !spatialTourActive;
   if (!video.paused || videoState.playRequested || typeof video.play !== "function") return;
 
+  if (videoState.ended) {
+    videoState.ended = false;
+    try { video.currentTime = 0; } catch {}
+  }
   videoState.playRequested = true;
   video.play().then(() => {
     videoState.playRequested = false;
@@ -2081,13 +2219,29 @@ function pauseSpatialWalkVideos() {
   });
 }
 
-function enableSpatialWalkSound() {
-  spatialWalkSoundUnlocked = true;
+function toggleSpatialWalkSound() {
+  spatialWalkSoundUnlocked = !spatialWalkSoundUnlocked;
   spatialWalkStations.forEach((station) => updateSpatialVideoSoundState(station.video?.element));
   updateSpatialWalkSoundButton();
+
   const activeStation = spatialWalkStations[spatialActiveStationIndex];
-  syncSpatialVideoPlayback(activeStation, 0, true);
+  if (spatialWalkSoundUnlocked) {
+    // Resume audible playback on the active moment immediately.
+    syncSpatialVideoPlayback(activeStation, 0, true);
+    syncSpatialAudioPlayback(activeStation, 0, true);
+  } else {
+    // Muting should silence voice memos outright (a muted memo is pointless).
+    pauseSpatialWalkAudios();
+  }
   requestSpatialWalkFrame();
+}
+
+function spatialSoundIconMarkup(isOn) {
+  const speaker = '<path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"></path>';
+  const waves = isOn
+    ? '<path d="M16 8.6a5 5 0 0 1 0 6.8"></path><path d="M18.7 6a8.5 8.5 0 0 1 0 12"></path>'
+    : '<line x1="16.5" y1="9.5" x2="21" y2="14"></line><line x1="21" y1="9.5" x2="16.5" y2="14"></line>';
+  return `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${speaker}${waves}</svg>`;
 }
 
 function updateSpatialWalkViewButton() {
@@ -2105,11 +2259,16 @@ function updateSpatialWalkViewButton() {
 function updateSpatialWalkSoundButton() {
   const button = qs("#capsuleWalkSoundButton");
   if (!button) return;
-  const hasVideo = spatialWalkStations.some((station) => String(station.item?.mediaType || "").toLowerCase() === "video");
-  button.hidden = currentCapsuleView !== "walk" || !hasVideo;
-  button.textContent = "Sound on";
+  const hasSound = spatialWalkStations.some((station) => {
+    const type = String(station.item?.mediaType || "").toLowerCase();
+    return type === "video" || type === "audio";
+  });
+  button.hidden = currentCapsuleView !== "walk" || !hasSound;
+  button.innerHTML = spatialSoundIconMarkup(spatialWalkSoundUnlocked);
+  button.classList.toggle("is-sound-on", spatialWalkSoundUnlocked);
   button.setAttribute("aria-pressed", String(spatialWalkSoundUnlocked));
-  button.setAttribute("aria-label", spatialWalkSoundUnlocked ? "3D Walk video sound is on" : "Turn 3D Walk video sound on");
+  button.setAttribute("aria-label", spatialWalkSoundUnlocked ? "Turn sound off" : "Turn sound on");
+  button.setAttribute("title", spatialWalkSoundUnlocked ? "Sound on" : "Sound off");
   document.body.classList.toggle("is-spatial-walk-sound-on", spatialWalkSoundUnlocked && currentCapsuleView === "walk");
 }
 
@@ -2342,6 +2501,7 @@ function setCapsuleView(view, options = {}) {
     startSpatialWalkScene();
   } else {
     pauseSpatialWalkVideos();
+    pauseSpatialWalkAudios();
     stopSpatialWalkLoop();
     exitSpatialWalkCssFullscreen();
   }

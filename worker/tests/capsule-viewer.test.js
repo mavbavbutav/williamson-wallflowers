@@ -316,8 +316,8 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(capsuleHtml, /id="capsuleWalk"/);
   assert.match(capsuleHtml, /id="capsuleWalkCanvas"/);
   assert.match(capsuleHtml, /id="capsuleWalkFallback"/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-perf-1/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-perf-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-audio-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-audio-1/);
 
   assert.match(capsuleJs, /let spatialLayout = null/);
   assert.match(capsuleJs, /let spatialClusters = \[\]/);
@@ -363,8 +363,8 @@ test('capsule 3D Walk uses cinematic stations with safe spacing and camera poses
   ]);
 
   assert.match(capsuleHtml, /id="capsuleWalkViewButton"/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-perf-1/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-perf-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-audio-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-audio-1/);
 
   assert.match(capsuleJs, /const SPATIAL_STATION_SPACING = 10/);
   assert.match(capsuleJs, /const SPATIAL_CAMERA_PULLBACK = 7/);
@@ -477,7 +477,7 @@ test('capsule 3D Walk adds event-title world art, richer atmosphere, and fullscr
     readText('../../moments/styles.css')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-perf-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-audio-1/);
   assert.match(capsuleHtml, /id="capsuleWalkFullscreenButton"/);
   assert.match(capsuleJs, /qs\("#capsuleWalkFullscreenButton"\)\?\.addEventListener\("click", toggleSpatialWalkFullscreen\)/);
   assert.match(capsuleJs, /let nativeSpatialWalkFullscreenActive = false/);
@@ -563,7 +563,7 @@ test('capsule 3D Walk auto tour holds videos for their playback duration', async
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-perf-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-audio-1/);
   assert.match(capsuleJs, /const SPATIAL_TOUR_VIDEO_MIN_DWELL_MS = 8000/);
   assert.match(capsuleJs, /const SPATIAL_TOUR_VIDEO_FALLBACK_DWELL_MS = 31000/);
   assert.match(capsuleJs, /const SPATIAL_TOUR_VIDEO_MAX_DWELL_MS = 34000/);
@@ -572,6 +572,12 @@ test('capsule 3D Walk auto tour holds videos for their playback duration', async
   assert.match(capsuleJs, /station\.item\?\.durationSeconds/);
   assert.match(capsuleJs, /station\.video\?\.element\?\.duration/);
   assert.match(capsuleJs, /spatialTourHoldMs >= spatialTourDwellMsForStation\(spatialWalkStations\[spatialTourTarget\]\)/);
+  // Advance the moment a clip finishes — no looping, no extra buffer.
+  assert.match(capsuleJs, /function isSpatialMediaFinished/);
+  assert.match(capsuleJs, /isSpatialMediaFinished\(targetStation\)/);
+  assert.match(capsuleJs, /video\.loop = !spatialTourActive/);
+  assert.match(capsuleJs, /const SPATIAL_TOUR_VIDEO_END_BUFFER_MS = 0/);
+  assert.match(capsuleJs, /function resetSpatialStationPlayback/);
 });
 
 test('capsule 3D Walk lets guests enable audio for WebGL video moments', async () => {
@@ -581,12 +587,17 @@ test('capsule 3D Walk lets guests enable audio for WebGL video moments', async (
     readText('../../moments/styles.css')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-perf-1/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-perf-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-audio-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-audio-1/);
   assert.match(capsuleHtml, /id="capsuleWalkSoundButton"/);
   assert.match(capsuleJs, /let spatialWalkSoundUnlocked = false/);
-  assert.match(capsuleJs, /qs\("#capsuleWalkSoundButton"\)\?\.addEventListener\("click", enableSpatialWalkSound\)/);
-  assert.match(capsuleJs, /function enableSpatialWalkSound/);
+  assert.match(capsuleJs, /qs\("#capsuleWalkSoundButton"\)\?\.addEventListener\("click", toggleSpatialWalkSound\)/);
+  assert.match(capsuleJs, /function toggleSpatialWalkSound/);
+  assert.match(capsuleJs, /spatialWalkSoundUnlocked = !spatialWalkSoundUnlocked/);
+  // Icon toggle + voice-memo playback.
+  assert.match(capsuleJs, /function spatialSoundIconMarkup/);
+  assert.match(capsuleJs, /function syncSpatialAudioPlayback/);
+  assert.match(capsuleJs, /function attachSpatialStationAudio/);
   assert.match(capsuleJs, /function updateSpatialVideoSoundState/);
   assert.match(capsuleJs, /video\.muted = !spatialWalkSoundUnlocked/);
   assert.match(capsuleJs, /video\.volume = spatialWalkSoundUnlocked \? 1 : 0/);
