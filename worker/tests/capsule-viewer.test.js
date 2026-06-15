@@ -316,8 +316,8 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(capsuleHtml, /id="capsuleWalk"/);
   assert.match(capsuleHtml, /id="capsuleWalkCanvas"/);
   assert.match(capsuleHtml, /id="capsuleWalkFallback"/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-fs-mobile-1/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-fs-mobile-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-perf-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-perf-1/);
 
   assert.match(capsuleJs, /let spatialLayout = null/);
   assert.match(capsuleJs, /let spatialClusters = \[\]/);
@@ -343,7 +343,8 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(capsuleJs, /fallback\.hidden = Boolean\(spatialWalkScene\)/);
   assert.match(capsuleJs, /function hideSpatialWalkFallback/);
   assert.match(capsuleJs, /material\.map = spatialTextureForItem\(THREE, station, isAudio, material, \(texture\) => updateSpatialStationMediaAspect\(THREE, station, texture\)\)/);
-  assert.match(capsuleJs, /loader\.load\(textureUrl, \(texture\) => \{[\s\S]*?material\.map = texture[\s\S]*?material\.needsUpdate = true[\s\S]*?\}, undefined, \(\) => \{[\s\S]*?material\.map = fallbackTexture[\s\S]*?material\.needsUpdate = true/);
+  assert.match(capsuleJs, /image\.onload = \(\) => \{[\s\S]*?image\.decode\(\)[\s\S]*?\};/);
+  assert.match(capsuleJs, /image\.onerror = \(\) => \{[\s\S]*?material\.map = fallbackTexture[\s\S]*?material\.needsUpdate = true/);
   assert.match(capsuleJs, /return fallbackTexture;/);
 
   assert.match(styles, /\.capsule-walk/);
@@ -362,8 +363,8 @@ test('capsule 3D Walk uses cinematic stations with safe spacing and camera poses
   ]);
 
   assert.match(capsuleHtml, /id="capsuleWalkViewButton"/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-fs-mobile-1/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-fs-mobile-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-perf-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-perf-1/);
 
   assert.match(capsuleJs, /const SPATIAL_STATION_SPACING = 10/);
   assert.match(capsuleJs, /const SPATIAL_CAMERA_PULLBACK = 7/);
@@ -476,7 +477,7 @@ test('capsule 3D Walk adds event-title world art, richer atmosphere, and fullscr
     readText('../../moments/styles.css')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-fs-mobile-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-perf-1/);
   assert.match(capsuleHtml, /id="capsuleWalkFullscreenButton"/);
   assert.match(capsuleJs, /qs\("#capsuleWalkFullscreenButton"\)\?\.addEventListener\("click", toggleSpatialWalkFullscreen\)/);
   assert.match(capsuleJs, /let nativeSpatialWalkFullscreenActive = false/);
@@ -562,7 +563,7 @@ test('capsule 3D Walk auto tour holds videos for their playback duration', async
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-fs-mobile-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-perf-1/);
   assert.match(capsuleJs, /const SPATIAL_TOUR_VIDEO_MIN_DWELL_MS = 8000/);
   assert.match(capsuleJs, /const SPATIAL_TOUR_VIDEO_FALLBACK_DWELL_MS = 31000/);
   assert.match(capsuleJs, /const SPATIAL_TOUR_VIDEO_MAX_DWELL_MS = 34000/);
@@ -580,8 +581,8 @@ test('capsule 3D Walk lets guests enable audio for WebGL video moments', async (
     readText('../../moments/styles.css')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-fs-mobile-1/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-fs-mobile-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-perf-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-perf-1/);
   assert.match(capsuleHtml, /id="capsuleWalkSoundButton"/);
   assert.match(capsuleJs, /let spatialWalkSoundUnlocked = false/);
   assert.match(capsuleJs, /qs\("#capsuleWalkSoundButton"\)\?\.addEventListener\("click", enableSpatialWalkSound\)/);
@@ -868,6 +869,28 @@ test('TV slideshow videos favor fullscreen mirroring instead of direct video Air
   assert.match(capsuleJs, /disableRemotePlayback/);
   assert.match(capsuleJs, /x-webkit-airplay", "deny"/);
   assert.match(capsuleJs, /prepareTvVideoForMirroring\(video\)/);
+});
+
+test('capsule 3D Walk warms media by proximity, primes decode, and streams video lazily', async () => {
+  const capsuleJs = await readText('../../moments/capsule/capsule.js');
+
+  // Proximity warming instead of loading every station up-front.
+  assert.match(capsuleJs, /const SPATIAL_MEDIA_WARM_RADIUS = 2/);
+  assert.match(capsuleJs, /function warmSpatialStationMedia/);
+  assert.match(capsuleJs, /station\.mediaState !== "idle"/);
+  assert.match(capsuleJs, /if \(distance <= SPATIAL_MEDIA_WARM_RADIUS\) warmSpatialStationMedia\(station\)/);
+
+  // Decode-primed, priority-hinted image loading (like the swipe feed).
+  assert.match(capsuleJs, /image\.decoding = "async"/);
+  assert.match(capsuleJs, /"fetchPriority" in image/);
+  assert.match(capsuleJs, /image\.decode\(\)/);
+
+  // Video element is created lazily when its station is reached, not at build.
+  assert.match(capsuleJs, /if \(shouldPlay && !station\.video/);
+
+  // HLS stream is preferred over downloading the whole file.
+  assert.match(capsuleJs, /Prefer the adaptive HLS stream/);
+  assert.match(capsuleJs, /const streamUrl = item\.streamUrl \|\| ""/);
 });
 
 async function readText(path) {

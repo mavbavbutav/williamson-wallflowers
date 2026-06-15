@@ -64,6 +64,7 @@ const SPATIAL_CAMERA_HEIGHT = 2.15;
 const SPATIAL_STATION_FOCUS_HEIGHT = 1.35;
 const SPATIAL_GROUND_CLEARANCE = 1.35;
 const SPATIAL_PLACARD_GAP = 0.22;
+const SPATIAL_MEDIA_WARM_RADIUS = 2;
 const SPATIAL_NEAR_STATION_RADIUS = 2.35;
 const SPATIAL_VIDEO_PLAY_RADIUS = 0.72;
 const SPATIAL_TOUR_DWELL_MS = 2600;
@@ -1422,40 +1423,87 @@ function updateSpatialStationMediaAspect(THREE, station, texture) {
 function spatialTextureForItem(THREE, station, isAudio, material, onTextureReady) {
   const item = station.item;
   const fallbackTexture = createSpatialCardTexture(THREE, item);
-  if (isAudio) return fallbackTexture;
-
-  const mediaType = String(item.mediaType || "").toLowerCase();
-  if (mediaType === "video") {
-    createSpatialVideoTexture(THREE, station, fallbackTexture, material, onTextureReady);
-    return item.thumbnailUrl
-      ? loadSpatialStillTexture(THREE, item.thumbnailUrl, fallbackTexture, material, onTextureReady)
-      : fallbackTexture;
-  }
-
-  const textureUrl = item.mediaUrl ? inlineMediaUrl(item.mediaUrl) : "";
-  if (!textureUrl) return fallbackTexture;
-
-  return loadSpatialStillTexture(THREE, textureUrl, fallbackTexture, material, onTextureReady);
+  // Defer real media until the station is near the camera (proximity warming),
+  // so opening the walk does not fire every full-res download at once. The
+  // lightweight card texture renders instantly; warmSpatialStationMedia() swaps
+  // in the real photo / video poster as the station is approached.
+  station.cardMaterial = material;
+  station.cardFallbackTexture = fallbackTexture;
+  station.onMediaTexture = onTextureReady;
+  station.mediaState = isAudio ? "ready" : "idle";
+  return fallbackTexture;
 }
 
-function loadSpatialStillTexture(THREE, textureUrl, fallbackTexture, material, onTextureReady) {
-  const loader = new THREE.TextureLoader();
-  loader.setCrossOrigin?.("anonymous");
-  loader.load(textureUrl, (texture) => {
+function warmSpatialStationMedia(station) {
+  if (!station || station.mediaState !== "idle") return;
+  const THREE = spatialWalkScene?.THREE;
+  if (!THREE) return;
+  station.mediaState = "loading";
+
+  const item = station.item;
+  const mediaType = String(item.mediaType || "").toLowerCase();
+  if (mediaType === "video") {
+    warmSpatialVideoStill(THREE, station);
+    return;
+  }
+
+  const url = item.mediaUrl ? inlineMediaUrl(item.mediaUrl) : "";
+  if (!url) {
+    station.mediaState = "ready";
+    return;
+  }
+  const priority = station.index === spatialActiveStationIndex ? "high" : "auto";
+  loadSpatialStillTexture(THREE, url, station, priority);
+}
+
+function warmSpatialVideoStill(THREE, station) {
+  const item = station.item;
+  // Prefer the server-side thumbnail (cheap). With none, keep the lightweight
+  // card and let the clip stream in when reached — avoids downloading the whole
+  // video just to grab a poster frame.
+  if (item.thumbnailUrl) {
+    loadSpatialStillTexture(THREE, item.thumbnailUrl, station, "auto");
+    return;
+  }
+  station.mediaState = "ready";
+}
+
+function loadSpatialStillTexture(THREE, url, station, priority) {
+  const material = station.cardMaterial;
+  const fallbackTexture = station.cardFallbackTexture;
+  const onTextureReady = station.onMediaTexture;
+
+  const image = new Image();
+  image.crossOrigin = "anonymous";
+  image.decoding = "async";
+  if (priority && "fetchPriority" in image) image.fetchPriority = priority;
+
+  const apply = () => {
+    const texture = new THREE.Texture(image);
     texture.colorSpace = THREE.SRGBColorSpace || texture.colorSpace;
+    texture.needsUpdate = true;
     applyWalkTextureQuality(THREE, texture);
     material.map = texture;
     material.emissiveMap = texture;
     material.needsUpdate = true;
+    station.mediaState = "ready";
     onTextureReady?.(texture);
     requestSpatialWalkFrame();
-  }, undefined, () => {
+  };
+
+  image.onload = () => {
+    // Decode off the main thread so the GPU upload doesn't hitch the walk.
+    if (typeof image.decode === "function") image.decode().then(apply).catch(apply);
+    else apply();
+  };
+  image.onerror = () => {
     material.map = fallbackTexture;
     material.emissiveMap = fallbackTexture;
     material.needsUpdate = true;
+    station.mediaState = "ready";
     requestSpatialWalkFrame();
-  });
-  return fallbackTexture;
+  };
+  image.src = url;
 }
 
 function applyWalkTextureQuality(THREE, texture) {
@@ -1536,32 +1584,34 @@ function updateSpatialVideoSoundState(video) {
 }
 
 function configureSpatialVideoSource(video, item) {
+  // Prefer the adaptive HLS stream so playback starts from a small prefetch
+  // instead of downloading the entire file; fall back to the direct media URL.
+  const streamUrl = item.streamUrl || "";
+  if (streamUrl) {
+    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = streamUrl;
+      video.dataset.spatialVideoSource = "stream-native";
+      return true;
+    }
+
+    if (window.Hls && window.Hls.isSupported()) {
+      const hls = new window.Hls({
+        maxBufferLength: 10,
+        maxMaxBufferLength: 18,
+        startFragPrefetch: true
+      });
+      hls.loadSource(streamUrl);
+      hls.attachMedia(video);
+      video.wallflowerSpatialHls = hls;
+      video.dataset.spatialVideoSource = "stream-hls";
+      return true;
+    }
+  }
+
   const directUrl = item.mediaUrl ? inlineMediaUrl(item.mediaUrl) : "";
   if (directUrl) {
     video.src = directUrl;
     video.dataset.spatialVideoSource = "media";
-    return true;
-  }
-
-  const streamUrl = item.streamUrl || "";
-  if (!streamUrl) return false;
-
-  if (video.canPlayType("application/vnd.apple.mpegurl")) {
-    video.src = streamUrl;
-    video.dataset.spatialVideoSource = "stream-native";
-    return true;
-  }
-
-  if (window.Hls && window.Hls.isSupported()) {
-    const hls = new window.Hls({
-      maxBufferLength: 10,
-      maxMaxBufferLength: 18,
-      startFragPrefetch: true
-    });
-    hls.loadSource(streamUrl);
-    hls.attachMedia(video);
-    video.wallflowerSpatialHls = hls;
-    video.dataset.spatialVideoSource = "stream-hls";
     return true;
   }
 
@@ -1970,21 +2020,36 @@ function updateSpatialStationFocus(stationFloat) {
     if (station.bevel) station.bevel.material.opacity = opacity;
     if (station.reflection) station.reflection.material.opacity = opacity * 0.16;
     if (station.placard) station.placard.material.opacity = opacity;
+    if (distance <= SPATIAL_MEDIA_WARM_RADIUS) warmSpatialStationMedia(station);
     syncSpatialVideoPlayback(station, distance, isActive);
   });
 }
 
 function syncSpatialVideoPlayback(station, distance, isActive) {
   if (!station) return;
+  if (String(station.item?.mediaType || "").toLowerCase() !== "video") return;
+
+  const shouldPlay = currentCapsuleView === "walk"
+    && station.group?.visible
+    && (isActive || distance <= SPATIAL_VIDEO_PLAY_RADIUS);
+
+  // Create + stream the actual <video> only when its station is reached, instead
+  // of preloading every clip when the walk opens.
+  if (shouldPlay && !station.video && spatialWalkScene?.THREE) {
+    createSpatialVideoTexture(
+      spatialWalkScene.THREE,
+      station,
+      station.cardFallbackTexture,
+      station.cardMaterial,
+      station.onMediaTexture
+    );
+  }
+
   const videoState = station.video;
   const video = videoState?.element;
   const texture = videoState?.texture;
   if (!video || !texture) return;
   updateSpatialVideoSoundState(video);
-
-  const shouldPlay = currentCapsuleView === "walk"
-    && station.group?.visible
-    && (isActive || distance <= SPATIAL_VIDEO_PLAY_RADIUS);
 
   if (!shouldPlay) {
     videoState.playRequested = false;
