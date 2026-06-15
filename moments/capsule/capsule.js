@@ -54,13 +54,15 @@ const SLIDE_ERROR_ADVANCE_MS = 6000;
 const CAST_RECEIVER_APP_ID = "D4D06631";
 const SPATIAL_STATION_SPACING = 10;
 const SPATIAL_STATION_SIDE_OFFSET = 4.4;
-const SPATIAL_STATION_SIZE_MULTIPLIER = 1.18;
-const SPATIAL_FEATURED_STATION_SCALE = 1.18;
+const SPATIAL_STATION_SIZE_MULTIPLIER = 1.32;
+const SPATIAL_FEATURED_STATION_SCALE = 1.16;
 const SPATIAL_DUST_PARTICLE_MULTIPLIER = 1.75;
-const SPATIAL_CAMERA_PULLBACK = 8.6;
+const SPATIAL_CAMERA_PULLBACK = 7;
 const SPATIAL_CAMERA_SAFE_PULLBACK = 1.15;
 const SPATIAL_CAMERA_HEIGHT = 2.15;
 const SPATIAL_STATION_FOCUS_HEIGHT = 1.35;
+const SPATIAL_GROUND_CLEARANCE = 1.35;
+const SPATIAL_PLACARD_GAP = 0.22;
 const SPATIAL_NEAR_STATION_RADIUS = 2.35;
 const SPATIAL_VIDEO_PLAY_RADIUS = 0.72;
 const SPATIAL_TOUR_DWELL_MS = 2600;
@@ -70,7 +72,7 @@ const SPATIAL_TOUR_VIDEO_MAX_DWELL_MS = 34000;
 const SPATIAL_TOUR_VIDEO_END_BUFFER_MS = 1200;
 const SPATIAL_TOUR_TRAVEL_MS = 2600;
 const SPATIAL_TOUR_RESUME_MS = 6000;
-const SPATIAL_ARRIVAL_MS = 1700;
+const SPATIAL_ARRIVAL_MS = 2600;
 const SPATIAL_IDLE_FLOAT = 0.07;
 const SPATIAL_PARALLAX_STRENGTH = 0.6;
 const SPATIAL_CAMERA_DAMP = 0.18;
@@ -464,100 +466,13 @@ function renderSpatialWalkFallbackCard(placement, index) {
 }
 
 function getSpatialMomentCaption(placement) {
+  // Only the guest's own words — no machine-written descriptions.
   const item = placement?.item || {};
-  const cluster = placement?.cluster || placement?.placement?.cluster || null;
-  const evidence = placement ? (placement.evidence || placement.placement?.evidence || null) : null;
-  const explicitCaption = cleanCaptionText(item.caption || item.guestNote);
-  const visionCaption = buildGalleryVisionCaption(item, cluster, { ...(placement || {}), evidence });
-
-  if (explicitCaption && visionCaption && !captionsShareMeaning(explicitCaption, visionCaption)) {
-    return `${explicitCaption} ${visionCaption}`;
-  }
-
-  return explicitCaption || visionCaption || "A polished stop in this Time Capsule path, held in the order it was captured.";
-}
-
-function buildGalleryVisionCaption(item = {}, cluster = null, placement = null) {
-  const aiVision = item.aiVision || {};
-  const summary = cleanCaptionText(aiVision.summary);
-  if (summary) return summary;
-
-  const cues = pickGalleryVisionCues(aiVision, placement?.evidence);
-  if (cues.length) {
-    const mediaType = String(item.mediaType || "").toLowerCase();
-    const opening = mediaType === "video"
-      ? "This clip brings"
-      : mediaType === "audio"
-        ? "This memory carries"
-        : "This frame brings";
-    const cueText = formatNaturalList(cues.slice(0, 3));
-    const peopleText = galleryPeoplePhrase(aiVision);
-    return `${opening} ${cueText} into focus${peopleText}, giving this moment its own little spark.`;
-  }
-
-  const clusterSummary = cleanCaptionText(cluster?.summary);
-  if (clusterSummary && !/arranged in capsule order/i.test(clusterSummary)) return clusterSummary;
-
-  const source = cleanCaptionText(placement?.evidence?.source);
-  if (source === "visual_cue") {
-    return "The gallery grouped this stop by a repeated visual thread running through the party.";
-  }
-
-  return "";
-}
-
-function pickGalleryVisionCues(aiVision = {}, evidence = {}) {
-  const candidates = [
-    evidence?.cue,
-    ...(Array.isArray(aiVision.backgroundCues) ? aiVision.backgroundCues : []),
-    ...(Array.isArray(aiVision.sceneTags) ? aiVision.sceneTags : []),
-    ...(Array.isArray(aiVision.lightingTags) ? aiVision.lightingTags : []),
-    ...(Array.isArray(aiVision.compositionTags) ? aiVision.compositionTags : [])
-  ];
-  const seen = new Set();
-  return candidates
-    .map(friendlyVisionCue)
-    .filter((cue) => {
-      if (!cue || seen.has(cue)) return false;
-      seen.add(cue);
-      return true;
-    })
-    .slice(0, 4);
-}
-
-function friendlyVisionCue(value) {
-  const cue = String(value || "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
-  if (!cue || cue.length < 3 || cue.length > 46) return "";
-  if (/^#[0-9a-f]{3,8}$/i.test(cue)) return "";
-  if (["photo", "video", "image", "unknown", "none", "person", "people"].includes(cue)) return "";
-  return cue;
-}
-
-function galleryPeoplePhrase(aiVision = {}) {
-  const peopleCount = Number(aiVision.peopleCount || aiVision.faceCount || 0);
-  if (!Number.isFinite(peopleCount) || peopleCount <= 0) return "";
-  if (peopleCount === 1) return " with one person at the center";
-  if (peopleCount <= 3) return " with a small group in the energy";
-  return " with the room feeling full and lively";
-}
-
-function formatNaturalList(values) {
-  const list = values.filter(Boolean);
-  if (!list.length) return "the party atmosphere";
-  if (list.length === 1) return list[0];
-  if (list.length === 2) return `${list[0]} and ${list[1]}`;
-  return `${list.slice(0, -1).join(", ")}, and ${list[list.length - 1]}`;
+  return cleanCaptionText(item.caption || item.guestNote);
 }
 
 function cleanCaptionText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
-}
-
-function captionsShareMeaning(left, right) {
-  const normalize = (value) => cleanCaptionText(value).toLowerCase().replace(/[^a-z0-9 ]+/g, "");
-  const a = normalize(left);
-  const b = normalize(right);
-  return Boolean(a && b && (a.includes(b) || b.includes(a)));
 }
 
 function renderSpatialWalkFallbackMedia(item) {
@@ -689,21 +604,14 @@ function buildSpatialStation(placement, index, total) {
     : 0;
   const routeCurve = Math.sin(index * 0.72) * SPATIAL_STATION_SIDE_OFFSET;
   const sourceHint = clamp(Number(sourcePosition.x || 0) * 0.18, -1.25, 1.25);
+  const centerY = stationCenterY(display.height);
   const focus = {
     x: routeCurve + sourceHint + clusterOffset,
-    y: SPATIAL_STATION_FOCUS_HEIGHT + Math.sin(index * 0.41) * 0.22,
+    y: centerY,
     z: -index * SPATIAL_STATION_SPACING
   };
-  const cameraPosition = {
-    x: focus.x * 0.32,
-    y: focus.y + SPATIAL_CAMERA_HEIGHT,
-    z: focus.z + SPATIAL_CAMERA_PULLBACK + SPATIAL_CAMERA_SAFE_PULLBACK + Math.min(1.4, display.height * 0.18)
-  };
-  const lookAt = {
-    x: focus.x,
-    y: focus.y + display.height * 0.04,
-    z: focus.z
-  };
+  const cameraPosition = stationCameraPose(focus, display);
+  const lookAt = stationLookAt(focus, display);
   const rotationY = Math.atan2(cameraPosition.x - focus.x, cameraPosition.z - focus.z);
 
   return {
@@ -759,6 +667,26 @@ function displaySizeFromAspect(aspect) {
   return {
     width: clamp(height * safeAspect, 2.12, 3.48),
     height
+  };
+}
+
+function stationCenterY(displayHeight) {
+  return Math.max(SPATIAL_STATION_FOCUS_HEIGHT, displayHeight / 2 + SPATIAL_GROUND_CLEARANCE);
+}
+
+function stationCameraPose(focus, display) {
+  return {
+    x: focus.x * 0.32,
+    y: focus.y + display.height * 0.06,
+    z: focus.z + SPATIAL_CAMERA_PULLBACK + SPATIAL_CAMERA_SAFE_PULLBACK + Math.min(1.4, display.height * 0.16)
+  };
+}
+
+function stationLookAt(focus, display) {
+  return {
+    x: focus.x,
+    y: focus.y - display.height * 0.16,
+    z: focus.z
   };
 }
 
@@ -872,6 +800,7 @@ function buildSpatialWalkScene(THREE) {
     station.focus.z
   ));
   const stationHitMeshes = [];
+  const backdrop = addGalleryBackdrop(THREE, scene);
   addGalleryFloor(THREE, scene, stations);
   addSpatialEventTitleBackdrop(THREE, scene, stations);
   addSpatialRouteRibbon(THREE, scene, routePoints);
@@ -895,6 +824,7 @@ function buildSpatialWalkScene(THREE) {
     spotTarget,
     dust,
     atmosphereStreams,
+    backdrop,
     currentLookAt: new THREE.Vector3(firstFocus.x, firstFocus.y, firstFocus.z)
   };
   camera.position.set(firstFocus.x, firstFocus.y + SPATIAL_CAMERA_HEIGHT, firstFocus.z + SPATIAL_CAMERA_PULLBACK + SPATIAL_CAMERA_SAFE_PULLBACK);
@@ -947,37 +877,106 @@ function addGalleryFloor(THREE, scene, stations) {
 
 function addSpatialEventTitleBackdrop(THREE, scene, stations) {
   const title = capsule?.eventTitle || capsule?.title || capsule?.name || "Wallflower Moments";
+  const first = stations[0];
+  const last = stations[stations.length - 1];
+  if (!first) return;
+
+  // Grand entrance — the walk opens by drifting toward the event name.
+  const entranceZ = first.cameraPosition.z + 4.5;
+  const entranceY = stationCenterY(first.display.height) + 2.2;
+  addSpatialTitlePanel(THREE, scene, title, { x: 0, y: entranceY, z: entranceZ }, 0.72, true);
+
+  // The event name recurs softly, high in the atmosphere, as the walk goes deeper.
+  const interval = 3;
+  for (let index = interval; index < stations.length; index += interval) {
+    const station = stations[index];
+    addSpatialTitlePanel(
+      THREE,
+      scene,
+      title,
+      { x: 0, y: stationCenterY(station.display.height) + 4.7, z: station.focus.z + SPATIAL_STATION_SPACING * 0.5 },
+      0.16,
+      false
+    );
+  }
+
+  // Quiet reprise behind the final piece.
+  if (last && last !== first) {
+    const endZ = last.focus.z - Math.max(9, SPATIAL_STATION_SPACING * 0.9);
+    addSpatialTitlePanel(THREE, scene, title, { x: 0, y: 3.7, z: endZ }, 0.4, true);
+  }
+}
+
+function addSpatialTitlePanel(THREE, scene, title, position, opacity, withHalo) {
   const texture = createSpatialTitleTexture(THREE, title);
-  const lastStation = stations[stations.length - 1];
-  const z = lastStation ? lastStation.focus.z - Math.max(9, SPATIAL_STATION_SPACING * 0.9) : -18;
-  const plane = new THREE.PlaneGeometry(20.5, 5.2);
   const material = new THREE.MeshBasicMaterial({
     map: texture,
     transparent: true,
-    opacity: 0.56,
+    opacity,
     depthWrite: false,
     side: THREE.DoubleSide,
     blending: THREE.AdditiveBlending
   });
-  const titleMesh = new THREE.Mesh(plane, material);
-  titleMesh.position.set(0, 3.55, z);
+  material.fog = false;
+  const titleMesh = new THREE.Mesh(new THREE.PlaneGeometry(20.5, 5.2), material);
+  titleMesh.position.set(position.x, position.y, position.z);
   titleMesh.renderOrder = -4;
   scene.add(titleMesh);
 
+  if (!withHalo) return;
   const halo = new THREE.Mesh(
     new THREE.PlaneGeometry(22, 6.2),
     new THREE.MeshBasicMaterial({
       color: 0xfff1dc,
       transparent: true,
-      opacity: 0.055,
+      opacity: 0.06,
       depthWrite: false,
       side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending
     })
   );
-  halo.position.set(0, 3.55, z - 0.08);
+  halo.material.fog = false;
+  halo.position.set(position.x, position.y, position.z - 0.08);
   halo.renderOrder = -5;
   scene.add(halo);
+}
+
+function addGalleryBackdrop(THREE, scene) {
+  const material = new THREE.MeshBasicMaterial({
+    map: createBackdropTexture(THREE),
+    depthWrite: false,
+    side: THREE.DoubleSide
+  });
+  material.fog = false;
+  const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(96, 56), material);
+  backdrop.renderOrder = -10;
+  scene.add(backdrop);
+  return backdrop;
+}
+
+function createBackdropTexture(THREE) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  const gradient = ctx.createLinearGradient(0, 0, 0, 256);
+  gradient.addColorStop(0, "#0a0908");
+  gradient.addColorStop(0.42, "#1b1410");
+  gradient.addColorStop(0.6, "#33231a");
+  gradient.addColorStop(0.74, "#1a120e");
+  gradient.addColorStop(1, "#090807");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 64, 256);
+
+  const glow = ctx.createRadialGradient(32, 150, 8, 32, 150, 150);
+  glow.addColorStop(0, "rgba(122,82,52,0.42)");
+  glow.addColorStop(1, "rgba(122,82,52,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, 64, 256);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace || texture.colorSpace;
+  return texture;
 }
 
 function createSpatialTitleTexture(THREE, eventTitle) {
@@ -1300,6 +1299,85 @@ function addSpatialStationMesh(THREE, scene, station, stationHitMeshes) {
   stationHitMeshes.push(hitArea);
   addStationContactShadow(THREE, scene, station);
   addStationReflection(THREE, scene, station);
+  addStationPlacard(THREE, station);
+}
+
+function addStationPlacard(THREE, station) {
+  if (!station.group) return;
+  const texture = createStationPlacardTexture(THREE, station);
+  if (!texture) return;
+  const imageWidth = texture.image?.width || 1024;
+  const imageHeight = texture.image?.height || 340;
+  const width = clamp(station.display.width, 2.8, 4.8);
+  const height = width * (imageHeight / imageWidth);
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 1,
+    depthWrite: false,
+    side: THREE.DoubleSide
+  });
+  material.toneMapped = false;
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
+  mesh.userData.stationIndex = station.index;
+  station.placard = mesh;
+  station.placardHeight = height;
+  station.group.add(mesh);
+  repositionStationPlacard(station);
+}
+
+function repositionStationPlacard(station) {
+  if (!station?.placard) return;
+  const height = station.placardHeight || 1;
+  station.placard.position.set(0, -(station.display.height / 2) - SPATIAL_PLACARD_GAP - height / 2, 0.04);
+}
+
+function createStationPlacardTexture(THREE, station) {
+  const item = station.item || {};
+  const title = cleanCaptionText(item.title) || "Time Capsule moment";
+  const message = getSpatialMomentCaption(station);
+  const date = formatDateTime(item.capturedAt);
+  const hasMessage = Boolean(message);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = hasMessage ? 340 : 168;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.textAlign = "center";
+
+  if (date) {
+    ctx.fillStyle = "rgba(255,250,245,0.6)";
+    ctx.font = "700 24px Manrope, Arial, sans-serif";
+    ctx.textBaseline = "alphabetic";
+    drawTrackedCanvasText(ctx, date.toUpperCase(), 512, 42, 4);
+  }
+
+  ctx.shadowColor = "rgba(0,0,0,0.55)";
+  ctx.shadowBlur = 16;
+  ctx.fillStyle = "#fffaf5";
+  let titleSize = 78;
+  ctx.font = `700 ${titleSize}px "Cormorant Garamond", Georgia, serif`;
+  while (titleSize > 44 && ctx.measureText(title).width > 940) {
+    titleSize -= 4;
+    ctx.font = `700 ${titleSize}px "Cormorant Garamond", Georgia, serif`;
+  }
+  ctx.fillText(title, 512, 122);
+
+  if (hasMessage) {
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = "rgba(255,250,245,0.85)";
+    ctx.font = "600 30px Manrope, Arial, sans-serif";
+    wrapCanvasText(ctx, message, 512, 196, 900, 42, 2);
+  }
+  ctx.shadowBlur = 0;
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace || texture.colorSpace;
+  const maxAnisotropy = spatialWalkScene?.renderer?.capabilities?.getMaxAnisotropy?.() || 1;
+  texture.anisotropy = Math.min(8, maxAnisotropy);
+  return texture;
 }
 
 function updateSpatialStationMediaAspect(THREE, station, texture) {
@@ -1310,14 +1388,11 @@ function updateSpatialStationMediaAspect(THREE, station, texture) {
 
   const display = displaySizeFromAspect(width / height);
   station.display = display;
-  station.cameraPosition = {
-    ...station.cameraPosition,
-    z: station.focus.z + SPATIAL_CAMERA_PULLBACK + SPATIAL_CAMERA_SAFE_PULLBACK + Math.min(1.4, display.height * 0.18)
-  };
-  station.lookAt = {
-    ...station.lookAt,
-    y: station.focus.y + display.height * 0.04
-  };
+  const centerY = stationCenterY(display.height);
+  station.focus = { ...station.focus, y: centerY };
+  station.cameraPosition = stationCameraPose(station.focus, display);
+  station.lookAt = stationLookAt(station.focus, display);
+  station.group.position.y = centerY;
 
   station.card.geometry.dispose?.();
   station.card.geometry = new THREE.PlaneGeometry(display.width, display.height);
@@ -1334,7 +1409,9 @@ function updateSpatialStationMediaAspect(THREE, station, texture) {
     station.reflection.material.needsUpdate = true;
     station.reflection.geometry.dispose?.();
     station.reflection.geometry = new THREE.PlaneGeometry(display.width, display.height);
+    station.reflection.position.y = -centerY;
   }
+  repositionStationPlacard(station);
 }
 
 function spatialTextureForItem(THREE, station, isAudio, material, onTextureReady) {
@@ -1765,6 +1842,14 @@ function applySpatialWalkCamera(progress, dt) {
     scene.spot.position.y += (focus.y + 3.6 - scene.spot.position.y) * k;
     scene.spot.position.z += (focus.z + 2.8 - scene.spot.position.z) * k;
   }
+
+  // Keep the atmospheric backdrop filling the view behind the art.
+  if (scene.backdrop) {
+    const dir = scene._backdropDir || (scene._backdropDir = new THREE.Vector3());
+    camera.getWorldDirection(dir);
+    scene.backdrop.position.copy(camera.position).addScaledVector(dir, 42);
+    scene.backdrop.quaternion.copy(camera.quaternion);
+  }
 }
 
 function advanceSpatialArrival(dt) {
@@ -1879,6 +1964,7 @@ function updateSpatialStationFocus(stationFloat) {
     station.frame.material.opacity = opacity;
     if (station.bevel) station.bevel.material.opacity = opacity;
     if (station.reflection) station.reflection.material.opacity = opacity * 0.16;
+    if (station.placard) station.placard.material.opacity = opacity;
     syncSpatialVideoPlayback(station, distance, isActive);
   });
 }

@@ -2952,14 +2952,20 @@ textarea:focus-visible {
   box-shadow: 0 0 12px rgba(255, 244, 230, 0.7);
 }
 
+/* The active moment's name + message + date now live on a 3D placard under
+   each frame in the scene. This DOM copy is kept visually hidden so the
+   foreground stays empty while screen readers still announce the active piece. */
 .capsule-walk-copy {
-  position: relative;
-  z-index: 3;
-  display: grid;
-  gap: 0.55rem;
-  max-width: min(520px, 58%);
-  padding: clamp(1rem, 3vw, 1.7rem);
-  background: linear-gradient(180deg, transparent 0%, rgba(18, 17, 17, 0.52) 42%, rgba(18, 17, 17, 0.88) 100%);
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
   pointer-events: none;
 }
 
