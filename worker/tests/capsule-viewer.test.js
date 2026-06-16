@@ -316,8 +316,8 @@ test('capsule viewer exposes a gated 3D Walk with WebGL and static fallback', as
   assert.match(capsuleHtml, /id="capsuleWalk"/);
   assert.match(capsuleHtml, /id="capsuleWalkCanvas"/);
   assert.match(capsuleHtml, /id="capsuleWalkFallback"/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-tweaks-1/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-tweaks-1/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260616-walk-perf-2/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260616-walk-perf-2/);
 
   assert.match(capsuleJs, /let spatialLayout = null/);
   assert.match(capsuleJs, /let spatialClusters = \[\]/);
@@ -366,8 +366,8 @@ test('capsule 3D Walk uses cinematic stations with safe spacing and camera poses
   assert.doesNotMatch(capsuleHtml, /id="capsuleWalkViewButton"/);
   assert.match(capsuleJs, /function revealSpatialWalkControls/);
   assert.match(styles, /\.is-walk-controls-hidden \.capsule-walk-controls/);
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-tweaks-1/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-tweaks-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260616-walk-perf-2/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260616-walk-perf-2/);
 
   assert.match(capsuleJs, /const SPATIAL_STATION_SPACING = 10/);
   assert.match(capsuleJs, /const SPATIAL_CAMERA_PULLBACK = 7/);
@@ -480,7 +480,7 @@ test('capsule 3D Walk adds event-title world art, richer atmosphere, and fullscr
     readText('../../moments/styles.css')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-tweaks-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260616-walk-perf-2/);
   assert.match(capsuleHtml, /id="capsuleWalkFullscreenButton"/);
   assert.match(capsuleJs, /qs\("#capsuleWalkFullscreenButton"\)\?\.addEventListener\("click", toggleSpatialWalkFullscreen\)/);
   assert.match(capsuleJs, /let nativeSpatialWalkFullscreenActive = false/);
@@ -490,7 +490,7 @@ test('capsule 3D Walk adds event-title world art, richer atmosphere, and fullscr
   assert.match(capsuleJs, /createSpatialTitleTexture/);
   assert.match(capsuleJs, /capsule\?\.eventTitle \|\| capsule\?\.title/);
   assert.match(capsuleJs, /function addGalleryAtmosphereStreams/);
-  assert.match(capsuleJs, /const SPATIAL_DUST_PARTICLE_MULTIPLIER = 1\.75/);
+  assert.match(capsuleJs, /const SPATIAL_DUST_PARTICLE_MULTIPLIER = 1\.1/);
   assert.match(styles, /\.capsule-walk-fullscreen-toggle/);
   assert.match(styles, /\.capsule-walk-controls \{[\s\S]*?top: clamp\(0\.85rem, 2vw, 1\.4rem\);[\s\S]*?bottom: auto;/);
   assert.match(styles, /\.capsule-walk:fullscreen/);
@@ -566,7 +566,7 @@ test('capsule 3D Walk auto tour holds videos for their playback duration', async
     readText('../../moments/capsule/capsule.js')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-tweaks-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260616-walk-perf-2/);
   assert.match(capsuleJs, /const SPATIAL_TOUR_VIDEO_MIN_DWELL_MS = 8000/);
   assert.match(capsuleJs, /const SPATIAL_TOUR_VIDEO_FALLBACK_DWELL_MS = 31000/);
   assert.match(capsuleJs, /const SPATIAL_TOUR_VIDEO_MAX_DWELL_MS = 34000/);
@@ -592,8 +592,8 @@ test('capsule 3D Walk lets guests enable audio for WebGL video moments', async (
     readText('../../moments/styles.css')
   ]);
 
-  assert.match(capsuleHtml, /capsule\.js\?v=20260615-walk-tweaks-1/);
-  assert.match(capsuleHtml, /styles\.css\?v=20260615-walk-tweaks-1/);
+  assert.match(capsuleHtml, /capsule\.js\?v=20260616-walk-perf-2/);
+  assert.match(capsuleHtml, /styles\.css\?v=20260616-walk-perf-2/);
   assert.match(capsuleHtml, /id="capsuleWalkSoundButton"/);
   assert.match(capsuleJs, /let spatialWalkSoundUnlocked = false/);
   assert.match(capsuleJs, /qs\("#capsuleWalkSoundButton"\)\?\.addEventListener\("click", toggleSpatialWalkSound\)/);
@@ -907,6 +907,28 @@ test('capsule 3D Walk warms media by proximity, primes decode, and streams video
   // HLS stream is preferred over downloading the whole file.
   assert.match(capsuleJs, /Prefer the adaptive HLS stream/);
   assert.match(capsuleJs, /const streamUrl = item\.streamUrl \|\| ""/);
+});
+
+test('capsule 3D Walk applies quality-preserving performance optimizations', async () => {
+  const capsuleJs = await readText('../../moments/capsule/capsule.js');
+
+  // Texture upload is capped so huge source photos are not uploaded full-size.
+  assert.match(capsuleJs, /function downscaleImageForTexture/);
+  assert.match(capsuleJs, /downscaleImageForTexture\(image, 2048\)/);
+
+  // Bloom renders at half resolution.
+  assert.match(capsuleJs, /UnrealBloomPass\([\s\S]*?size\.x \* 0\.5[\s\S]*?size\.y \* 0\.5/);
+
+  // Dust drifts by transform, not a per-frame vertex buffer re-upload.
+  assert.match(capsuleJs, /dust\.position\.y = Math\.sin/);
+  assert.doesNotMatch(capsuleJs, /dust\.userData\?\.baseY/);
+
+  // Off-screen reflections / contact shadows are culled with their station.
+  assert.match(capsuleJs, /station\.reflection\.visible = visible/);
+  assert.match(capsuleJs, /station\.contactShadow\.visible = visible/);
+
+  // Pixel ratio is capped a touch lower on high quality for fewer pixels.
+  assert.match(capsuleJs, /spatialWalkQuality === "lite" \? 1\.25 : 1\.5/);
 });
 
 async function readText(path) {

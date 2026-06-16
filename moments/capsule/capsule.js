@@ -59,7 +59,7 @@ const SPATIAL_STATION_SPACING = 10;
 const SPATIAL_STATION_SIDE_OFFSET = 4.4;
 const SPATIAL_STATION_SIZE_MULTIPLIER = 1.32;
 const SPATIAL_FEATURED_STATION_SCALE = 1.16;
-const SPATIAL_DUST_PARTICLE_MULTIPLIER = 1.75;
+const SPATIAL_DUST_PARTICLE_MULTIPLIER = 1.1;
 const SPATIAL_CAMERA_PULLBACK = 7;
 const SPATIAL_CAMERA_SAFE_PULLBACK = 1.15;
 const SPATIAL_CAMERA_HEIGHT = 2.15;
@@ -787,7 +787,7 @@ function buildSpatialWalkScene(THREE) {
     powerPreference: "high-performance"
   });
   renderer.setClearColor(0x0d0c0b, 1);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, spatialWalkQuality === "lite" ? 1.25 : 1.65));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, spatialWalkQuality === "lite" ? 1.25 : 1.5));
   if (THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.88;
@@ -1166,7 +1166,6 @@ function addGalleryDust(THREE, scene, stations) {
     sizeAttenuation: true
   });
   const points = new THREE.Points(geometry, material);
-  points.userData.baseY = positions.slice();
   scene.add(points);
   return points;
 }
@@ -1492,7 +1491,10 @@ function loadSpatialStillTexture(THREE, url, station, priority) {
   if (priority && "fetchPriority" in image) image.fetchPriority = priority;
 
   const apply = () => {
-    const texture = new THREE.Texture(image);
+    // Cap texture size so a 4000px source photo isn't uploaded at full size —
+    // the cards are small on screen, so 2048px is visually lossless and saves
+    // a lot of GPU memory + upload bandwidth (especially on phones).
+    const texture = new THREE.Texture(downscaleImageForTexture(image, 2048));
     texture.colorSpace = THREE.SRGBColorSpace || texture.colorSpace;
     texture.needsUpdate = true;
     applyWalkTextureQuality(THREE, texture);
@@ -1525,6 +1527,21 @@ function applyWalkTextureQuality(THREE, texture) {
   texture.anisotropy = Math.min(8, maxAnisotropy);
   texture.generateMipmaps = true;
   if (THREE.LinearMipmapLinearFilter) texture.minFilter = THREE.LinearMipmapLinearFilter;
+}
+
+function downscaleImageForTexture(image, maxDimension) {
+  const width = image.naturalWidth || image.width || 0;
+  const height = image.naturalHeight || image.height || 0;
+  if (!width || !height || Math.max(width, height) <= maxDimension) return image;
+
+  const scale = maxDimension / Math.max(width, height);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) return image;
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas;
 }
 
 function createSpatialVideoTexture(THREE, station, fallbackTexture, material, onTextureReady) {
@@ -1699,7 +1716,7 @@ function resizeSpatialWalkScene() {
 
   spatialWalkScene.renderer.setSize(width, height, false);
   spatialWalkScene.composer?.setSize?.(width, height);
-  spatialWalkScene.bloom?.setSize?.(width, height);
+  spatialWalkScene.bloom?.setSize?.(Math.max(1, Math.round(width * 0.5)), Math.max(1, Math.round(height * 0.5)));
   spatialWalkScene.camera.aspect = width / height;
   spatialWalkScene.camera.updateProjectionMatrix();
   requestSpatialWalkFrame();
@@ -1750,8 +1767,10 @@ async function buildSpatialWalkComposer(THREE) {
     const size = renderer.getSize(new THREE.Vector2());
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
+    // Bloom is a soft glow, so render it at half resolution — visually identical
+    // and roughly 4x cheaper than full-res blur passes.
     const bloom = new UnrealBloomPass(
-      new THREE.Vector2(Math.max(1, size.x), Math.max(1, size.y)),
+      new THREE.Vector2(Math.max(1, Math.round(size.x * 0.5)), Math.max(1, Math.round(size.y * 0.5))),
       0.32,
       0.5,
       0.85
@@ -2021,17 +2040,10 @@ function playSpatialWalkArrival() {
 function animateSpatialAtmosphere(dt) {
   const dust = spatialWalkScene?.dust;
   if (dust) {
+    // Drift the whole field with transform only — no per-frame vertex buffer
+    // re-upload to the GPU, which is the same look at a fraction of the cost.
     dust.rotation.y += dt * 0.015;
-    const positions = dust.geometry?.attributes?.position;
-    const base = dust.userData?.baseY;
-    if (positions && base) {
-      const array = positions.array;
-      const t = spatialWalkClock;
-      for (let index = 1; index < array.length; index += 3) {
-        array[index] = base[index] + Math.sin(t * 0.3 + index) * 0.12;
-      }
-      positions.needsUpdate = true;
-    }
+    dust.position.y = Math.sin(spatialWalkClock * 0.3) * 0.12;
   }
 
   const streams = spatialWalkScene?.atmosphereStreams;
@@ -2086,15 +2098,29 @@ function updateSpatialStationFocus(stationFloat) {
     updateSpatialWalkOverlay();
   }
 
-  spatialWalkScene.stations.forEach((station) => {
-    if (!station.group || !station.card || !station.frame) return;
+  const stations = spatialWalkScene.stations;
+  for (let i = 0; i < stations.length; i += 1) {
+    const station = stations[i];
+    if (!station.group || !station.card || !station.frame) continue;
     const distance = Math.abs(station.index - stationFloat);
+    const visible = distance < 5;
+    station.group.visible = visible;
+    if (station.reflection) station.reflection.visible = visible;
+    if (station.contactShadow) station.contactShadow.visible = visible;
+
+    // Off-screen stations skip all per-frame material/media work; just make sure
+    // any clip that was playing is paused as it leaves the frame.
+    if (!visible) {
+      if (station.video?.element && !station.video.element.paused) station.video.element.pause();
+      if (station.audio?.element && !station.audio.element.paused) station.audio.element.pause();
+      continue;
+    }
+
     const near = distance <= SPATIAL_NEAR_STATION_RADIUS;
     const isActive = station.index === spatialActiveStationIndex;
     const isHovered = station.index === spatialHoveredStationIndex;
     const opacity = isActive ? 1 : near ? Math.max(0.4, 0.85 - distance * 0.16) : 0.12;
     const scale = isActive ? SPATIAL_FEATURED_STATION_SCALE : near ? Math.max(0.86, 1 - distance * 0.06) : 0.68;
-    station.group.visible = distance < 5;
     station.group.scale.setScalar(isHovered ? scale + 0.04 : scale);
     station.card.material.opacity = opacity;
     station.card.material.emissiveIntensity = isActive ? 0.28 : near ? 0.22 : 0.16;
@@ -2105,7 +2131,7 @@ function updateSpatialStationFocus(stationFloat) {
     if (distance <= SPATIAL_MEDIA_WARM_RADIUS) warmSpatialStationMedia(station);
     syncSpatialVideoPlayback(station, distance, isActive);
     syncSpatialAudioPlayback(station, distance, isActive);
-  });
+  }
 }
 
 function syncSpatialAudioPlayback(station, distance, isActive) {
