@@ -5588,14 +5588,16 @@ tr:last-child td {
   }
 
   .capsule-walk-progress {
-    top: auto;
-    right: 0.7rem;
-    bottom: calc(env(safe-area-inset-bottom) + 3.9rem);
-    flex-direction: row;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    max-width: 62vw;
-    transform: none;
+    top: 50%;
+    right: 0.5rem;
+    bottom: auto;
+    transform: translateY(-50%);
+    flex-direction: column;
+    flex-wrap: nowrap;
+    justify-content: center;
+    max-width: none;
+    gap: 0.42rem;
+    padding: 0.4rem 0.25rem;
   }
 
   .capsule-walk-fallback {
