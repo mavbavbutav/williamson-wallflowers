@@ -27,6 +27,7 @@ let spatialArrivalProgress = 1;
 let spatialWalkQuality = "high";
 let spatialWalkSoundUnlocked = false;
 let spatialTourActive = false;
+let spatialWalkControlsTimer = 0;
 const spatialPointerParallax = { x: 0, y: 0 };
 const spatialPointerParallaxTarget = { x: 0, y: 0 };
 let slideIndex = 0;
@@ -66,6 +67,8 @@ const SPATIAL_STATION_FOCUS_HEIGHT = 1.35;
 const SPATIAL_GROUND_CLEARANCE = 1.35;
 const SPATIAL_PLACARD_GAP = 0.22;
 const SPATIAL_MEDIA_WARM_RADIUS = 2;
+const SPATIAL_CAMERA_FOV = 42;
+const SPATIAL_FIT_MARGIN = 1.32;
 const SPATIAL_NEAR_STATION_RADIUS = 2.35;
 const SPATIAL_VIDEO_PLAY_RADIUS = 0.72;
 const SPATIAL_TOUR_DWELL_MS = 2600;
@@ -98,7 +101,9 @@ async function init() {
     scheduleFeedAutoplay();
   }, { passive: true });
   qs("#capsuleWalk")?.addEventListener("scroll", handleSpatialWalkScroll, { passive: true });
-  qs("#capsuleWalkViewButton")?.addEventListener("click", () => openSpatialWalkStation(spatialActiveStationIndex));
+  qs("#capsuleWalk")?.addEventListener("pointermove", revealSpatialWalkControls, { passive: true });
+  qs("#capsuleWalk")?.addEventListener("pointerdown", revealSpatialWalkControls, { passive: true });
+  qs("#capsuleWalk")?.addEventListener("touchstart", revealSpatialWalkControls, { passive: true });
   qs("#capsuleWalkTourToggle")?.addEventListener("click", toggleSpatialTour);
   qs("#capsuleWalkSoundButton")?.addEventListener("click", toggleSpatialWalkSound);
   qs("#capsuleWalkFullscreenButton")?.addEventListener("click", toggleSpatialWalkFullscreen);
@@ -682,17 +687,24 @@ function stationCenterY(displayHeight) {
 }
 
 function stationCameraPose(focus, display) {
+  // Pull back far enough that the whole frame (its full height) fits inside the
+  // vertical field of view — tall 9:16 media included — so nothing is clipped.
+  const halfFovTan = Math.tan((SPATIAL_CAMERA_FOV * Math.PI / 180) / 2);
+  const fitDistance = (display.height / 2) / halfFovTan * SPATIAL_FIT_MARGIN;
+  const distance = Math.max(SPATIAL_CAMERA_PULLBACK, fitDistance) + SPATIAL_CAMERA_SAFE_PULLBACK;
   return {
     x: focus.x * 0.32,
-    y: focus.y + display.height * 0.06,
-    z: focus.z + SPATIAL_CAMERA_PULLBACK + SPATIAL_CAMERA_SAFE_PULLBACK + Math.min(1.4, display.height * 0.16)
+    y: focus.y + display.height * 0.05,
+    z: focus.z + distance
   };
 }
 
 function stationLookAt(focus, display) {
+  // Look near the frame's center (only a touch low to seat the placard) so the
+  // top of tall media is never cut and the bottom space is used.
   return {
     x: focus.x,
-    y: focus.y - display.height * 0.16,
+    y: focus.y - display.height * 0.06,
     z: focus.z
   };
 }
@@ -784,7 +796,7 @@ function buildSpatialWalkScene(THREE) {
   scene.background = new THREE.Color(0x0d0c0b);
   scene.fog = new THREE.Fog(0x0d0c0b, 13, Math.max(48, stations.length * 8));
 
-  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, Math.max(120, stations.length * 16));
+  const camera = new THREE.PerspectiveCamera(SPATIAL_CAMERA_FOV, 1, 0.1, Math.max(120, stations.length * 16));
 
   // Gallery rig: low fill, warm key, cool rim, plus a moving spotlight pool.
   const hemi = new THREE.HemisphereLight(0x3a4654, 0x140f0c, 0.48);
@@ -1842,7 +1854,16 @@ function spatialTourDwellMsForStation(station) {
   );
 }
 
+function spatialMediaElementFinished(element) {
+  if (!element) return false;
+  if (element.ended) return true;
+  const duration = Number(element.duration);
+  return Number.isFinite(duration) && duration > 0 && element.currentTime >= duration - 0.05;
+}
+
 function isSpatialMediaFinished(station) {
+  if (spatialMediaElementFinished(station?.video?.element)) return true;
+  if (spatialMediaElementFinished(station?.audio?.element)) return true;
   return Boolean(station?.video?.ended || station?.audio?.ended);
 }
 
@@ -2109,13 +2130,13 @@ function syncSpatialAudioPlayback(station, distance, isActive) {
   if (!shouldPlay) {
     audioState.playRequested = false;
     if (typeof element.pause === "function" && !element.paused) element.pause();
-    if (audioState.ended) resetSpatialStationPlayback(station);
+    if (audioState.ended || spatialMediaElementFinished(element)) resetSpatialStationPlayback(station);
     return;
   }
 
   if (!element.paused || audioState.playRequested || typeof element.play !== "function") return;
 
-  if (audioState.ended) {
+  if (audioState.ended || spatialMediaElementFinished(element)) {
     // During the tour a finished memo does not replay; the tour advances.
     if (spatialTourActive) return;
     resetSpatialStationPlayback(station);
@@ -2188,7 +2209,7 @@ function syncSpatialVideoPlayback(station, distance, isActive) {
     if (typeof video.pause === "function" && !video.paused) video.pause();
     // Once the camera has moved past it, rewind a finished clip so a later
     // visit starts fresh — never while it is still on screen.
-    if (videoState.ended) resetSpatialStationPlayback(station);
+    if (videoState.ended || spatialMediaElementFinished(video)) resetSpatialStationPlayback(station);
     return;
   }
 
@@ -2197,7 +2218,9 @@ function syncSpatialVideoPlayback(station, distance, isActive) {
   video.loop = !spatialTourActive;
   if (!video.paused || videoState.playRequested || typeof video.play !== "function") return;
 
-  if (videoState.ended) {
+  // Use the element's own ended/position (set synchronously by the browser) so a
+  // finished clip is never restarted for a frame before our flag catches up.
+  if (videoState.ended || spatialMediaElementFinished(video)) {
     // During the tour a finished clip holds on its last frame and the tour
     // advances — it must not replay from the start.
     if (spatialTourActive) return;
@@ -2275,6 +2298,15 @@ function updateSpatialWalkSoundButton() {
   button.setAttribute("aria-label", spatialWalkSoundUnlocked ? "Turn sound off" : "Turn sound on");
   button.setAttribute("title", spatialWalkSoundUnlocked ? "Sound on" : "Sound off");
   document.body.classList.toggle("is-spatial-walk-sound-on", spatialWalkSoundUnlocked && currentCapsuleView === "walk");
+}
+
+function revealSpatialWalkControls() {
+  if (currentCapsuleView !== "walk") return;
+  document.body.classList.remove("is-walk-controls-hidden");
+  window.clearTimeout(spatialWalkControlsTimer);
+  spatialWalkControlsTimer = window.setTimeout(() => {
+    if (currentCapsuleView === "walk") document.body.classList.add("is-walk-controls-hidden");
+  }, 3600);
 }
 
 function updateSpatialWalkOverlay() {
@@ -2504,11 +2536,14 @@ function setCapsuleView(view, options = {}) {
   if (currentCapsuleView === "walk") {
     renderSpatialWalk();
     startSpatialWalkScene();
+    revealSpatialWalkControls();
   } else {
     pauseSpatialWalkVideos();
     pauseSpatialWalkAudios();
     stopSpatialWalkLoop();
     exitSpatialWalkCssFullscreen();
+    window.clearTimeout(spatialWalkControlsTimer);
+    document.body.classList.remove("is-walk-controls-hidden");
   }
 
   qsaCapsuleViewButtons().forEach((button) => {

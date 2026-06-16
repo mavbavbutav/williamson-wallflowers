@@ -2865,6 +2865,13 @@ textarea:focus-visible {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.5rem;
+  transition: opacity 0.45s ease;
+}
+
+/* Controls fade away during the walk and reappear on interaction. */
+.is-walk-controls-hidden .capsule-walk-controls {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .capsule-walk-tour-toggle {
