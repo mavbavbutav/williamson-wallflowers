@@ -1449,14 +1449,14 @@
             <span class="eyebrow">Availability</span>
             <h2>Choose your Nashville flower wall and request your date.</h2>
           </div>
-          <p class="muted">Pick a flower wall rental to see the calendar for that backdrop. Friday through Sunday dates can be sent straight into your booking request.</p>
+          <p class="muted">Pick a flower wall rental to see the calendar for that backdrop. Choose an available date to start your booking request.</p>
         </div>
 
         <div class="booking-shell reveal">
           <div class="booking-panel">
             <span class="eyebrow">Book online</span>
             <h3>Start with the wall you love.</h3>
-            <p class="muted">Availability is checked by wall. Booking requests are available Friday through Sunday.</p>
+            <p class="muted">Availability is checked by wall. Booking requests are available seven days a week.</p>
 
             <div class="booking-controls">
               <div>
@@ -1685,7 +1685,7 @@
         label: "The Secret Garden"
       }
     ];
-    const fullyBookedWalls = new Set([
+    const weekendBookedWalls = new Set([
       "The Timeless Bloom",
       "The Love Language",
       "Wild Bloom"
@@ -1712,11 +1712,11 @@
     }
 
     function isBooked(wall, date) {
-      if (fullyBookedWalls.has(wall) && isBookingDay(date)) return true;
+      if (weekendBookedWalls.has(wall) && isWeekend(date)) return true;
       return bookedDates.some((booking) => booking.wall === wall && booking.date === date);
     }
 
-    function isBookingDay(date) {
+    function isWeekend(date) {
       const day = parseDateKey(date).getDay();
       return day === 0 || day === 5 || day === 6;
     }
@@ -1737,13 +1737,7 @@
       availabilityNote.classList.toggle("is-booked", Boolean(booked));
 
       if (!selectedDate) {
-        availabilityNote.innerHTML = "<strong>Select a date.</strong> Choose a Friday, Saturday, or Sunday to start your booking request.";
-        bookingContinue.disabled = true;
-        return;
-      }
-
-      if (!isBookingDay(selectedDate)) {
-        availabilityNote.innerHTML = `<strong>Weekend dates only.</strong> ${formatDate(selectedDate)} is not available for online booking. Please choose a Friday, Saturday, or Sunday.`;
+        availabilityNote.innerHTML = "<strong>Select a date.</strong> Choose an available date to start your booking request.";
         bookingContinue.disabled = true;
         return;
       }
@@ -1778,19 +1772,15 @@
         const key = dateKey(year, month, day);
         const button = document.createElement("button");
         const booked = isBooked(wall, key);
-        const unavailable = !isBookingDay(key);
 
         button.type = "button";
         button.className = "calendar-day";
         button.textContent = day;
-        button.setAttribute("aria-label", `${formatDate(key)}${booked ? " booked" : unavailable ? " closed" : " available"}`);
+        button.setAttribute("aria-label", `${formatDate(key)}${booked ? " booked" : " available"}`);
 
         if (selectedDate === key) button.classList.add("is-selected");
         if (booked) {
           button.classList.add("is-booked");
-          button.disabled = true;
-        } else if (unavailable) {
-          button.classList.add("is-unavailable");
           button.disabled = true;
         } else {
           button.addEventListener("click", () => {
@@ -1854,7 +1844,6 @@
 
     bookingWall.value = "The Secret Garden";
     formWall.value = bookingWall.value;
-    visibleMonth = new Date(2026, 4, 1);
     renderCalendar();
 
     bookingWall.addEventListener("change", () => {
@@ -1879,7 +1868,7 @@
     });
 
     bookingContinue.addEventListener("click", () => {
-      if (!selectedDate || !isBookingDay(selectedDate) || isBooked(bookingWall.value, selectedDate)) return;
+      if (!selectedDate || isBooked(bookingWall.value, selectedDate)) return;
       formDate.value = selectedDate;
       formWall.value = bookingWall.value;
       document.getElementById("contact").scrollIntoView({ behavior: "smooth" });
@@ -1922,16 +1911,6 @@
       const preferredWall = formData.get("preferred-wall") || "";
       const details = formData.get("details") || "";
       const askTimeCapsule = formData.get("ask-time-capsule") ? "Yes" : "No";
-
-      if (eventDate && !isBookingDay(eventDate)) {
-        alert(`${formatDate(eventDate)} is not available for online booking. Please choose a Friday, Saturday, or Sunday.`);
-        bookingDate.value = eventDate;
-        selectedDate = eventDate;
-        visibleMonth = parseDateKey(eventDate);
-        renderCalendar();
-        document.getElementById("booking").scrollIntoView({ behavior: "smooth" });
-        return;
-      }
 
       if (eventDate && preferredWall && isBooked(preferredWall, eventDate)) {
         alert(`${preferredWall} is already booked on ${formatDate(eventDate)}. Please choose another date or flower wall.`);
