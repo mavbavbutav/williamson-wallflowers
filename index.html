@@ -512,6 +512,50 @@
       gap: 1rem;
     }
 
+    .review-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+    }
+
+    .review-card {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      margin: 0;
+    }
+
+    .review-stars {
+      color: #8a6528;
+      letter-spacing: 0.18em;
+    }
+
+    .review-card blockquote {
+      margin: 0;
+      font-family: "Cormorant Garamond", serif;
+      font-size: clamp(1.3rem, 2vw, 1.7rem);
+      line-height: 1.5;
+    }
+
+    .review-card figcaption {
+      margin-top: auto;
+    }
+
+    .review-card figcaption span {
+      display: block;
+    }
+
+    .review-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem 2rem;
+      margin-top: 1.5rem;
+    }
+
+    @media (max-width: 760px) {
+      .review-grid { grid-template-columns: 1fr; }
+    }
+
     .detail-card {
       padding: 1.35rem;
       background: rgba(255,255,255,0.62);
@@ -1205,6 +1249,7 @@
         <a href="https://jjentertainmentsolutions.com/">JJ Home</a>
         <a href="#collection">Collection</a>
         <a href="#details">Details</a>
+        <a href="#reviews">Reviews</a>
         <a href="#booking">Book</a>
         <a href="#contact" class="nav-cta">Contact</a>
       </nav>
@@ -1357,6 +1402,42 @@
               </details>
             </div>
           </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-soft" id="reviews" aria-labelledby="reviews-heading">
+      <div class="container">
+        <div class="section-intro reveal">
+          <div>
+            <span class="eyebrow">Kind words on Google</span>
+            <h2 id="reviews-heading">Celebrations worth sharing.</h2>
+          </div>
+          <p class="muted">Real stories from our Wallflower Moments customers, bringing loved ones into the celebration wherever they are. Here are a few words from their five-star Google reviews.</p>
+        </div>
+        <div class="review-grid">
+          <figure class="detail-card review-card reveal">
+            <div class="review-stars" role="img" aria-label="5 out of 5 stars">★★★★★</div>
+            <blockquote cite="https://maps.app.goo.gl/GfQr2R2BAqy7afrA8">“I’m talking above and beyond friendly and accommodating.”</blockquote>
+            <figcaption>
+              <strong>Janna Brackin</strong>
+              <span class="muted">Wallflower Moments · Birthday celebration</span>
+            </figcaption>
+            <a class="inline-link" href="https://maps.app.goo.gl/GfQr2R2BAqy7afrA8" target="_blank" rel="noopener noreferrer" aria-label="Read Janna Brackin’s full review on Google (opens in a new tab)">Read full review on Google ↗</a>
+          </figure>
+          <figure class="detail-card review-card reveal">
+            <div class="review-stars" role="img" aria-label="5 out of 5 stars">★★★★★</div>
+            <blockquote cite="https://maps.app.goo.gl/vnAFteCDDwP4PED3A">“Such a great way for loved ones to connect and share in celebration!”</blockquote>
+            <figcaption>
+              <strong>Alexis Youdelman</strong>
+              <span class="muted">Wallflower Moments · Promotion celebration</span>
+            </figcaption>
+            <a class="inline-link" href="https://maps.app.goo.gl/vnAFteCDDwP4PED3A" target="_blank" rel="noopener noreferrer" aria-label="Read Alexis Youdelman’s full review on Google (opens in a new tab)">Read full review on Google ↗</a>
+          </figure>
+        </div>
+        <div class="review-actions reveal">
+          <a class="text-button" href="https://www.google.com/maps/place/Williamson+Wallflowers/@36.0492214,-86.6899919,10z/data=!3m1!4b1!4m6!3m5!1s0x2311120effec6b11:0x7688aa111b7e9329!8m2!3d36.0492214!4d-86.6899919!16s%2Fg%2F11zbk4qq_4?entry=ttu" target="_blank" rel="noopener noreferrer">Visit us on Google ↗</a>
+          <a class="text-button" href="#contact">Plan your own celebration</a>
         </div>
       </div>
     </section>
