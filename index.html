@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nashville Flower Wall Rentals | Williamson Wallflowers</title>
-  <meta name="description" content="Nashville flower wall rentals for weddings, showers, birthdays, corporate events, and photo moments. Williamson Wallflowers serves Nashville, Franklin, Brentwood, Williamson County, and Middle Tennessee." />
+  <meta name="description" content="Nashville flower wall rentals and Wallflower Moments: collect guest photos, videos, and voice messages for celebrations across Williamson County and Middle Tennessee." />
   <meta name="robots" content="index,follow" />
   <meta name="theme-color" content="#f4f1ec" />
   <link rel="canonical" href="https://williamsonwallflowers.com/" />
@@ -408,7 +408,7 @@
       align-items: center;
     }
 
-    .collection-intro > .muted {
+    .collection-copy > .muted {
       font-size: clamp(1.08rem, 1.45vw, 1.22rem);
       line-height: 1.72;
     }
@@ -500,6 +500,66 @@
 
     .event-essentials {
       margin-top: 1.5rem;
+    }
+
+    .collection-copy p + p { margin-top: 1rem; }
+
+    .moments-intro-link {
+      display: inline-block;
+      margin-top: 1rem;
+    }
+
+    .moments-feature {
+      background: linear-gradient(135deg, #eee4e3, #f8f5f0 65%, #e8eade);
+    }
+
+    .moments-layout {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: clamp(2rem, 5vw, 5rem);
+      align-items: center;
+    }
+
+    .moments-copy h2 { margin-bottom: 1.25rem; }
+    .moments-copy > p + p { margin-top: 1rem; }
+
+    .moments-keepsake {
+      padding: clamp(1.5rem, 3vw, 3rem);
+      border: 1px solid rgba(183,163,144,0.5);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,0.72);
+      box-shadow: var(--shadow);
+    }
+
+    .moments-keepsake h3 {
+      font-size: clamp(2rem, 3vw, 3rem);
+      line-height: 1.1;
+      margin-bottom: 1.5rem;
+    }
+
+    .moments-memory {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      padding: 1rem 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .moments-memory > span {
+      display: grid;
+      place-items: center;
+      flex: 0 0 2.75rem;
+      height: 2.75rem;
+      border-radius: 50%;
+      background: #eee4e3;
+      color: #62514d;
+    }
+
+    .moments-memory p { font-size: 0.9rem; }
+    .moments-steps { margin-top: 2.5rem; }
+
+    @media (max-width: 980px) {
+      .moments-layout { grid-template-columns: 1fr; }
     }
 
     .event-essentials .tags {
@@ -1248,6 +1308,7 @@
       <nav class="nav-links" id="navLinks" aria-label="Primary navigation">
         <a href="https://jjentertainmentsolutions.com/">JJ Home</a>
         <a href="#collection">Collection</a>
+        <a href="#wallflower-moments">Moments</a>
         <a href="#details">Details</a>
         <a href="#reviews">Reviews</a>
         <a href="#booking">Book</a>
@@ -1266,9 +1327,13 @@
             </h1>
             <span class="eyebrow">Our collection</span>
           </div>
+          <div class="collection-copy">
           <p class="muted">
             Each flower wall rental is styled to create a refined focal point for your event. Our Nashville backdrops are romantic enough for weddings and showers, polished enough for birthdays, photo moments, corporate events, and brand-forward celebrations.
           </p>
+          <p class="muted">And with Wallflower Moments, the celebration reaches beyond the backdrop. Gather guest photos, videos, and voice messages from the people who make your day yours.</p>
+          <a class="text-button moments-intro-link" href="#wallflower-moments">Meet Wallflower Moments <span aria-hidden="true">↗</span></a>
+          </div>
         </div>
 
         <div class="cards">
@@ -1349,6 +1414,57 @@
           <p class="muted">Tell us your event date, table sizes, and quantities so we can confirm availability and pricing.</p>
           <a class="text-button" href="#contact">Ask about tables &amp; chairs <span aria-hidden="true">↗</span></a>
         </article>
+      </div>
+    </section>
+
+    <section class="section moments-feature" id="wallflower-moments" aria-labelledby="moments-heading">
+      <div class="container">
+        <div class="moments-layout">
+          <div class="moments-copy reveal">
+            <span class="eyebrow">Wallflower Moments · By Williamson Wallflowers</span>
+            <h2 id="moments-heading">Your people.<br />Your party.<br />Every little moment.</h2>
+            <p>Be in the celebration. Let your guests help capture it.</p>
+            <p class="muted">Wallflower Moments brings photos, videos, and voice messages together in one event experience. Guests can share the moments you missed, while loved ones celebrating from afar can send a little love of their own.</p>
+            <p class="muted">From birthday wishes to wedding memories and well-earned congratulations, make room for everyone’s perspective.</p>
+            <div class="review-actions">
+              <a class="text-button" href="#contact" data-moments-inquiry>Ask about Moments for your event <span aria-hidden="true">↗</span></a>
+              <a class="inline-link" href="#reviews">Read our customer stories</a>
+            </div>
+          </div>
+          <div class="moments-keepsake reveal" aria-label="Ways guests can contribute to Wallflower Moments">
+            <span class="eyebrow">One celebration. So many perspectives.</span>
+            <h3>The pictures.<br />The voices.<br />The people you love.</h3>
+            <div class="moments-memory">
+              <span aria-hidden="true">▧</span>
+              <div><strong>Photos from the party</strong><p class="muted">The candid smiles and little details.</p></div>
+            </div>
+            <div class="moments-memory">
+              <span aria-hidden="true">▷</span>
+              <div><strong>Videos with personality</strong><p class="muted">A toast, a happy dance, a wish from afar.</p></div>
+            </div>
+            <div class="moments-memory">
+              <span aria-hidden="true">♫</span>
+              <div><strong>Messages in their own voice</strong><p class="muted">Something heartfelt you can hear again.</p></div>
+            </div>
+          </div>
+        </div>
+        <div class="details-grid moments-steps">
+          <article class="detail-card reveal">
+            <span class="eyebrow">01 · Invite</span>
+            <h3>Share the celebration.</h3>
+            <p class="muted">Give guests your event QR code or guest link. Send the link to loved ones who can’t be there, too.</p>
+          </article>
+          <article class="detail-card reveal">
+            <span class="eyebrow">02 · Collect</span>
+            <h3>Let everyone contribute.</h3>
+            <p class="muted">Guests use their phones to send photos, videos, and voice messages. You manage what’s shared with the event’s viewing and approval settings.</p>
+          </article>
+          <article class="detail-card reveal">
+            <span class="eyebrow">03 · Revisit</span>
+            <h3>Enjoy it all over again.</h3>
+            <p class="muted">Return to your collection after the celebration and download guest moments to keep your favorites close.</p>
+          </article>
+        </div>
       </div>
     </section>
 
@@ -1437,7 +1553,7 @@
         </div>
         <div class="review-actions reveal">
           <a class="text-button" href="https://www.google.com/maps/place/Williamson+Wallflowers/@36.0492214,-86.6899919,10z/data=!3m1!4b1!4m6!3m5!1s0x2311120effec6b11:0x7688aa111b7e9329!8m2!3d36.0492214!4d-86.6899919!16s%2Fg%2F11zbk4qq_4?entry=ttu" target="_blank" rel="noopener noreferrer">Visit us on Google ↗</a>
-          <a class="text-button" href="#contact">Plan your own celebration</a>
+          <a class="text-button" href="#contact" data-moments-inquiry>Bring Moments to your celebration</a>
         </div>
       </div>
     </section>
@@ -1617,7 +1733,7 @@
                 <input id="askTimeCapsule" name="ask-time-capsule" type="checkbox" value="yes" />
                 <span>
                   <strong>Ask about Wallflower Moments</strong>
-                  <span>Collect beautiful guest photo and video memories in a private QR flow that creates a polished moment-sharing experience.</span>
+                  <span>Bring together guest photos, videos, and voice messages — including wishes from loved ones celebrating from afar.</span>
                 </span>
               </label>
 
@@ -1843,6 +1959,11 @@
     });
 
     bookingWall.value = "The Secret Garden";
+    document.querySelectorAll("[data-moments-inquiry]").forEach((link) => {
+      link.addEventListener("click", () => {
+        document.getElementById("askTimeCapsule").checked = true;
+      });
+    });
     formWall.value = bookingWall.value;
     renderCalendar();
 
