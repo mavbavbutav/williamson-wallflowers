@@ -498,6 +498,14 @@
       font-size: 0.81rem;
     }
 
+    .event-essentials {
+      margin-top: 1.5rem;
+    }
+
+    .event-essentials .tags {
+      margin-block: 1rem;
+    }
+
     .details-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -1283,6 +1291,19 @@
             </div>
           </article>
         </div>
+
+        <article class="detail-card event-essentials reveal" aria-labelledby="event-essentials-heading">
+          <span class="eyebrow">Tables &amp; seating</span>
+          <h3 id="event-essentials-heading">Make room for everyone.</h3>
+          <p class="muted">Bring your celebration together with 6ft and 8ft table rentals and folding chairs. From a place to gather to a spot for gifts and cake, we can help with the everyday essentials alongside your statement backdrop.</p>
+          <div class="tags" aria-label="Available event rentals">
+            <span class="tag">6ft tables</span>
+            <span class="tag">8ft tables</span>
+            <span class="tag">Folding chairs</span>
+          </div>
+          <p class="muted">Tell us your event date, table sizes, and quantities so we can confirm availability and pricing.</p>
+          <a class="text-button" href="#contact">Ask about tables &amp; chairs <span aria-hidden="true">↗</span></a>
+        </article>
       </div>
     </section>
 
@@ -1454,7 +1475,7 @@
             <div class="form-head">
               <span class="eyebrow">Start your inquiry</span>
               <h3>Tell us about your event.</h3>
-              <p class="muted">Share a few quick details and Jami will receive your inquiry directly.</p>
+              <p class="muted">Share a few quick details and Jami will receive your inquiry directly. For tables and chairs, include your preferred table sizes and quantities below.</p>
             </div>
 
             <form id="inquiryForm" name="inquiry" action="https://williamson-wallflowers-inquiry.johnmartinferguson.workers.dev" method="POST" data-email-fallback="jamicarswell@gmail.com">
@@ -1508,7 +1529,7 @@
 
               <div>
                 <label for="details" class="muted">Tell us about your event</label>
-                <textarea id="details" name="details" placeholder="Event style, guest count, colors, or anything you'd like us to know"></textarea>
+                <textarea id="details" name="details" placeholder="Event style, guest count, 6ft or 8ft tables and quantities, folding chair count, or anything else you'd like us to know"></textarea>
               </div>
 
               <label class="addon-checkbox" for="askTimeCapsule">
