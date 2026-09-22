@@ -95,6 +95,14 @@ Superseding the "no external asset" constraint: two real GLB models (a closed pe
 
 This trades away the "zero asset weight" property (the two GLBs are ~3MB each) for a materially better result. The idle-load-past-`window.load` gating and reduced-motion/WebGL/save-data fallback behavior are unchanged — visitors who don't get the animation still get no extra download.
 
+## Revision 2 (2026-09-22): back to procedural — the two-model crossfade was the wrong technique
+
+User feedback: "two separate models that try to fade into one another... that is a flawed design. it needs to be one model that animates." Correct. The bud GLB (52,969 vertices) and bloom GLB (48,108 vertices) are two independent image-to-3D reconstructions with no shared topology or vertex correspondence — opacity-crossfading them is a double-exposure trick, not a transformation, and it reads that way (a ghosting overlap of two unrelated shapes rather than one flower opening).
+
+What sites that do this convincingly actually use: a single mesh with either a skeletal rig (bones placed at each petal's hinge, animated in a DCC tool, exported as a GLTF animation clip) or morph targets (the same mesh sculpted in closed and open poses with vertex-for-vertex correspondence, exported as shape keys) — then Three.js scrubs that one animation directly against scroll position. That requires bespoke 3D authoring (a rigger/modeler building the deformation on purpose); it is not something image-to-3D photo reconstruction produces. `sam_3_3d`/`meshy image_to_3d` lift a static, unrigged mesh from a single photo, with fresh unrelated topology on every generation, and the only animation option available (`enable_rigging`/`enable_animation`) is a humanoid motion-capture action library — no organic bloom deformation, and not usable on a non-biped subject.
+
+Reverted to procedural geometry (`assets/js/flower-scene.js` rebuilt again, `assets/models/*.glb` and the GLTFLoader vendor files removed) so the flower is genuinely one mesh: `choreo.bloom` drives each petal hinge's `rotation.x` directly, the same vertices swinging from closed to open, no second object, no crossfade. Rebuilt at meaningfully higher quality than the first procedural pass — per-vertex color gradient (deeper base tone to pale tip, not one flat hue), curved/curled petal geometry, two layered rings, a stamen cluster at the center, and per-petal jitter for organic irregularity — informed by what the real-asset detour revealed about color and form, without carrying forward its structural flaw. The opacity-driven "vivid in the hero, faint ambient presence elsewhere" choreography from Revision 1's follow-up fix is unchanged and still applies unmodified.
+
 ## Implementation Notes
 
 Likely implementation path:

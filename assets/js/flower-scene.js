@@ -1,69 +1,179 @@
 import * as THREE from '../../moments/vendor/three.module.js';
-import { GLTFLoader } from '../../moments/vendor/jsm/loaders/GLTFLoader.js';
-import { computeChoreography, getQualityProfile } from './flower-choreography.js?v=20260922-bloom-7';
+import { computeChoreography, getQualityProfile } from './flower-choreography.js?v=20260922-bloom-8';
 
 const MOBILE_QUERY = '(max-width: 760px)';
-const BUD_MODEL_URL = new URL('../models/peony-bud.glb', import.meta.url).href;
-const BLOOM_MODEL_URL = new URL('../models/peony-bloom.glb', import.meta.url).href;
-const CROSSFADE_START = 0.28;
-const CROSSFADE_END = 0.62;
 
-function smoothstep(edge0, edge1, x) {
-  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
-  return t * t * (3 - 2 * t);
+// One procedural mesh per petal, hinged at a fixed radius from the central
+// axis. choreo.bloom (0-1) drives hinge.rotation.x directly, so the same
+// vertices swing from "closed" (near-vertical, clustered into a bud) to
+// "open" (swung out, bloomed) — a real transformation of one continuous
+// object, not a crossfade between two separate models.
+const RING_CONFIG = {
+  outer: {
+    length: 1.6,
+    width: 0.36,
+    curve: 0.26,
+    radius: 0.28,
+    closedTilt: 0.05,
+    openTilt: -2.05,
+    baseColor: 0xd8768f,
+    tipColor: 0xf9d9e4
+  },
+  inner: {
+    length: 0.9,
+    width: 0.24,
+    curve: 0.36,
+    radius: 0.14,
+    closedTilt: -0.1,
+    openTilt: -1.5,
+    baseColor: 0xe28ba1,
+    tipColor: 0xfdeaf0
+  }
+};
+
+function lerpColor(a, b, t) {
+  return new THREE.Color(a).lerp(new THREE.Color(b), t);
 }
 
-// Normalize a loaded model to a target height and re-center it on its own
-// origin, so both the bud and bloom meshes (scanned at different real-world
-// sizes) line up consistently regardless of their source photo framing.
-function frameModel(object, targetHeight) {
-  const box = new THREE.Box3().setFromObject(object);
-  const size = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
-  object.position.sub(center);
-  const scale = targetHeight / Math.max(size.y, 0.001);
-  object.scale.setScalar(scale);
+// Petal blade bent forward (curled) along its length, with a per-vertex
+// color gradient from a deeper base tone to a pale tip — real peony petals
+// darken toward the center, not just toward one flat hue.
+function buildPetalGeometry(config) {
+  const { length, width, curve, baseColor, tipColor } = config;
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0);
+  shape.bezierCurveTo(width, length * 0.3, width, length * 0.78, 0, length);
+  shape.bezierCurveTo(-width, length * 0.78, -width, length * 0.3, 0, 0);
+
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: 0.03, bevelEnabled: false, curveSegments: 10 });
+  const position = geometry.attributes.position;
+  const colors = new Float32Array(position.count * 3);
+  const base = new THREE.Color(baseColor);
+  const tip = new THREE.Color(tipColor);
+
+  for (let i = 0; i < position.count; i++) {
+    const y = position.getY(i);
+    const t = Math.min(1, Math.max(0, y / length));
+    const bend = Math.sin(t * Math.PI * 0.5) * curve;
+    position.setZ(i, position.getZ(i) + bend);
+
+    const c = lerpColor(base, tip, t);
+    colors[i * 3] = c.r;
+    colors[i * 3 + 1] = c.g;
+    colors[i * 3 + 2] = c.b;
+  }
+  position.needsUpdate = true;
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
-function loadModel(loader, url, targetHeight, onReady) {
-  loader.load(
-    url,
-    (gltf) => {
-      frameModel(gltf.scene, targetHeight);
-      const materials = [];
-      gltf.scene.traverse((node) => {
-        if (node.isMesh) {
-          node.material = node.material.clone();
-          node.material.transparent = true;
-          node.material.metalness = 0;
-          node.material.metalnessMap = null;
-          node.material.roughness = 0.75;
-          node.material.roughnessMap = null;
-          node.material.envMapIntensity = 1;
-          materials.push(node.material);
-        }
-      });
-      onReady(gltf.scene, materials);
-    },
-    undefined,
-    () => {
-      // Model failed to load (network hiccup, blocked asset, etc). The scene
-      // stays up with whatever did load; this is a decorative background
-      // layer, so we fail silently rather than surfacing an error to the
-      // visitor.
-    }
+function buildPetalRing(config, count, ringName) {
+  const geometry = buildPetalGeometry(config);
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.42,
+    metalness: 0,
+    emissive: new THREE.Color(config.baseColor).multiplyScalar(0.08),
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.96
+  });
+
+  const petals = [];
+  for (let i = 0; i < count; i++) {
+    const jitter = (Math.sin(i * 12.9898) * 43758.5453) % 1;
+    const angle = ((Math.PI * 2) / count) * i + (ringName === 'inner' ? Math.PI / count : 0) + jitter * 0.06;
+
+    const radialPivot = new THREE.Object3D();
+    radialPivot.rotation.y = angle;
+
+    const hinge = new THREE.Object3D();
+    hinge.position.set(0, 0, config.radius);
+    hinge.rotation.x = config.closedTilt;
+
+    const petal = new THREE.Mesh(geometry, material);
+    const scaleJitter = 0.92 + Math.abs(jitter) * 0.16;
+    petal.scale.setScalar(scaleJitter);
+
+    hinge.add(petal);
+    radialPivot.add(hinge);
+
+    petals.push({
+      root: radialPivot,
+      hinge,
+      closedTilt: config.closedTilt,
+      openTilt: config.openTilt,
+      phase: i * 1.31 + (ringName === 'inner' ? 10 : 0)
+    });
+  }
+
+  return { petals, material };
+}
+
+// A small cluster of stamens at the flower's center — cheap geometry, but
+// it's what makes a procedural bloom read as a peony instead of a generic
+// flat flower icon.
+function buildStamens() {
+  const group = new THREE.Group();
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xf6c453,
+    emissive: 0xf2a63c,
+    emissiveIntensity: 0.5,
+    roughness: 0.4
+  });
+  const geometry = new THREE.ConeGeometry(0.02, 0.16, 6);
+  const stamenCount = 14;
+  for (let i = 0; i < stamenCount; i++) {
+    const angle = (Math.PI * 2 * i) / stamenCount;
+    const radius = 0.05 + (i % 3) * 0.02;
+    const stamen = new THREE.Mesh(geometry, material);
+    stamen.position.set(Math.cos(angle) * radius, 0.06, Math.sin(angle) * radius);
+    stamen.rotation.x = Math.PI * 0.42 + Math.sin(angle) * 0.15;
+    stamen.rotation.z = Math.cos(angle) * 0.15;
+    group.add(stamen);
+  }
+  return group;
+}
+
+function buildFlower(quality) {
+  const flower = new THREE.Group();
+
+  const stem = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.05, 0.08, 3, 8),
+    new THREE.MeshStandardMaterial({ color: 0x7c9a68, roughness: 0.7 })
   );
+  stem.position.y = -1.7;
+  flower.add(stem);
+
+  const center = new THREE.Mesh(
+    new THREE.SphereGeometry(0.16, 20, 20),
+    new THREE.MeshStandardMaterial({ color: 0xf6c453, emissive: 0xf6c453, emissiveIntensity: 0.3, roughness: 0.5 })
+  );
+  flower.add(center);
+  flower.add(buildStamens());
+
+  const outerCount = quality.petalCount;
+  const innerCount = Math.max(4, Math.round(quality.petalCount * 0.6));
+
+  const outer = buildPetalRing(RING_CONFIG.outer, outerCount, 'outer');
+  const inner = buildPetalRing(RING_CONFIG.inner, innerCount, 'inner');
+  const petals = outer.petals.concat(inner.petals);
+
+  for (const petal of petals) flower.add(petal.root);
+
+  return { flower, petals, materials: [outer.material, inner.material] };
 }
 
 function buildLights(scene) {
-  scene.add(new THREE.AmbientLight(0xfff1e0, 2.2));
-  const key = new THREE.DirectionalLight(0xffe6c8, 2.6);
+  scene.add(new THREE.AmbientLight(0xfff1e0, 1.3));
+  const key = new THREE.DirectionalLight(0xffe6c8, 1.5);
   key.position.set(2, 3, 3);
   scene.add(key);
-  const fill = new THREE.DirectionalLight(0xd8c9ff, 1.2);
+  const fill = new THREE.DirectionalLight(0xd8c9ff, 0.7);
   fill.position.set(-3, 1.5, 2);
   scene.add(fill);
-  const rim = new THREE.DirectionalLight(0xffd9a8, 1.5);
+  const rim = new THREE.DirectionalLight(0xffd9a8, 0.9);
   rim.position.set(-1, 2, -3);
   scene.add(rim);
 }
@@ -132,28 +242,11 @@ export function mount(root, win) {
   const camera = new THREE.PerspectiveCamera(42, win.innerWidth / win.innerHeight, 0.1, 100);
   buildLights(scene);
 
-  const basePosition = isMobile ? { x: 0, y: 0.1 } : { x: -2.3, y: 0.2 };
+  const basePosition = isMobile ? { x: 0, y: 0.2 } : { x: -1.7, y: 0.5 };
 
-  const budGroup = new THREE.Group();
-  const bloomGroup = new THREE.Group();
-  budGroup.position.set(basePosition.x, basePosition.y, 0);
-  bloomGroup.position.set(basePosition.x, basePosition.y, 0);
-  bloomGroup.visible = false;
-  scene.add(budGroup, bloomGroup);
-
-  let budMaterials = [];
-  let bloomMaterials = [];
-
-  const loader = new GLTFLoader();
-  loadModel(loader, BUD_MODEL_URL, 2.0, (object, materials) => {
-    budMaterials = materials;
-    budGroup.add(object);
-  });
-  loadModel(loader, BLOOM_MODEL_URL, 2.4, (object, materials) => {
-    for (const material of materials) material.opacity = 0;
-    bloomMaterials = materials;
-    bloomGroup.add(object);
-  });
+  const { flower, petals, materials } = buildFlower(quality);
+  flower.position.set(basePosition.x, basePosition.y, 0);
+  scene.add(flower);
 
   const particleCount = isMobile ? 8 : 16;
   const particles = buildParticleField(particleCount);
@@ -190,23 +283,21 @@ export function mount(root, win) {
 
     const now = ((win.performance || Date).now() - startTime) / 1000;
     const choreo = computeChoreography(currentProgress());
-    const crossfade = smoothstep(CROSSFADE_START, CROSSFADE_END, choreo.bloom);
 
-    for (const material of budMaterials) material.opacity = 1 - crossfade;
-    for (const material of bloomMaterials) material.opacity = crossfade;
-    budGroup.visible = crossfade < 0.995;
-    bloomGroup.visible = crossfade > 0.005;
-
-    budGroup.scale.setScalar(1 - crossfade * 0.1);
-    bloomGroup.scale.setScalar(0.92 + crossfade * 0.16);
+    for (const petal of petals) {
+      const sway = Math.sin(now * 1.15 + petal.phase) * 0.09 + Math.sin(now * 0.41 + petal.phase * 1.6) * 0.035;
+      const flutter = Math.sin(now * 0.6 + petal.phase) * 0.05;
+      petal.hinge.rotation.x = petal.closedTilt + (petal.openTilt - petal.closedTilt) * choreo.bloom + sway;
+      petal.hinge.rotation.z = flutter;
+    }
+    for (const material of materials) {
+      material.opacity = 0.96;
+    }
 
     const sway = Math.sin(now * 0.5) * 0.05;
-    const flutter = Math.sin(now * 0.33 + 1.4) * 0.035;
     const bob = Math.sin(now * 0.45) * 0.06;
-    for (const group of [budGroup, bloomGroup]) {
-      group.rotation.set(flutter, idleRotation, sway);
-      group.position.y = basePosition.y + bob;
-    }
+    flower.position.y = basePosition.y + bob;
+    flower.rotation.z = sway * 0.3;
 
     const positions = particles.points.geometry.attributes.position;
     for (let i = 0; i < particles.speeds.length; i++) {
@@ -219,19 +310,15 @@ export function mount(root, win) {
     positions.needsUpdate = true;
     particles.points.rotation.y = idleRotation * 0.4;
 
-    // Mobile has no room to dolly sideways into a "corner" the way desktop
-    // does, so it leans entirely on shrinking (via distance) and blurring/
-    // fading to stay out of the way as content scrolls past. The 1.7x
-    // multiplier compensates for the narrower horizontal FOV of a portrait
-    // viewport at the same distance.
     const dollyX = quality.allowDolly ? choreo.cameraOffsetX : 0;
     const dollyY = quality.allowDolly ? choreo.cameraOffsetY : 0.3;
     const distance = quality.allowDolly ? choreo.cameraDistance : choreo.cameraDistance * 1.7;
 
-    camera.position.set(dollyX, dollyY + 0.5, distance);
+    camera.position.set(dollyX, dollyY + 0.6, distance);
     camera.lookAt(0, 0.3, 0);
 
     idleRotation += 0.0035 + choreo.bloom * 0.0015;
+    flower.rotation.y = idleRotation;
 
     canvas.style.filter = choreo.blur > 0 ? `blur(${(choreo.blur * 6).toFixed(2)}px)` : '';
     canvas.style.opacity = String(choreo.opacity);
