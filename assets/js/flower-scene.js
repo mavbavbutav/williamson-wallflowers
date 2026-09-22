@@ -1,6 +1,6 @@
 import * as THREE from '../../moments/vendor/three.module.js';
 import { GLTFLoader } from '../../moments/vendor/jsm/loaders/GLTFLoader.js';
-import { computeChoreography, getQualityProfile } from './flower-choreography.js?v=20260922-bloom-6';
+import { computeChoreography, getQualityProfile } from './flower-choreography.js?v=20260922-bloom-7';
 
 const MOBILE_QUERY = '(max-width: 760px)';
 const BUD_MODEL_URL = new URL('../models/peony-bud.glb', import.meta.url).href;
@@ -234,7 +234,7 @@ export function mount(root, win) {
     idleRotation += 0.0035 + choreo.bloom * 0.0015;
 
     canvas.style.filter = choreo.blur > 0 ? `blur(${(choreo.blur * 6).toFixed(2)}px)` : '';
-    canvas.style.opacity = String(1 - choreo.blur * 0.45);
+    canvas.style.opacity = String(choreo.opacity);
 
     renderer.render(scene, camera);
   }

@@ -22,19 +22,21 @@ test('computeChoreography at progress 0 returns the closed-bud keyframe', () => 
   closeTo(result.cameraOffsetY, 0, 'cameraOffsetY');
   closeTo(result.blur, 0, 'blur');
   closeTo(result.saturation, 1.0, 'saturation');
+  closeTo(result.opacity, 1.0, 'opacity');
 });
 
-test('computeChoreography at progress 1 returns the fully-bloomed keyframe', () => {
+test('computeChoreography at progress 1 returns the settled ambient keyframe', () => {
   const result = computeChoreography(1);
   closeTo(result.bloom, 1.0, 'bloom');
-  closeTo(result.cameraDistance, 22.0, 'cameraDistance');
-  closeTo(result.cameraOffsetX, 10.2, 'cameraOffsetX');
-  closeTo(result.cameraOffsetY, 4.0, 'cameraOffsetY');
-  closeTo(result.blur, 0.72, 'blur');
-  closeTo(result.saturation, 0.65, 'saturation');
+  closeTo(result.cameraDistance, 16.5, 'cameraDistance');
+  closeTo(result.cameraOffsetX, 4.5, 'cameraOffsetX');
+  closeTo(result.cameraOffsetY, 2.0, 'cameraOffsetY');
+  closeTo(result.blur, 0.25, 'blur');
+  closeTo(result.saturation, 0.7, 'saturation');
+  closeTo(result.opacity, 0.12, 'opacity');
 });
 
-test('computeChoreography finishes most of the bloom before the card grid (0.15)', () => {
+test('computeChoreography finishes most of the bloom before the card grid (0.168)', () => {
   const result = computeChoreography(0.035);
   closeTo(result.bloom, 0.45, 'bloom');
   closeTo(result.cameraDistance, 9.75, 'cameraDistance');
@@ -42,16 +44,29 @@ test('computeChoreography finishes most of the bloom before the card grid (0.15)
   closeTo(result.cameraOffsetY, 0.25, 'cameraOffsetY');
   closeTo(result.blur, 0.05, 'blur');
   closeTo(result.saturation, 0.975, 'saturation');
+  closeTo(result.opacity, 1.0, 'opacity');
+});
+
+test('computeChoreography fades to a genuinely faint ambient opacity crossing the card grid', () => {
+  const result = computeChoreography(0.185);
+  closeTo(result.bloom, 1.0, 'bloom');
+  closeTo(result.cameraDistance, 13.5, 'cameraDistance');
+  closeTo(result.cameraOffsetX, 3.0, 'cameraOffsetX');
+  closeTo(result.cameraOffsetY, 1.4, 'cameraOffsetY');
+  closeTo(result.blur, 0.2, 'blur');
+  closeTo(result.saturation, 0.875, 'saturation');
+  closeTo(result.opacity, 0.505, 'opacity');
 });
 
 test('computeChoreography interpolates linearly between keyframes', () => {
-  const result = computeChoreography(0.39);
+  const result = computeChoreography(0.435);
   closeTo(result.bloom, 1.0, 'bloom');
-  closeTo(result.cameraDistance, 19.5, 'cameraDistance');
-  closeTo(result.cameraOffsetX, 9.65, 'cameraOffsetX');
-  closeTo(result.cameraOffsetY, 3.7, 'cameraOffsetY');
-  closeTo(result.blur, 0.575, 'blur');
-  closeTo(result.saturation, 0.775, 'saturation');
+  closeTo(result.cameraDistance, 15.0, 'cameraDistance');
+  closeTo(result.cameraOffsetX, 3.75, 'cameraOffsetX');
+  closeTo(result.cameraOffsetY, 1.7, 'cameraOffsetY');
+  closeTo(result.blur, 0.21, 'blur');
+  closeTo(result.saturation, 0.825, 'saturation');
+  closeTo(result.opacity, 0.15, 'opacity');
 });
 
 test('computeChoreography clamps progress below 0 and above 1', () => {
@@ -59,11 +74,13 @@ test('computeChoreography clamps progress below 0 and above 1', () => {
   const zero = computeChoreography(0);
   closeTo(below.bloom, zero.bloom, 'clamped-low bloom');
   closeTo(below.cameraDistance, zero.cameraDistance, 'clamped-low cameraDistance');
+  closeTo(below.opacity, zero.opacity, 'clamped-low opacity');
 
   const above = computeChoreography(1.9);
   const one = computeChoreography(1);
   closeTo(above.bloom, one.bloom, 'clamped-high bloom');
   closeTo(above.cameraDistance, one.cameraDistance, 'clamped-high cameraDistance');
+  closeTo(above.opacity, one.opacity, 'clamped-high opacity');
 });
 
 test('shouldEnableFlowerScene is true only when every gate clears', () => {

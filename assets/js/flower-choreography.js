@@ -1,21 +1,31 @@
-// Measured against the actual homepage layout: the collection section's
-// 4-card grid runs from roughly 15% to 50% of total scroll, so the bud-to-
-// bloom crossfade (see CROSSFADE_START/END below) needs to fully resolve
-// before 0.15 — otherwise it plays out behind/across the card photos
-// instead of as a clean moment. After that, the flower recedes
-// monotonically (smaller, blurrier, pushed toward the corner) rather than
-// re-timing a camera move to each section's real content, so it stays out
-// of the way regardless of exactly how tall any given section is.
+// Measured directly against the live homepage layout (getBoundingClientRect
+// on every major content block, converted to scroll-fraction coordinates).
+// The reality: outside the hero, this page is almost entirely dense content
+// — the collection cards run 0.168-0.477, details text/cards run
+// 0.520-0.667, booking text/calendar/form run 0.711-0.919, contact
+// info/form run 0.962-1.159 — with only narrow ~4% gaps between them.
+// There is no scroll position past the hero where a recognizably-shaped,
+// clearly-visible flower can sit without crossing *something*. Two earlier
+// passes tried to dodge content with camera panning + blur while staying
+// semi-visible everywhere, and kept losing that fight.
+//
+// The fix is a design decision, not another camera nudge: the flower tells
+// its bloom story in the hero (where there's real room for it), then fades
+// to a genuinely faint ambient presence — opacity ~0.12-0.16, not a
+// half-measure ~0.7 — for the rest of the page. At that opacity, crossing a
+// card edge or a heading reads as a soft wash of color, not a shape
+// competing with content. It keeps drifting/swaying (still "alive"), it
+// just isn't trying to be seen anymore once the page gets busy.
 const KEYFRAMES = [
-  { at: 0.0, bloom: 0.0, cameraDistance: 9.0, cameraOffsetX: 0.0, cameraOffsetY: 0.0, blur: 0.0, saturation: 1.0 },
-  { at: 0.07, bloom: 0.9, cameraDistance: 10.5, cameraOffsetX: 1.0, cameraOffsetY: 0.5, blur: 0.1, saturation: 0.95 },
-  { at: 0.13, bloom: 1.0, cameraDistance: 19.0, cameraOffsetX: 9.5, cameraOffsetY: 3.6, blur: 0.55, saturation: 0.8 },
-  { at: 0.65, bloom: 1.0, cameraDistance: 20.0, cameraOffsetX: 9.8, cameraOffsetY: 3.8, blur: 0.6, saturation: 0.75 },
-  { at: 0.94, bloom: 1.0, cameraDistance: 22.0, cameraOffsetX: 10.2, cameraOffsetY: 4.0, blur: 0.72, saturation: 0.65 },
-  { at: 1.0, bloom: 1.0, cameraDistance: 22.0, cameraOffsetX: 10.2, cameraOffsetY: 4.0, blur: 0.72, saturation: 0.65 }
+  { at: 0.0, bloom: 0.0, cameraDistance: 9.0, cameraOffsetX: 0.0, cameraOffsetY: 0.0, blur: 0.0, saturation: 1.0, opacity: 1.0 },
+  { at: 0.07, bloom: 0.9, cameraDistance: 10.5, cameraOffsetX: 1.0, cameraOffsetY: 0.5, blur: 0.1, saturation: 0.95, opacity: 1.0 },
+  { at: 0.15, bloom: 1.0, cameraDistance: 12.5, cameraOffsetX: 2.5, cameraOffsetY: 1.2, blur: 0.2, saturation: 0.9, opacity: 0.85 },
+  { at: 0.22, bloom: 1.0, cameraDistance: 14.5, cameraOffsetX: 3.5, cameraOffsetY: 1.6, blur: 0.2, saturation: 0.85, opacity: 0.16 },
+  { at: 0.65, bloom: 1.0, cameraDistance: 15.5, cameraOffsetX: 4.0, cameraOffsetY: 1.8, blur: 0.22, saturation: 0.8, opacity: 0.14 },
+  { at: 1.0, bloom: 1.0, cameraDistance: 16.5, cameraOffsetX: 4.5, cameraOffsetY: 2.0, blur: 0.25, saturation: 0.7, opacity: 0.12 }
 ];
 
-const FIELDS = ['bloom', 'cameraDistance', 'cameraOffsetX', 'cameraOffsetY', 'blur', 'saturation'];
+const FIELDS = ['bloom', 'cameraDistance', 'cameraOffsetX', 'cameraOffsetY', 'blur', 'saturation', 'opacity'];
 
 export function computeChoreography(progress) {
   const clamped = Math.min(1, Math.max(0, progress));
