@@ -1,5 +1,10 @@
 import * as THREE from '../../moments/vendor/three.module.js';
-import { computeChoreography, getQualityProfile } from './flower-choreography.js?v=20260922-bloom-12';
+import {
+  computeChoreography,
+  getQualityProfile,
+  buildScrollMap,
+  mapScrollToStory
+} from './flower-choreography.js?v=20260922-bloom-13';
 
 const MOBILE_QUERY = '(max-width: 760px)';
 
@@ -412,10 +417,46 @@ function buildParticleField(count) {
   return { points, positions, speeds, drifts };
 }
 
-export function mount(root, win) {
+// Where the story milestones actually sit in the live DOM. Anything that
+// can't be found returns undefined and falls back to its default fraction
+// inside buildScrollMap, so a markup change degrades one anchor instead of
+// desyncing the whole animation.
+function measureAnchors(doc, win, scrollRange) {
+  const spanOf = (selector) => {
+    const el = doc.querySelector(selector);
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    return {
+      top: (rect.top + win.scrollY) / scrollRange,
+      bottom: (rect.bottom + win.scrollY) / scrollRange
+    };
+  };
+  const between = (a, b) => (a && b ? (a.bottom + b.top) / 2 : undefined);
+  const inside = (span, t) => (span ? span.top + (span.bottom - span.top) * t : undefined);
+
+  const cards = spanOf('.cards');
+  const detailsIntro = spanOf('#details .section-intro');
+  const detailsRow = spanOf('#details .container > div:nth-child(2)');
+  const bookingIntro = spanOf('#booking .section-intro');
+  const bookingPanels = spanOf('#booking .container > div:last-child');
+  const contact = spanOf('#contact');
+
+  return {
+    // The bloom now gets the whole hero to play out in, rather than a
+    // hardcoded 15% of an arbitrary page height.
+    bloomEnd: cards ? cards.top : undefined,
+    cardsDeep: inside(cards, 0.15),
+    gapDetails: between(cards, detailsIntro),
+    detailsDeep: inside(detailsRow, 0.5),
+    gapBooking: between(detailsRow, bookingIntro),
+    bookingDeep: inside(bookingPanels, 0.5),
+    gapContact: between(bookingPanels, contact)
+  };
+}
+
+export function mount(root, win, options = {}) {
   const doc = win.document;
-  const isMobile = win.matchMedia(MOBILE_QUERY).matches;
-  const quality = getQualityProfile(isMobile);
+  const animate = options.animate !== false;
 
   const canvas = doc.createElement('canvas');
   canvas.setAttribute('aria-hidden', 'true');
@@ -424,7 +465,6 @@ export function mount(root, win) {
   root.appendChild(canvas);
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, premultipliedAlpha: false });
-  renderer.setPixelRatio(Math.min(win.devicePixelRatio || 1, quality.pixelRatioCap));
   renderer.setSize(win.innerWidth, win.innerHeight);
   renderer.setClearAlpha(0);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -436,22 +476,57 @@ export function mount(root, win) {
   buildEnvironment(renderer, scene);
   buildLights(scene);
 
-  const basePosition = isMobile ? { x: 0, y: 0.2 } : { x: -1.7, y: 0.5 };
+  // The whole flower system depends on the breakpoint (petal counts, pixel
+  // ratio, framing), so crossing it has to rebuild rather than just resize.
+  let system = null;
 
-  const { flower, petals } = buildFlower(quality);
-  flower.position.set(basePosition.x, basePosition.y, 0);
-  scene.add(flower);
+  function disposeSystem() {
+    if (!system) return;
+    scene.remove(system.flower);
+    scene.remove(system.particles.points);
+    system.flower.traverse((node) => {
+      if (node.geometry) node.geometry.dispose();
+      if (node.material) {
+        const materials = Array.isArray(node.material) ? node.material : [node.material];
+        for (const material of materials) {
+          if (material.map) material.map.dispose();
+          material.dispose();
+        }
+      }
+    });
+    system.particles.points.geometry.dispose();
+    if (system.particles.points.material.map) system.particles.points.material.map.dispose();
+    system.particles.points.material.dispose();
+    system = null;
+  }
 
-  const glow = buildGlow();
-  flower.add(glow.group);
+  function createSystem(isMobile) {
+    const quality = getQualityProfile(isMobile);
+    const basePosition = isMobile ? { x: 0, y: 0.2 } : { x: -1.7, y: 0.5 };
 
-  const particles = buildParticleField(isMobile ? 10 : 20);
-  particles.points.position.set(basePosition.x, basePosition.y, 0);
-  scene.add(particles.points);
+    const { flower, petals } = buildFlower(quality);
+    flower.position.set(basePosition.x, basePosition.y, 0);
+    scene.add(flower);
 
-  let cachedScrollRange = Math.max(1, doc.documentElement.scrollHeight - win.innerHeight);
-  function currentProgress() {
-    return win.scrollY / cachedScrollRange;
+    const glow = buildGlow();
+    flower.add(glow.group);
+
+    const particles = buildParticleField(isMobile ? 10 : 20);
+    particles.points.position.set(basePosition.x, basePosition.y, 0);
+    scene.add(particles.points);
+
+    renderer.setPixelRatio(Math.min(win.devicePixelRatio || 1, quality.pixelRatioCap));
+
+    return { isMobile, quality, basePosition, flower, petals, glow, particles };
+  }
+
+  system = createSystem(win.matchMedia(MOBILE_QUERY).matches);
+
+  let scrollRange = Math.max(1, doc.documentElement.scrollHeight - win.innerHeight);
+  let scrollMap = buildScrollMap(measureAnchors(doc, win, scrollRange));
+
+  function storyProgress() {
+    return mapScrollToStory(win.scrollY / scrollRange, scrollMap);
   }
 
   let visible = true;
@@ -459,20 +534,70 @@ export function mount(root, win) {
     visible = doc.visibilityState === 'visible';
   });
 
-  function resize() {
-    cachedScrollRange = Math.max(1, doc.documentElement.scrollHeight - win.innerHeight);
+  function applyViewport() {
+    scrollRange = Math.max(1, doc.documentElement.scrollHeight - win.innerHeight);
+    scrollMap = buildScrollMap(measureAnchors(doc, win, scrollRange));
     camera.aspect = win.innerWidth / win.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(win.innerWidth, win.innerHeight);
+
+    const isMobile = win.matchMedia(MOBILE_QUERY).matches;
+    if (system && isMobile !== system.isMobile) {
+      disposeSystem();
+      system = createSystem(isMobile);
+    }
   }
-  win.addEventListener('resize', resize);
-  resize();
+
+  let resizeTimer = 0;
+  win.addEventListener('resize', () => {
+    win.clearTimeout(resizeTimer);
+    resizeTimer = win.setTimeout(() => {
+      applyViewport();
+      if (!animate) renderStatic();
+    }, 150);
+  });
+  applyViewport();
+
+  let lastOpacity = -1;
+  let lastBlur = -1;
+
+  function applyCanvasStyle(choreo) {
+    const opacity = Math.round(choreo.opacity * 100) / 100;
+    if (opacity !== lastOpacity) {
+      canvas.style.opacity = String(opacity);
+      lastOpacity = opacity;
+    }
+    const blur = Math.round(choreo.blur * 3 * 10) / 10;
+    if (blur !== lastBlur) {
+      canvas.style.filter = blur > 0 ? `blur(${blur}px)` : '';
+      lastBlur = blur;
+    }
+  }
+
+  // Reduced motion: render a single settled frame and stop. Scroll-linked
+  // movement is still movement, so the static version is deliberately
+  // inert — a quiet bloomed watermark rather than nothing at all.
+  function renderStatic() {
+    const choreo = computeChoreography(0.55);
+    for (const petal of system.petals) {
+      petal.hinge.rotation.x = petal.openTilt;
+    }
+    system.glow.core.material.opacity = 0.5;
+    system.glow.halo.material.opacity = 0.2;
+    camera.position.set(system.quality.allowDolly ? 1.6 : 0, 1.4, system.quality.allowDolly ? 11.5 : 19);
+    camera.lookAt(0, 0.6, 0);
+    applyCanvasStyle({ opacity: 0.18, blur: choreo.blur });
+    renderer.render(scene, camera);
+  }
+
+  if (!animate) {
+    renderStatic();
+    return { renderer, scene, camera, static: true };
+  }
 
   let idleRotation = 0;
   let lastScrollY = win.scrollY;
   let lastScrollAt = 0;
-  let lastOpacity = -1;
-  let lastBlur = -1;
   let frameIndex = 0;
   const startTime = (win.performance || Date).now();
 
@@ -488,13 +613,14 @@ export function mount(root, win) {
       lastScrollAt = nowMs;
     }
     // Once the page has been still for a moment, only the idle sway is
-    // changing — no need to redraw a full-viewport bloom pass at 60fps.
+    // changing — no need to redraw a full-viewport scene at 60fps.
     const idle = nowMs - lastScrollAt > 250;
     if (idle && frameIndex % 2 === 1) return;
 
     const now = (nowMs - startTime) / 1000;
-    const progress = currentProgress();
+    const progress = storyProgress();
     const choreo = computeChoreography(progress);
+    const { flower, petals, glow, particles, quality, basePosition } = system;
 
     for (const petal of petals) {
       const sway = Math.sin(now * 1.15 + petal.phase) * 0.085 + Math.sin(now * 0.41 + petal.phase * 1.6) * 0.035;
@@ -524,9 +650,8 @@ export function mount(root, win) {
 
     // Vertical travel: the camera rises only modestly while its aim point
     // sweeps up faster. That difference is what actually slides the flower
-    // down the frame — moving the camera and the aim together (as this did
-    // previously) just changes the viewing angle and leaves the subject
-    // pinned to the middle of the screen.
+    // down the frame — moving the camera and the aim together just changes
+    // the viewing angle and leaves the subject pinned mid-screen.
     const weaveX = quality.allowDolly ? Math.sin(progress * Math.PI * 2.5) * 0.8 : 0;
     const dollyX = quality.allowDolly ? choreo.cameraOffsetX + weaveX : 0;
     const dollyY = choreo.cameraOffsetY * 0.3;
@@ -539,20 +664,7 @@ export function mount(root, win) {
     idleRotation += 0.0035 + choreo.bloom * 0.0015;
     flower.rotation.y = idleRotation;
 
-    // Only touch style when the value actually changes — these are writes
-    // to a full-viewport fixed element, and the canvas no longer carries a
-    // CSS transition that would fight a per-frame write.
-    const opacity = Math.round(choreo.opacity * 100) / 100;
-    if (opacity !== lastOpacity) {
-      canvas.style.opacity = String(opacity);
-      lastOpacity = opacity;
-    }
-    const blur = Math.round(choreo.blur * 3 * 10) / 10;
-    if (blur !== lastBlur) {
-      canvas.style.filter = blur > 0 ? `blur(${blur}px)` : '';
-      lastBlur = blur;
-    }
-
+    applyCanvasStyle(choreo);
     renderer.render(scene, camera);
   }
 

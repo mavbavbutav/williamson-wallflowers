@@ -4,7 +4,10 @@ import { test } from 'node:test';
 import {
   computeChoreography,
   shouldEnableFlowerScene,
-  getQualityProfile
+  getQualityProfile,
+  buildScrollMap,
+  mapScrollToStory,
+  STORY_ANCHORS
 } from '../../assets/js/flower-choreography.js';
 
 function closeTo(actual, expected, message) {
@@ -36,15 +39,22 @@ test('computeChoreography at progress 1 returns the settled ambient keyframe', (
   closeTo(result.opacity, 0.12, 'opacity');
 });
 
-test('computeChoreography finishes most of the bloom before the card grid (0.168)', () => {
-  const result = computeChoreography(0.035);
-  closeTo(result.bloom, 0.45, 'bloom');
-  closeTo(result.cameraDistance, 9.75, 'cameraDistance');
-  closeTo(result.cameraOffsetX, 0.5, 'cameraOffsetX');
-  closeTo(result.cameraOffsetY, 0.25, 'cameraOffsetY');
-  closeTo(result.blur, 0.05, 'blur');
-  closeTo(result.saturation, 0.975, 'saturation');
-  closeTo(result.opacity, 1.0, 'opacity');
+test('computeChoreography opens the bloom steadily across the hero', () => {
+  // The bloom is spread evenly over story 0-0.15 (which the scroll map
+  // anchors to the whole hero) rather than being 90% done by story 0.07.
+  const early = computeChoreography(0.035);
+  closeTo(early.bloom, 0.21, 'bloom');
+  closeTo(early.cameraDistance, 9.56, 'cameraDistance');
+  closeTo(early.cameraOffsetX, 0.42, 'cameraOffsetX');
+  closeTo(early.cameraOffsetY, 0.224, 'cameraOffsetY');
+  closeTo(early.blur, 0.035, 'blur');
+  closeTo(early.opacity, 1.0, 'opacity');
+
+  const mid = computeChoreography(0.075);
+  closeTo(mid.bloom, 0.49, 'midpoint bloom');
+  assert.ok(mid.bloom > early.bloom, 'bloom keeps opening through the hero');
+
+  closeTo(computeChoreography(0.15).bloom, 1.0, 'fully open at the end of the hero');
 });
 
 test('computeChoreography fades to a faint ambient opacity crossing the card grid', () => {
@@ -147,4 +157,59 @@ test('getQualityProfile returns the desktop profile', () => {
     allowDolly: true,
     pixelRatioCap: 2
   });
+});
+
+test('buildScrollMap anchors story milestones to measured page positions', () => {
+  const map = buildScrollMap({
+    bloomEnd: 0.168,
+    cardsDeep: 0.215,
+    gapDetails: 0.5,
+    detailsDeep: 0.62,
+    gapBooking: 0.69,
+    bookingDeep: 0.85,
+    gapContact: 0.94
+  });
+
+  assert.equal(map.length, STORY_ANCHORS.length);
+  assert.deepEqual(map[0], { real: 0, story: 0 });
+  assert.deepEqual(map[map.length - 1], { real: 1, story: 1 });
+  closeTo(map[1].real, 0.168, 'bloomEnd real');
+  closeTo(map[1].story, 0.15, 'bloomEnd story');
+});
+
+test('buildScrollMap falls back to the default fraction for missing anchors', () => {
+  const map = buildScrollMap({ bloomEnd: 0.1 });
+  closeTo(map[1].real, 0.1, 'measured anchor is used');
+  // cardsDeep was not measured, so it falls back to its own story fraction
+  closeTo(map[2].real, 0.22, 'unmeasured anchor falls back');
+});
+
+test('buildScrollMap keeps anchors strictly increasing even if measured out of order', () => {
+  const map = buildScrollMap({ bloomEnd: 0.6, cardsDeep: 0.2, gapDetails: 0.1 });
+  for (let i = 1; i < map.length; i++) {
+    assert.ok(
+      map[i].real > map[i - 1].real,
+      `anchor ${i} (${map[i].real}) should exceed ${map[i - 1].real}`
+    );
+  }
+});
+
+test('mapScrollToStory stretches the bloom across the measured hero', () => {
+  // Hero ends at 30% of the page, so story 0.15 (bloom complete) should
+  // land at real 0.30 rather than at the hardcoded 0.15.
+  const map = buildScrollMap({ bloomEnd: 0.3 });
+  closeTo(mapScrollToStory(0.3, map), 0.15, 'hero end maps to bloom end');
+  closeTo(mapScrollToStory(0.15, map), 0.075, 'halfway through the hero is halfway through the bloom');
+  closeTo(mapScrollToStory(0, map), 0, 'page top');
+});
+
+test('mapScrollToStory clamps outside the page range', () => {
+  const map = buildScrollMap({ bloomEnd: 0.2 });
+  closeTo(mapScrollToStory(-0.5, map), 0, 'below range');
+  closeTo(mapScrollToStory(1.5, map), 1, 'above range');
+});
+
+test('mapScrollToStory is identity-ish without a usable map', () => {
+  closeTo(mapScrollToStory(0.42, null), 0.42, 'null map');
+  closeTo(mapScrollToStory(0.42, []), 0.42, 'empty map');
 });

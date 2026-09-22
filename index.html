@@ -1962,24 +1962,25 @@
       var prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       var saveData = !!(navigator.connection && navigator.connection.saveData);
 
-      if (prefersReducedMotion || !hasWebGL() || saveData) return;
+      // No WebGL or the visitor asked to save data: load nothing at all.
+      // Reduced motion still gets the scene, but mounted as a single
+      // static frame — respecting "don't animate" rather than showing
+      // those visitors nothing.
+      if (!hasWebGL() || saveData) return;
 
       function loadFlowerScene() {
         Promise.all([
-          import("./assets/js/flower-scene.js?v=20260922-bloom-12"),
-          import("./assets/js/flower-choreography.js?v=20260922-bloom-12")
+          import("./assets/js/flower-scene.js?v=20260922-bloom-13"),
+          import("./assets/js/flower-choreography.js?v=20260922-bloom-13")
         ]).then(function (modules) {
           var sceneModule = modules[0];
           var choreographyModule = modules[1];
-          if (
-            choreographyModule.shouldEnableFlowerScene({
-              prefersReducedMotion: prefersReducedMotion,
-              hasWebGL: hasWebGL(),
-              saveData: saveData
-            })
-          ) {
-            sceneModule.mount(document.body, window);
-          }
+          var animate = choreographyModule.shouldEnableFlowerScene({
+            prefersReducedMotion: prefersReducedMotion,
+            hasWebGL: hasWebGL(),
+            saveData: saveData
+          });
+          sceneModule.mount(document.body, window, { animate: animate });
         });
       }
 
