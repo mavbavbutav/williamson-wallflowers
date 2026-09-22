@@ -1,5 +1,5 @@
 import * as THREE from '../../moments/vendor/three.module.js';
-import { computeChoreography, getQualityProfile } from './flower-choreography.js?v=20260922-bloom-8';
+import { computeChoreography, getQualityProfile } from './flower-choreography.js?v=20260922-bloom-9';
 
 const MOBILE_QUERY = '(max-width: 760px)';
 
@@ -45,7 +45,7 @@ function buildPetalGeometry(config) {
   shape.bezierCurveTo(width, length * 0.3, width, length * 0.78, 0, length);
   shape.bezierCurveTo(-width, length * 0.78, -width, length * 0.3, 0, 0);
 
-  const geometry = new THREE.ExtrudeGeometry(shape, { depth: 0.03, bevelEnabled: false, curveSegments: 10 });
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: 0.03, bevelEnabled: false, curveSegments: 18 });
   const position = geometry.attributes.position;
   const colors = new Float32Array(position.count * 3);
   const base = new THREE.Color(baseColor);
@@ -136,6 +136,34 @@ function buildStamens() {
   return group;
 }
 
+// A couple of simple leaves partway down the stem — cheap, but it's the
+// difference between "a flower head floating on a rod" and a plant.
+function buildLeaves() {
+  const group = new THREE.Group();
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0);
+  shape.bezierCurveTo(0.22, 0.18, 0.22, 0.5, 0, 0.68);
+  shape.bezierCurveTo(-0.22, 0.5, -0.22, 0.18, 0, 0);
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: 0.02, bevelEnabled: false, curveSegments: 8 });
+  const material = new THREE.MeshStandardMaterial({ color: 0x6f8f5c, roughness: 0.75, side: THREE.DoubleSide });
+
+  const placements = [
+    { y: -1.0, angle: 0.55, tilt: 0.5 },
+    { y: -1.25, angle: -2.4, tilt: 0.55 }
+  ];
+  for (const p of placements) {
+    const pivot = new THREE.Object3D();
+    pivot.position.set(0, p.y, 0);
+    pivot.rotation.y = p.angle;
+    const leaf = new THREE.Mesh(geometry, material);
+    leaf.rotation.z = -Math.PI / 2 + p.tilt;
+    leaf.position.x = 0.06;
+    pivot.add(leaf);
+    group.add(pivot);
+  }
+  return group;
+}
+
 function buildFlower(quality) {
   const flower = new THREE.Group();
 
@@ -145,6 +173,7 @@ function buildFlower(quality) {
   );
   stem.position.y = -1.7;
   flower.add(stem);
+  flower.add(buildLeaves());
 
   const center = new THREE.Mesh(
     new THREE.SphereGeometry(0.16, 20, 20),
@@ -152,6 +181,10 @@ function buildFlower(quality) {
   );
   flower.add(center);
   flower.add(buildStamens());
+
+  const glow = new THREE.PointLight(0xffdcae, 0.6, 2.2, 2);
+  glow.position.set(0, 0.1, 0.15);
+  flower.add(glow);
 
   const outerCount = quality.petalCount;
   const innerCount = Math.max(4, Math.round(quality.petalCount * 0.6));
@@ -282,7 +315,8 @@ export function mount(root, win) {
     if (!visible) return;
 
     const now = ((win.performance || Date).now() - startTime) / 1000;
-    const choreo = computeChoreography(currentProgress());
+    const progress = currentProgress();
+    const choreo = computeChoreography(progress);
 
     for (const petal of petals) {
       const sway = Math.sin(now * 1.15 + petal.phase) * 0.09 + Math.sin(now * 0.41 + petal.phase * 1.6) * 0.035;
@@ -310,8 +344,14 @@ export function mount(root, win) {
     positions.needsUpdate = true;
     particles.points.rotation.y = idleRotation * 0.4;
 
-    const dollyX = quality.allowDolly ? choreo.cameraOffsetX : 0;
-    const dollyY = quality.allowDolly ? choreo.cameraOffsetY : 0.3;
+    // cameraOffsetY always applies (mobile included) so the flower visibly
+    // travels down with the page rather than sitting in one spot once past
+    // the hero. The horizontal weave is desktop-only, since a narrow mobile
+    // viewport has no room to swing sideways without immediately clipping
+    // the edge.
+    const weaveX = quality.allowDolly ? Math.sin(progress * Math.PI * 2.5) * 0.8 : 0;
+    const dollyX = quality.allowDolly ? choreo.cameraOffsetX + weaveX : 0;
+    const dollyY = choreo.cameraOffsetY;
     const distance = quality.allowDolly ? choreo.cameraDistance : choreo.cameraDistance * 1.7;
 
     camera.position.set(dollyX, dollyY + 0.6, distance);
