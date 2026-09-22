@@ -3,6 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./moments/vendor/three.module.js",
+      "three/addons/": "./moments/vendor/jsm/"
+    }
+  }
+  </script>
   <title>Nashville Flower Wall Rentals | Williamson Wallflowers</title>
   <meta name="description" content="Nashville flower wall rentals for weddings, showers, birthdays, corporate events, and photo moments. Williamson Wallflowers serves Nashville, Franklin, Brentwood, Williamson County, and Middle Tennessee." />
   <meta name="robots" content="index,follow" />
@@ -1958,8 +1966,8 @@
 
       function loadFlowerScene() {
         Promise.all([
-          import("./assets/js/flower-scene.js?v=20260922-bloom-2"),
-          import("./assets/js/flower-choreography.js?v=20260922-bloom-2")
+          import("./assets/js/flower-scene.js?v=20260922-bloom-3"),
+          import("./assets/js/flower-choreography.js?v=20260922-bloom-3")
         ]).then(function (modules) {
           var sceneModule = modules[0];
           var choreographyModule = modules[1];

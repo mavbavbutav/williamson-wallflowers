@@ -84,9 +84,16 @@ Browser QA (per `AGENTS.md` — `python -m http.server 8765`, checked on both de
 ## Out of Scope
 
 - Any change to `moments/` (hidden Moments surfaces, host/admin flows, or the existing 3D Walk) — this feature is homepage-only.
-- A real/authored 3D flower model or textures — geometry is procedural.
 - User-facing controls to pause, hide, or replay the animation.
 - Sound.
+
+## Revision (2026-09-22): real 3D assets replace procedural geometry
+
+A first pass shipped with fully procedural geometry (Three.js primitives, no downloaded asset), per the original scope above. A self-assessment against the live result found it visually flat and unconvincing — sharp-edged single-ring petals, a flat matte material, and idle motion too subtle to read as "alive." A code-only touch-up (curved petals, a second ring, warmer material, idle sway) improved it but still fell short of the site's photographic, romantic aesthetic.
+
+Superseding the "no external asset" constraint: two real GLB models (a closed peony bud and a full peony bloom) were sourced via image generation (`z_image`) + image-to-3D lifting (`sam_3_3d`, Meta), stored at `assets/models/peony-bud.glb` and `assets/models/peony-bloom.glb`. The scene now loads both via `GLTFLoader` (vendored at `moments/vendor/jsm/loaders/GLTFLoader.js`, matching the existing `moments/vendor/three.module.js` r165 build, resolved through an `<script type="importmap">` in `index.html` following the same pattern already used by `moments/capsule/index.html`) and crossfades opacity between them as `choreo.bloom` crosses a threshold window, instead of animating a hinge rotation on procedural petals.
+
+This trades away the "zero asset weight" property (the two GLBs are ~3MB each) for a materially better result. The idle-load-past-`window.load` gating and reduced-motion/WebGL/save-data fallback behavior are unchanged — visitors who don't get the animation still get no extra download.
 
 ## Implementation Notes
 
