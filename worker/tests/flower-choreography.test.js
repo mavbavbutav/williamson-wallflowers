@@ -17,7 +17,7 @@ function closeTo(actual, expected, message) {
 test('computeChoreography at progress 0 returns the closed-bud keyframe', () => {
   const result = computeChoreography(0);
   closeTo(result.bloom, 0.0, 'bloom');
-  closeTo(result.cameraDistance, 6.0, 'cameraDistance');
+  closeTo(result.cameraDistance, 9.0, 'cameraDistance');
   closeTo(result.cameraOffsetX, 0, 'cameraOffsetX');
   closeTo(result.cameraOffsetY, 0, 'cameraOffsetY');
   closeTo(result.blur, 0, 'blur');
@@ -27,9 +27,9 @@ test('computeChoreography at progress 0 returns the closed-bud keyframe', () => 
 test('computeChoreography at progress 1 returns the fully-bloomed keyframe', () => {
   const result = computeChoreography(1);
   closeTo(result.bloom, 1.0, 'bloom');
-  closeTo(result.cameraDistance, 11.5, 'cameraDistance');
-  closeTo(result.cameraOffsetX, 3.4, 'cameraOffsetX');
-  closeTo(result.cameraOffsetY, 1.7, 'cameraOffsetY');
+  closeTo(result.cameraDistance, 15.5, 'cameraDistance');
+  closeTo(result.cameraOffsetX, 4.6, 'cameraOffsetX');
+  closeTo(result.cameraOffsetY, 2.3, 'cameraOffsetY');
   closeTo(result.blur, 0.65, 'blur');
   closeTo(result.saturation, 0.65, 'saturation');
 });
@@ -37,9 +37,9 @@ test('computeChoreography at progress 1 returns the fully-bloomed keyframe', () 
 test('computeChoreography interpolates linearly between keyframes', () => {
   const result = computeChoreography(0.5);
   closeTo(result.bloom, 0.8, 'bloom');
-  closeTo(result.cameraDistance, 8.0, 'cameraDistance');
-  closeTo(result.cameraOffsetX, 1.25, 'cameraOffsetX');
-  closeTo(result.cameraOffsetY, 0.6, 'cameraOffsetY');
+  closeTo(result.cameraDistance, 11.25, 'cameraDistance');
+  closeTo(result.cameraOffsetX, 1.75, 'cameraOffsetX');
+  closeTo(result.cameraOffsetY, 0.9, 'cameraOffsetY');
   closeTo(result.blur, 0.175, 'blur');
   closeTo(result.saturation, 0.925, 'saturation');
 });
