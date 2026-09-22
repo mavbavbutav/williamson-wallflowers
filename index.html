@@ -1937,5 +1937,52 @@
       }
     });
   </script>
+  <script>
+    (function () {
+      function hasWebGL() {
+        try {
+          var canvas = document.createElement("canvas");
+          return !!(
+            window.WebGLRenderingContext &&
+            (canvas.getContext("webgl") || canvas.getContext("experimental-webgl"))
+          );
+        } catch (error) {
+          return false;
+        }
+      }
+
+      var prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      var saveData = !!(navigator.connection && navigator.connection.saveData);
+
+      if (prefersReducedMotion || !hasWebGL() || saveData) return;
+
+      function loadFlowerScene() {
+        Promise.all([
+          import("./assets/js/flower-scene.js?v=20260922-bloom-1"),
+          import("./assets/js/flower-choreography.js?v=20260922-bloom-1")
+        ]).then(function (modules) {
+          var sceneModule = modules[0];
+          var choreographyModule = modules[1];
+          if (
+            choreographyModule.shouldEnableFlowerScene({
+              prefersReducedMotion: prefersReducedMotion,
+              hasWebGL: hasWebGL(),
+              saveData: saveData
+            })
+          ) {
+            sceneModule.mount(document.body, window);
+          }
+        });
+      }
+
+      window.addEventListener("load", function () {
+        if ("requestIdleCallback" in window) {
+          window.requestIdleCallback(loadFlowerScene, { timeout: 2000 });
+        } else {
+          setTimeout(loadFlowerScene, 300);
+        }
+      });
+    })();
+  </script>
 </body>
 </html>

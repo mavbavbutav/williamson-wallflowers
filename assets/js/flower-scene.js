@@ -1,20 +1,27 @@
 import * as THREE from '../../moments/vendor/three.module.js';
 import { computeChoreography, getQualityProfile } from './flower-choreography.js?v=20260922-bloom-1';
 
-const CLOSED_TILT = -1.4;
-const OPEN_TILT = -0.2;
+const CLOSED_TILT = 0;
+const OPEN_TILT = -1.95;
 const BASE_PETAL_COLOR = 0xeab4c6;
 const LATE_PETAL_COLOR = 0xd79aa8;
 const MOBILE_QUERY = '(max-width: 760px)';
+const PETAL_LENGTH = 1.5;
+const PETAL_ATTACH_RADIUS = 0.26;
 
 function buildPetalGeometry() {
   const shape = new THREE.Shape();
   shape.moveTo(0, 0);
-  shape.bezierCurveTo(0.38, 0.55, 0.38, 1.4, 0, 1.9);
-  shape.bezierCurveTo(-0.38, 1.4, -0.38, 0.55, 0, 0);
-  return new THREE.ExtrudeGeometry(shape, { depth: 0.05, bevelEnabled: false });
+  shape.bezierCurveTo(0.3, 0.42, 0.3, 1.1, 0, PETAL_LENGTH);
+  shape.bezierCurveTo(-0.3, 1.1, -0.3, 0.42, 0, 0);
+  return new THREE.ExtrudeGeometry(shape, { depth: 0.04, bevelEnabled: false });
 }
 
+// Each petal hinges at a fixed radius from the flower's central axis. The
+// hinge itself is what animates (hinge.rotation.x), swinging the blade
+// between "closed" (pointing straight up, clustered into a bud) and "open"
+// (swung out past horizontal, like a bloomed flower). The petal mesh keeps
+// a fixed local transform so the hinge rotation is a clean single-axis fold.
 function buildFlower(quality) {
   const flower = new THREE.Group();
 
@@ -26,17 +33,21 @@ function buildFlower(quality) {
   flower.add(stem);
 
   const center = new THREE.Mesh(
-    new THREE.SphereGeometry(0.34, 20, 20),
+    new THREE.SphereGeometry(0.28, 20, 20),
     new THREE.MeshStandardMaterial({ color: 0xf6c453, roughness: 0.5 })
   );
   flower.add(center);
 
   const petalGeometry = buildPetalGeometry();
-  const pivots = [];
+  const hinges = [];
   for (let i = 0; i < quality.petalCount; i++) {
     const angle = ((Math.PI * 2) / quality.petalCount) * i;
-    const pivot = new THREE.Object3D();
-    pivot.rotation.y = angle;
+    const radialPivot = new THREE.Object3D();
+    radialPivot.rotation.y = angle;
+
+    const hinge = new THREE.Object3D();
+    hinge.position.set(0, 0, PETAL_ATTACH_RADIUS);
+    hinge.rotation.x = CLOSED_TILT;
 
     const material = new THREE.MeshStandardMaterial({
       color: new THREE.Color(BASE_PETAL_COLOR),
@@ -44,15 +55,14 @@ function buildFlower(quality) {
       side: THREE.DoubleSide
     });
     const petal = new THREE.Mesh(petalGeometry, material);
-    petal.position.set(0, 0, 0.34);
-    petal.rotation.x = -Math.PI / 2;
 
-    pivot.add(petal);
-    flower.add(pivot);
-    pivots.push(pivot);
+    hinge.add(petal);
+    radialPivot.add(hinge);
+    flower.add(radialPivot);
+    hinges.push(hinge);
   }
 
-  return { flower, pivots };
+  return { flower, hinges };
 }
 
 function buildLights(scene) {
@@ -84,7 +94,12 @@ export function mount(root, win) {
   const camera = new THREE.PerspectiveCamera(42, win.innerWidth / win.innerHeight, 0.1, 100);
   buildLights(scene);
 
-  const { flower, pivots } = buildFlower(quality);
+  const { flower, hinges } = buildFlower(quality);
+  if (isMobile) {
+    flower.position.set(0, 0.3, 0);
+  } else {
+    flower.position.set(-1.6, 0.9, 0);
+  }
   scene.add(flower);
 
   const baseColor = new THREE.Color(BASE_PETAL_COLOR);
@@ -119,18 +134,18 @@ export function mount(root, win) {
 
     const choreo = computeChoreography(currentProgress());
 
-    for (const pivot of pivots) {
-      const petal = pivot.children[0];
-      petal.rotation.z = CLOSED_TILT + (OPEN_TILT - CLOSED_TILT) * choreo.bloom;
+    for (const hinge of hinges) {
+      hinge.rotation.x = CLOSED_TILT + (OPEN_TILT - CLOSED_TILT) * choreo.bloom;
+      const petal = hinge.children[0];
       petal.material.color.copy(baseColor).lerp(lateColor, 1 - choreo.saturation);
     }
 
     const dollyX = quality.allowDolly ? choreo.cameraOffsetX : 0;
-    const dollyY = quality.allowDolly ? choreo.cameraOffsetY : 0.6;
-    const distance = quality.allowDolly ? choreo.cameraDistance : 7.5;
+    const dollyY = quality.allowDolly ? choreo.cameraOffsetY : 0.4;
+    const distance = quality.allowDolly ? choreo.cameraDistance : 17;
 
-    camera.position.set(dollyX, dollyY + 1.4, distance);
-    camera.lookAt(0, 0.6, 0);
+    camera.position.set(dollyX, dollyY + 0.6, distance);
+    camera.lookAt(0, 0.1, 0);
 
     idleRotation += 0.0015 + choreo.bloom * 0.001;
     flower.rotation.y = idleRotation;
