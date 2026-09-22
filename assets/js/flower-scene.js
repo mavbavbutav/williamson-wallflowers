@@ -1,6 +1,6 @@
 import * as THREE from '../../moments/vendor/three.module.js';
 import { GLTFLoader } from '../../moments/vendor/jsm/loaders/GLTFLoader.js';
-import { computeChoreography, getQualityProfile } from './flower-choreography.js?v=20260922-bloom-3';
+import { computeChoreography, getQualityProfile } from './flower-choreography.js?v=20260922-bloom-6';
 
 const MOBILE_QUERY = '(max-width: 760px)';
 const BUD_MODEL_URL = new URL('../models/peony-bud.glb', import.meta.url).href;
@@ -219,9 +219,14 @@ export function mount(root, win) {
     positions.needsUpdate = true;
     particles.points.rotation.y = idleRotation * 0.4;
 
+    // Mobile has no room to dolly sideways into a "corner" the way desktop
+    // does, so it leans entirely on shrinking (via distance) and blurring/
+    // fading to stay out of the way as content scrolls past. The 1.7x
+    // multiplier compensates for the narrower horizontal FOV of a portrait
+    // viewport at the same distance.
     const dollyX = quality.allowDolly ? choreo.cameraOffsetX : 0;
     const dollyY = quality.allowDolly ? choreo.cameraOffsetY : 0.3;
-    const distance = quality.allowDolly ? choreo.cameraDistance : 15;
+    const distance = quality.allowDolly ? choreo.cameraDistance : choreo.cameraDistance * 1.7;
 
     camera.position.set(dollyX, dollyY + 0.5, distance);
     camera.lookAt(0, 0.3, 0);
@@ -229,7 +234,7 @@ export function mount(root, win) {
     idleRotation += 0.0035 + choreo.bloom * 0.0015;
 
     canvas.style.filter = choreo.blur > 0 ? `blur(${(choreo.blur * 6).toFixed(2)}px)` : '';
-    canvas.style.opacity = String(1 - choreo.blur * 0.15);
+    canvas.style.opacity = String(1 - choreo.blur * 0.45);
 
     renderer.render(scene, camera);
   }

@@ -27,21 +27,31 @@ test('computeChoreography at progress 0 returns the closed-bud keyframe', () => 
 test('computeChoreography at progress 1 returns the fully-bloomed keyframe', () => {
   const result = computeChoreography(1);
   closeTo(result.bloom, 1.0, 'bloom');
-  closeTo(result.cameraDistance, 15.5, 'cameraDistance');
-  closeTo(result.cameraOffsetX, 4.6, 'cameraOffsetX');
-  closeTo(result.cameraOffsetY, 2.3, 'cameraOffsetY');
-  closeTo(result.blur, 0.65, 'blur');
+  closeTo(result.cameraDistance, 22.0, 'cameraDistance');
+  closeTo(result.cameraOffsetX, 10.2, 'cameraOffsetX');
+  closeTo(result.cameraOffsetY, 4.0, 'cameraOffsetY');
+  closeTo(result.blur, 0.72, 'blur');
   closeTo(result.saturation, 0.65, 'saturation');
 });
 
+test('computeChoreography finishes most of the bloom before the card grid (0.15)', () => {
+  const result = computeChoreography(0.035);
+  closeTo(result.bloom, 0.45, 'bloom');
+  closeTo(result.cameraDistance, 9.75, 'cameraDistance');
+  closeTo(result.cameraOffsetX, 0.5, 'cameraOffsetX');
+  closeTo(result.cameraOffsetY, 0.25, 'cameraOffsetY');
+  closeTo(result.blur, 0.05, 'blur');
+  closeTo(result.saturation, 0.975, 'saturation');
+});
+
 test('computeChoreography interpolates linearly between keyframes', () => {
-  const result = computeChoreography(0.5);
-  closeTo(result.bloom, 0.8, 'bloom');
-  closeTo(result.cameraDistance, 11.25, 'cameraDistance');
-  closeTo(result.cameraOffsetX, 1.75, 'cameraOffsetX');
-  closeTo(result.cameraOffsetY, 0.9, 'cameraOffsetY');
-  closeTo(result.blur, 0.175, 'blur');
-  closeTo(result.saturation, 0.925, 'saturation');
+  const result = computeChoreography(0.39);
+  closeTo(result.bloom, 1.0, 'bloom');
+  closeTo(result.cameraDistance, 19.5, 'cameraDistance');
+  closeTo(result.cameraOffsetX, 9.65, 'cameraOffsetX');
+  closeTo(result.cameraOffsetY, 3.7, 'cameraOffsetY');
+  closeTo(result.blur, 0.575, 'blur');
+  closeTo(result.saturation, 0.775, 'saturation');
 });
 
 test('computeChoreography clamps progress below 0 and above 1', () => {
