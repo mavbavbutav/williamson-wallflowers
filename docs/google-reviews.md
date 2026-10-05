@@ -14,11 +14,21 @@ Only the public display fields are returned. OAuth secrets stay in Worker secret
 
 ## Activation (required before claiming automatic updates are live)
 
+### Temporary public-page refresh (October 5)
+
+The owner requested public-page checks until Business Profile authorization is available. `index.html` now reads `assets/reviews-public.json`, a verified public snapshot containing short exact excerpts, author names, individual ratings, Google's overall rating/count and the actual check time. It is explicitly labeled as excerpts and dated, not described as a live API feed. Initial public inspection found all five reviews; sorting required sign-in, so the snapshot preserves the observed page order and does not invent exact review dates or individual permalinks.
+
+A daily Codex heartbeat checks the public Google reviews at 9 a.m. America/Chicago, subject to the host being available. It must verify the business identity, full visible review list and rating/count before updating this file. Use only supported public browser access: no login, CAPTCHA bypass or undocumented Google endpoints. Do not filter by star rating. Keep each quoted excerpt at most 25 words per reviewer, verbatim and representative; never replace text with a paraphrase inside quotation marks. Preserve an existing excerpt if still valid; update edited or deleted reviews only with a complete verified list. If more than 50 reviews become available, stop for a source upgrade rather than silently truncating while claiming completeness.
+
+If a check fails or is incomplete, do not advance `fetchedAt` and do not change the deployed snapshot. The website rejects snapshots older than seven days and falls back to the original attributed Moments excerpts without the overall rating/count. Daily success updates the actual check date even when review contents are unchanged. Validate the JSON with `node scripts/validate-public-reviews.mjs`, commit only the snapshot change, push to main without force, and verify the deployed JSON before recording success. Keep run evidence outside the public site. No credentials or Google API content are committed. Replace this temporary source with the official API once authorized; then retire its heartbeat.
+
+### Official API activation
+
 1. Obtain Business Profile API access for the business-owned Google Cloud project and authorize a Google account that manages the verified Williamson Wallflowers location, using scope `https://www.googleapis.com/auth/business.manage` and offline access. A normal Google sign-in or a Places API key is not sufficient. Production OAuth configuration must support a durable refresh token; testing-mode tokens may expire.
 2. From `reviews-worker`, securely set Wrangler secrets `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`. Do not paste credentials into the website, Git, or chat. Set `GOOGLE_LOCATION_NAME` to the verified `accounts/ACCOUNT_ID/locations/LOCATION_ID` in Wrangler vars. Confirm the location is Williamson Wallflowers, not another business on the account.
 3. Authenticate Wrangler to the correct Cloudflare account, run `npm install` and `npm run deploy`. This is a separate Worker and does not replace the existing inquiry/Moments service. No additional storage resource or third-party widget subscription is required.
 4. Verify `GET /reviews` returns actual Williamson Wallflowers authors/text, a current `fetchedAt`, and Google's rating/count. Verify allowed website origins receive CORS headers.
-5. Set `data-reviews-endpoint` on `#reviews` in `index.html` to the verified deployed HTTPS `/reviews` URL. It is deliberately empty until the source is connected; the current carousel uses the two existing Google excerpts.
+5. Set `data-reviews-endpoint` on `#reviews` in `index.html` to the verified deployed HTTPS `/reviews` URL, replacing the temporary public snapshot. Disable the temporary refresh heartbeat after verifying the official source.
 6. Test on the site, including a fresh API response and an unavailable source. Check Worker logs after authorization changes. Do not advertise the integration as connected until a real response has been verified.
 
 Validation: `node --test reviews-worker/tests/*.test.js`, `node --check assets/reviews.js`, desktop/mobile browser checks. For an outage, Google permissions changes or invalid credentials, existing content remains available; repair the owner connection and verify a new response rather than fabricating fresh reviews.
