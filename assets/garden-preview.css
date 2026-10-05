@@ -83,3 +83,12 @@
  .garden-detail-photo img { height: 320px; } .garden-price-row h3 { font-size: 28px; }
  .garden-quote { padding: 24px 18px; margin-top: 30px; } .garden-button { font-size: 13px; }
 }
+
+/* Preserve the original floral identity, without cropping or recoloring it. */
+.garden-preview .brand { flex-shrink: 0; }
+.garden-preview .garden-brand-logo { display: block; width: 156px; height: auto; object-fit: contain; }
+.garden-preview .nav { min-height: 176px; }
+@media (max-width: 760px) {
+  .garden-preview .garden-brand-logo { width: 112px; }
+  .garden-preview .nav { min-height: 128px; }
+}
