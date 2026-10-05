@@ -1,0 +1,85 @@
+.garden-preview { --bg: #fbf8f2; --muted: #645f55; --accent: #52664b; background: #fbf8f2; color: #2e392c; }
+.preview-note { padding: 9px 20px; text-align: center; background: #e6eada; color: #3e5139; font-size: 12px; letter-spacing: .03em; }
+.preview-note a { margin-left: 16px; text-decoration: underline; }
+.garden-preview .site-header { background: #fbf8f2f5; border-color: #dfdfd0; }
+.garden-preview .nav { min-height: 95px; }
+.garden-wordmark { display: block; font-family: 'Cormorant Garamond',serif; font-size: 25px; font-weight: 600; line-height: 1; letter-spacing: -.03em; }
+.garden-wordmark em { font-weight: 400; }
+.garden-preview .brand-affiliation-sub { font-size: 9px; letter-spacing: .2em; margin-top: 8px; color: #65745c; }
+.garden-preview .nav-cta { background: #52664b; border-color: #52664b; color: white; padding: 12px 20px; border-radius: 6px; }
+.garden-preview .eyebrow { color: #617157; font-size: 11px; letter-spacing: .17em; }
+.garden-hero { padding-top: 42px; }
+.garden-hero-grid { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 70px; padding-bottom: 55px; }
+.garden-hero h1 { font: 500 clamp(52px,6.3vw,88px)/.98 'Cormorant Garamond',serif; letter-spacing: -.045em; margin: 25px 0; }
+.garden-hero h1 em { color: #697d5e; font-weight: 400; }
+.garden-hero-copy > p { max-width: 40ch; font-size: 17px; line-height: 1.75; color: #645f55; }
+.garden-hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; margin-top: 28px; }
+.garden-button { display: inline-flex; align-items: center; justify-content: space-between; gap: 26px; padding: 17px 24px; min-height: 48px; border: 1px solid #52664b; border-radius: 6px; background: #52664b; color: #fff; font: 500 14px 'Manrope',sans-serif; text-decoration: none; cursor: pointer; }
+.garden-button:hover { background: #3e5139; color: white; }
+.garden-secondary { font-size: 13px; text-decoration: underline; text-underline-offset: 6px; }
+.garden-signoff { display: flex; gap: 14px; align-items: center; margin-top: 28px; font: italic 18px/1.3 'Cormorant Garamond',serif; color: #6d735d; }
+.garden-signoff img { width: 64px; height: auto; }
+.garden-hero-photo { margin: 0; position: relative; padding: 0 0 18px; }
+.garden-hero-photo > img { width: 100%; height: 555px; object-fit: cover; object-position: center 50%; border-radius: 180px 180px 8px 8px; }
+.garden-hero-photo figcaption { position: absolute; bottom: 0; left: -26px; background: #eedfce; border: 5px solid #fbf8f2; padding: 17px 25px; transform: rotate(-3deg); font-size: 11px; color: #5b4c42; }
+.garden-hero-photo figcaption span { display: block; font: italic 30px 'Cormorant Garamond',serif; }
+.garden-occasion-strip { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 25px; border-block: 1px solid #d8dfcd; background: #eaf0e3; padding: 17px; color: #52664b; font-size: 12px; }
+.garden-preview .reviews-feature { background: #fbf8f2; border: 0; padding: 45px 0; }
+.garden-preview .reviews-layout { grid-template-columns: .85fr 1.15fr; gap: 60px; }
+.garden-preview .reviews-intro h2 { font-size: 36px; }
+.garden-preview #reviews-description { display: none; }
+.garden-preview .reviews-carousel { box-shadow: none; background: #f1eee6; border: 0; border-radius: 8px; padding: 24px 30px; }
+.garden-preview .reviews-stage .review-card blockquote { font-size: 26px; }
+.garden-preview .reviews-controls { margin-top: 12px; padding-top: 8px; }
+.garden-preview .reviews-intro .text-button { font-size: 11px; }
+.garden-rentals { background: #eef1e7; border-block: 1px solid #dce1d2; }
+.garden-rentals-intro { display: grid; grid-template-columns: 1.3fr 1fr; align-items: end; gap: 70px; margin-bottom: 35px; }
+.garden-rentals h2 { font: 500 clamp(38px,4vw,57px)/1.08 'Cormorant Garamond',serif; letter-spacing: -.03em; margin: 13px 0 0; }
+.garden-rentals h2 em { color: #637658; font-weight: 400; }
+.garden-rentals-intro > p { color: #646b5d; font-size: 15px; line-height: 1.8; }
+.garden-rental-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; }
+.garden-detail-photo { margin: 0; }
+.garden-detail-photo img { width: 100%; height: 470px; object-fit: cover; object-position: center 68%; border-radius: 8px; }
+.garden-detail-photo figcaption { font-size: 11px; line-height: 1.5; margin-top: 10px; color: #67705e; }
+.garden-price-row { display: grid; grid-template-columns: 1fr auto; gap: 20px; padding: 22px 0; border-bottom: 1px solid #cbd4c1; }
+.garden-price-row:first-child { padding-top: 0; }
+.garden-price-row h3 { font: 500 30px 'Cormorant Garamond',serif; margin: 8px 0; }
+.garden-price-row p { font-size: 13px; color: #646b5d; max-width: 30ch; margin: 0; }
+.garden-price { font: 500 44px 'Cormorant Garamond',serif; text-align: right; }
+.garden-price small { display: block; font: 11px 'Manrope',sans-serif; color: #646b5d; }
+.garden-delivery { margin: 24px 0; font-size: 13px; line-height: 1.8; }
+.garden-delivery p { color: #646b5d; margin: 6px 0; }
+.garden-fine { font-size: 11px; color: #646b5d; line-height: 1.7; }
+.garden-quote { margin-top: 50px; padding: 32px; background: #fbf8f2; border-radius: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 55px; scroll-margin-top: 110px; }
+.garden-quote h3 { font: 500 36px 'Cormorant Garamond',serif; margin: 12px 0; }
+.garden-quote > div > p { font-size: 13px; }
+.garden-quote-fields { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
+.garden-quote label { font-size: 11px; display: grid; gap: 8px; }
+.garden-quote input { min-width: 0; width: 100%; padding: 10px; border-radius: 5px; background: white; }
+.garden-estimate { font-size: 15px; margin: 20px 0 8px; }
+.garden-estimate strong { font-size: 22px; }
+#previewQuoteResult { font-size: 13px; }
+.garden-preview .card { border-radius: 8px; box-shadow: none; }
+.garden-preview .card-media { aspect-ratio: 4/5; }
+.garden-preview .card-media img { height: 100%; object-fit: cover; }
+.garden-preview .section-intro h2 { color: #2e392c; }
+.garden-preview #tables-chairs { scroll-margin-top: 95px; }
+@media(max-width:980px) { .garden-hero-grid { gap: 35px; } .garden-hero-photo > img { height: 500px; } .garden-rental-layout { gap: 30px; } }
+@media(max-width:760px) {
+ .preview-note span { display: none; } .garden-preview .nav { min-height: 76px; }
+ .garden-wordmark { font-size: 23px; } .garden-preview .container { width: calc(100% - 36px); }
+ .garden-hero { padding-top: 27px; } .garden-hero-grid { grid-template-columns: 1fr; gap: 25px; padding-bottom: 28px; }
+ .garden-hero h1 { font-size: 60px; margin: 20px 0; } .garden-hero h1 br:first-child { display: none; }
+ .garden-hero-copy > p { font-size: 15px; } .garden-hero-actions { gap: 20px; margin-top: 20px; }
+ .garden-signoff { display: none; } .garden-hero-photo { margin: 8px 5px 0 15px; }
+ .garden-hero-photo > img { height: 340px; border-radius: 140px 140px 7px 7px; object-position: center 57%; }
+ .garden-hero-photo figcaption { left: -15px; padding: 10px 17px; } .garden-hero-photo figcaption span { font-size: 25px; }
+ .garden-occasion-strip { gap: 12px; font-size: 10px; padding: 13px 12px; } .garden-occasion-strip span:last-child, .garden-occasion-strip span:nth-last-child(2) { display: none; }
+ .garden-preview .reviews-layout { grid-template-columns: 1fr; gap: 20px; } .garden-preview .reviews-intro h2 { font-size: 30px; margin: 8px 0; }
+ .garden-preview .reviews-intro h2 br { display: none; } .garden-preview .reviews-intro .text-button { margin-top: 5px; }
+ .garden-preview .reviews-carousel { padding: 22px; } .garden-preview .reviews-stage .review-card blockquote { font-size: 25px; }
+ .garden-rentals-intro, .garden-rental-layout, .garden-quote { grid-template-columns: 1fr; gap: 24px; }
+ .garden-rentals-intro { margin-bottom: 25px; } .garden-rentals h2 { font-size: 40px; }
+ .garden-detail-photo img { height: 320px; } .garden-price-row h3 { font-size: 28px; }
+ .garden-quote { padding: 24px 18px; margin-top: 30px; } .garden-button { font-size: 13px; }
+}
