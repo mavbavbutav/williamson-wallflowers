@@ -1,0 +1,9 @@
+name = "williamson-wallflowers-reviews"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[vars]
+ALLOWED_ORIGINS = "https://williamsonwallflowers.com,https://www.williamsonwallflowers.com,http://localhost:8000,http://127.0.0.1:8000"
+# After authorization, add GOOGLE_LOCATION_NAME = "accounts/ACCOUNT_ID/locations/LOCATION_ID".
+# Keep GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REFRESH_TOKEN in Wrangler secrets.

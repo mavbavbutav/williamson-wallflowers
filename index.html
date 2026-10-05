@@ -1289,6 +1289,8 @@
       }
     }
   </style>
+  <link rel="stylesheet" href="assets/reviews.css" />
+  <script src="assets/reviews.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to content</a>
@@ -1318,14 +1320,14 @@
   </header>
 
   <main id="main-content">
-    <section class="section" id="collection">
+    <section class="section brand-introduction" id="top">
       <div class="container">
         <div class="section-intro collection-intro reveal">
           <div>
             <h1 class="section-heading hero-logo-heading">
               <img src="assets/williamson-wallflowers-logo.png" alt="Williamson Wallflowers" width="1664" height="1757" fetchpriority="high" />
             </h1>
-            <span class="eyebrow">Our collection</span>
+            <span class="eyebrow">Made for your celebration</span>
           </div>
           <div class="collection-copy">
           <p class="muted">
@@ -1336,6 +1338,55 @@
           </div>
         </div>
 
+      </div>
+    </section>
+
+    <section class="reviews-feature" id="reviews" aria-labelledby="reviews-heading" data-reviews-endpoint="">
+      <div class="container reviews-layout">
+        <div class="reviews-intro">
+          <span class="eyebrow">Kind words on Google</span>
+          <h2 id="reviews-heading">Their celebrations.<br> In their words.</h2>
+          <p class="muted" id="reviews-description">A little love from our customers. Explore these Google review excerpts from Wallflower Moments celebrations.</p>
+          <p class="reviews-summary" id="reviews-summary" hidden></p>
+          <a class="text-button" href="https://www.google.com/maps/place/Williamson+Wallflowers/@36.0492214,-86.6899919,10z/data=!3m1!4b1!4m6!3m5!1s0x2311120effec6b11:0x7688aa111b7e9329!8m2!3d36.0492214!4d-86.6899919!16s%2Fg%2F11zbk4qq_4?entry=ttu" target="_blank" rel="noopener noreferrer">See our reviews on Google <span aria-hidden="true">↗</span></a>
+        </div>
+        <div class="reviews-carousel" role="region" aria-roledescription="carousel" aria-label="Customer Google reviews">
+          <div class="reviews-stage" id="reviews-stage">
+<figure class="review-card">
+            <div class="review-stars" role="img" aria-label="5 out of 5 stars">★★★★★</div>
+            <blockquote data-review-quote cite="https://maps.app.goo.gl/GfQr2R2BAqy7afrA8">“I’m talking above and beyond friendly and accommodating.”</blockquote>
+            <figcaption>
+              <strong>Janna Brackin</strong>
+              <span class="muted">Wallflower Moments · Birthday celebration</span>
+            </figcaption>
+            <a class="inline-link" href="https://maps.app.goo.gl/GfQr2R2BAqy7afrA8" target="_blank" rel="noopener noreferrer" aria-label="Read Janna Brackin’s full review on Google (opens in a new tab)">Read full review on Google ↗</a>
+          </figure>
+<figure class="review-card">
+            <div class="review-stars" role="img" aria-label="5 out of 5 stars">★★★★★</div>
+            <blockquote data-review-quote cite="https://maps.app.goo.gl/vnAFteCDDwP4PED3A">“Such a great way for loved ones to connect and share in celebration!”</blockquote>
+            <figcaption>
+              <strong>Alexis Youdelman</strong>
+              <span class="muted">Wallflower Moments · Promotion celebration</span>
+            </figcaption>
+            <a class="inline-link" href="https://maps.app.goo.gl/vnAFteCDDwP4PED3A" target="_blank" rel="noopener noreferrer" aria-label="Read Alexis Youdelman’s full review on Google (opens in a new tab)">Read full review on Google ↗</a>
+          </figure>
+          </div>
+          <div class="reviews-controls" hidden>
+            <button type="button" data-review-action="toggle" aria-label="Pause automatic review rotation">Pause</button>
+            <span class="reviews-position" aria-live="off">1 / 2</span>
+            <div class="reviews-arrows">
+              <button type="button" data-review-action="previous" aria-label="Previous review">←</button>
+              <button type="button" data-review-action="next" aria-label="Next review">→</button>
+            </div>
+          </div>
+          <span class="reviews-announcement" role="status" aria-live="polite"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="collection" aria-labelledby="collection-heading">
+      <div class="container">
+        <div class="section-intro"><div><span class="eyebrow">Our collection</span><h2 id="collection-heading">Find your backdrop.</h2></div></div>
         <div class="cards">
           <article class="card reveal">
             <div class="card-media">
@@ -1517,42 +1568,6 @@
               </details>
             </div>
           </article>
-        </div>
-      </div>
-    </section>
-
-    <section class="section section-soft" id="reviews" aria-labelledby="reviews-heading">
-      <div class="container">
-        <div class="section-intro reveal">
-          <div>
-            <span class="eyebrow">Kind words on Google</span>
-            <h2 id="reviews-heading">Celebrations worth sharing.</h2>
-          </div>
-          <p class="muted">Real stories from our Wallflower Moments customers, bringing loved ones into the celebration wherever they are. Here are a few words from their five-star Google reviews.</p>
-        </div>
-        <div class="review-grid">
-          <figure class="detail-card review-card reveal">
-            <div class="review-stars" role="img" aria-label="5 out of 5 stars">★★★★★</div>
-            <blockquote cite="https://maps.app.goo.gl/GfQr2R2BAqy7afrA8">“I’m talking above and beyond friendly and accommodating.”</blockquote>
-            <figcaption>
-              <strong>Janna Brackin</strong>
-              <span class="muted">Wallflower Moments · Birthday celebration</span>
-            </figcaption>
-            <a class="inline-link" href="https://maps.app.goo.gl/GfQr2R2BAqy7afrA8" target="_blank" rel="noopener noreferrer" aria-label="Read Janna Brackin’s full review on Google (opens in a new tab)">Read full review on Google ↗</a>
-          </figure>
-          <figure class="detail-card review-card reveal">
-            <div class="review-stars" role="img" aria-label="5 out of 5 stars">★★★★★</div>
-            <blockquote cite="https://maps.app.goo.gl/vnAFteCDDwP4PED3A">“Such a great way for loved ones to connect and share in celebration!”</blockquote>
-            <figcaption>
-              <strong>Alexis Youdelman</strong>
-              <span class="muted">Wallflower Moments · Promotion celebration</span>
-            </figcaption>
-            <a class="inline-link" href="https://maps.app.goo.gl/vnAFteCDDwP4PED3A" target="_blank" rel="noopener noreferrer" aria-label="Read Alexis Youdelman’s full review on Google (opens in a new tab)">Read full review on Google ↗</a>
-          </figure>
-        </div>
-        <div class="review-actions reveal">
-          <a class="text-button" href="https://www.google.com/maps/place/Williamson+Wallflowers/@36.0492214,-86.6899919,10z/data=!3m1!4b1!4m6!3m5!1s0x2311120effec6b11:0x7688aa111b7e9329!8m2!3d36.0492214!4d-86.6899919!16s%2Fg%2F11zbk4qq_4?entry=ttu" target="_blank" rel="noopener noreferrer">Visit us on Google ↗</a>
-          <a class="text-button" href="#contact" data-moments-inquiry>Bring Moments to your celebration</a>
         </div>
       </div>
     </section>
