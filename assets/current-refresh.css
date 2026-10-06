@@ -1,0 +1,12 @@
+/* Targeted additions to the existing design; original homepage remains intact. */
+.refresh-notice{background:#f4e4ea;text-align:center;padding:10px 16px;font-size:12px;color:#634552}.refresh-notice a{text-decoration:underline}
+.current-refresh .collection-copy h2{font-family:'Cormorant Garamond',serif;font-size:clamp(34px,4vw,54px);font-weight:500;line-height:1.08;margin:16px 0 24px}
+.refresh-actions{display:flex;flex-wrap:wrap;gap:12px;margin:28px 0}
+.refresh-button,.refresh-outline{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:13px 20px;border-radius:999px;background:#934a65;color:white;font-size:13px;font-weight:600;border:1px solid #934a65}
+.refresh-outline{background:transparent;color:#7a3d55}.refresh-button:hover{background:#76374f}
+.current-refresh .reviews-feature{padding:40px 0}.current-refresh .reviews-intro h2{font-size:36px}.current-refresh .reviews-carousel{padding:24px}.current-refresh .review-card blockquote{font-size:26px}
+.refresh-rentals{background:linear-gradient(120deg,#f9edf1,#f8f5f0);border-block:1px solid #ead8df}
+.refresh-rental-grid{display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:center}.refresh-rental-grid figure{margin:0}.refresh-rental-grid img{width:100%;height:540px;object-fit:cover;border-radius:28px}.refresh-rental-grid figcaption,.refresh-small{font-size:12px;color:#6a6159;line-height:1.6;margin-top:12px}
+.refresh-rental-grid h2{font:500 clamp(40px,4.5vw,62px)/1.05 'Cormorant Garamond',serif;margin:16px 0 24px}.refresh-rate{display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:1px solid #e3ccd5;padding:14px 0}.refresh-rate h3{font-size:18px;margin:0}.refresh-rate p{font-size:12px;margin:0;white-space:nowrap}.refresh-rate strong{font-size:30px;color:#934a65;font-family:'Cormorant Garamond',serif}
+#tables-chairs{scroll-margin-top:110px}
+@media(max-width:760px){.refresh-rental-grid{grid-template-columns:1fr;gap:28px}.refresh-rental-grid img{height:350px}.refresh-actions{flex-direction:column}.refresh-rate h3{font-size:16px}.current-refresh .reviews-intro h2{font-size:30px}.current-refresh .reviews-feature{padding:30px 0}}
