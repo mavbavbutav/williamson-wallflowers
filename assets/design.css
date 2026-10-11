@@ -62,3 +62,82 @@ body{background:var(--paper);font-size:14px;color:var(--text)}h1,h2,h3,blockquot
 
 .testimonial-loop{scroll-margin-top:88px}
 @media(max-width:760px){.testimonial-loop{scroll-margin-top:73px}}
+
+/* Keep the editorial hierarchy while making supporting copy readable. */
+body { font-size: 17px; }
+.eyebrow,
+.hero-inner > .eyebrow,
+.hero-copy .eyebrow {
+  font-size: 14px;
+  line-height: 1.6;
+  letter-spacing: .12em;
+}
+.nav-links a { font-size: 15px; }
+.menu-toggle .menu-text { font-size: 14px; }
+.new-hero .hero-copy p { font-size: 17px; }
+.button-primary,
+.hero-secondary,
+.text-button,
+.inline-link,
+.wall-book-link,
+.review-loop-toggle,
+.form-panel button[type="submit"],
+#bookingContinue { font-size: 15px; line-height: 1.6; }
+.hero-actions { flex-wrap: wrap; }
+.new-hero .hero-footnote { font-size: 14px; line-height: 1.6; }
+.hero-scroll { font-size: 14px; letter-spacing: .12em; }
+.motion-toggle { font-size: 14px; }
+.celebration-ribbon { font-size: 14px; flex-wrap: wrap; gap: 20px; }
+.card-body p,
+.event-essentials p,
+.price-card > p,
+.detail-list,
+.compact-faq,
+.moments-memory p { font-size: 16px; line-height: 1.7; }
+.tag,
+.event-essentials .tag { font-size: 14px; line-height: 1.5; padding: 5px 8px; }
+.card-footer-note { font-size: 14px; line-height: 1.7; }
+.wall-price { font-size: 14px !important; }
+.wall-price strong { font-size: 19px; }
+.rental-price span,
+.delivery-note strong,
+.delivery-note p,
+.booking-price { font-size: 15px; line-height: 1.7; }
+.price-card .rental-price { font-size: 3.7rem; }
+.scroll-stars,
+.scroll-review-author,
+.scroll-review a { font-size: 15px; }
+label,
+.contact-item small,
+.reviews-checked,
+.reviews-position,
+.reviews-stage .review-card figcaption span,
+.reviews-stage .inline-link,
+.reviews-controls button[data-review-action="toggle"] { font-size: 14px; }
+.contact-item small { letter-spacing: .08em; }
+input, select, textarea { font-size: 16px; }
+.calendar-weekdays { font-size: 14px; letter-spacing: .02em; }
+.calendar-day.is-booked::after,
+.calendar-day.is-unavailable::after { font-size: 12px; letter-spacing: 0; }
+.contact-item > div { min-width: 0; overflow-wrap: anywhere; }
+
+@media (max-width: 760px) {
+  body { font-size: 16px; }
+  .nav-links { gap: 5px; }
+  .nav-links a { font-size: 16px; }
+  .hero-inner > .eyebrow { max-width: 32ch; }
+  .new-hero .hero-copy p { font-size: 16px; }
+  .hero-footnote { gap: 8px; }
+  .hero-scroll { left: 20px; right: 20px; text-align: center; font-size: 14px; }
+  .celebration-ribbon { gap: 10px; }
+  .card h3 { font-size: 1.65rem; }
+  .calendar-panel { padding: 16px; }
+  .calendar-grid, .calendar-weekdays { gap: 3px; }
+  .calendar-day { min-height: 64px; }
+  .price-card .rental-price { font-size: 3.2rem; }
+}
+
+@media (max-width: 600px) {
+  .cards { grid-template-columns: 1fr; gap: 38px; }
+  .hero-footnote { flex-wrap: wrap; }
+}
