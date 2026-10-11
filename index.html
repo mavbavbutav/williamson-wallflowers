@@ -1717,8 +1717,8 @@
               </div>
 
               <div>
-                <label for="details" class="muted">Tell us about your event</label>
-                <textarea id="details" name="details" placeholder="Event style, guest count, 6ft table quantity, folding chair count, or anything else you'd like us to know"></textarea>
+                <label for="eventDetails" class="muted">Tell us about your event</label>
+                <textarea id="eventDetails" name="details" placeholder="Event style, guest count, 6ft table quantity, folding chair count, or anything else you'd like us to know"></textarea>
               </div>
 
               <label class="addon-checkbox" for="askTimeCapsule">
@@ -1745,7 +1745,7 @@
         <h2 id="confirmationTitle">Your event inquiry is in bloom.</h2>
         <p id="confirmationMessage">Thanks for reaching out. Jami received your details, and you&rsquo;ll receive a confirmation email at the address you provided.</p>
         <div class="confirmation-actions">
-          <a class="text-button" href="#gallery" data-confirmation-close>View the walls</a>
+          <a class="text-button" href="#collection" data-confirmation-close>View the walls</a>
           <button class="inline-link" type="button" data-confirmation-close>Close</button>
         </div>
       </div>
@@ -1784,6 +1784,7 @@
     const inquiryStatus = document.getElementById("inquiryStatus");
     const inquiryConfirmation = document.getElementById("inquiryConfirmation");
     const confirmationCloseControls = document.querySelectorAll("[data-confirmation-close]");
+    const confirmationBackground = document.querySelectorAll(".site-header, main > section, main > .celebration-ribbon, .footer, .skip-link");
     let lastFocusedElement = null;
 
     const bookedDates = [
@@ -1793,11 +1794,6 @@
         label: "The Secret Garden"
       }
     ];
-    const weekendBookedWalls = new Set([
-      "The Timeless Bloom",
-      "The Love Language",
-      "Wild Bloom"
-    ]);
 
     const monthNames = [
       "January", "February", "March", "April", "May", "June",
@@ -1820,13 +1816,27 @@
     }
 
     function isBooked(wall, date) {
-      if (weekendBookedWalls.has(wall) && isWeekend(date)) return true;
       return bookedDates.some((booking) => booking.wall === wall && booking.date === date);
     }
 
-    function isWeekend(date) {
-      const day = parseDateKey(date).getDay();
-      return day === 0 || day === 5 || day === 6;
+    function todayKey() {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit"
+      }).formatToParts(new Date());
+      const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+      return `${values.year}-${values.month}-${values.day}`;
+    }
+
+    function isPastDate(date) {
+      return Boolean(date && date < todayKey());
+    }
+
+    function dateProblem(wall, date) {
+      if (isPastDate(date)) return "Please choose today or a future event date.";
+      if (date && wall && isBooked(wall, date)) {
+        return `${wall} is already booked on ${formatDate(date)}. Please choose another date or flower wall.`;
+      }
+      return "";
     }
 
     function formatDate(value) {
@@ -1850,6 +1860,12 @@
         return;
       }
 
+      if (isPastDate(selectedDate)) {
+        availabilityNote.innerHTML = "<strong>This date has already passed.</strong> Please choose today or a future event date.";
+        bookingContinue.disabled = true;
+        return;
+      }
+
       if (booked) {
         availabilityNote.innerHTML = `<strong>${wall} is already booked.</strong> ${formatDate(selectedDate)} is unavailable for this wall. Please choose another date or backdrop.`;
         bookingContinue.disabled = true;
@@ -1861,6 +1877,8 @@
     }
 
     function renderCalendar() {
+      bookingDate.min = todayKey();
+      formDate.min = bookingDate.min;
       const year = visibleMonth.getFullYear();
       const month = visibleMonth.getMonth();
       const firstDay = new Date(year, month, 1).getDay();
@@ -1880,14 +1898,18 @@
         const key = dateKey(year, month, day);
         const button = document.createElement("button");
         const booked = isBooked(wall, key);
+        const past = isPastDate(key);
 
         button.type = "button";
         button.className = "calendar-day";
         button.textContent = day;
-        button.setAttribute("aria-label", `${formatDate(key)}${booked ? " booked" : " available"}`);
+        button.setAttribute("aria-label", `${formatDate(key)}${past ? " past date" : booked ? " booked" : " available"}`);
 
         if (selectedDate === key) button.classList.add("is-selected");
-        if (booked) {
+        if (past) {
+          button.classList.add("is-unavailable", "is-past");
+          button.disabled = true;
+        } else if (booked) {
           button.classList.add("is-booked");
           button.disabled = true;
         } else {
@@ -1981,7 +2003,7 @@
     });
 
     bookingContinue.addEventListener("click", () => {
-      if (!selectedDate || isBooked(bookingWall.value, selectedDate)) return;
+      if (!selectedDate || dateProblem(bookingWall.value, selectedDate)) return;
       formDate.value = selectedDate;
       formWall.value = bookingWall.value;
       document.getElementById("contact").scrollIntoView({ behavior: "smooth" });
@@ -2025,8 +2047,9 @@
       const details = formData.get("details") || "";
       const askTimeCapsule = formData.get("ask-time-capsule") ? "Yes" : "No";
 
-      if (eventDate && preferredWall && isBooked(preferredWall, eventDate)) {
-        alert(`${preferredWall} is already booked on ${formatDate(eventDate)}. Please choose another date or flower wall.`);
+      const problem = dateProblem(preferredWall, eventDate);
+      if (problem) {
+        inquiryStatus.textContent = problem;
         bookingWall.value = preferredWall;
         bookingDate.value = eventDate;
         selectedDate = eventDate;
@@ -2064,6 +2087,7 @@
 
       lastFocusedElement = document.activeElement;
       inquiryConfirmation.hidden = false;
+      confirmationBackground.forEach((element) => { element.inert = true; });
       document.body.classList.add("modal-open");
       const closeButton = inquiryConfirmation.querySelector(".confirmation-close");
 
@@ -2078,6 +2102,7 @@
       }
 
       inquiryConfirmation.hidden = true;
+      confirmationBackground.forEach((element) => { element.inert = false; });
       document.body.classList.remove("modal-open");
 
       if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
@@ -2093,6 +2118,17 @@
       if (event.key === "Escape") {
         closeMenu();
         closeConfirmationModal();
+      } else if (event.key === "Tab" && !inquiryConfirmation.hidden) {
+        const controls = Array.from(inquiryConfirmation.querySelectorAll("a[href], button:not([disabled])"));
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
       }
     });
 
@@ -2103,6 +2139,20 @@
       const fallbackEmail = inquiryForm.dataset.emailFallback || "jamicarswell@gmail.com";
 
       if (formData.get("_honey")) {
+        return;
+      }
+
+      const eventDate = formData.get("event-date") || "";
+      const preferredWall = formData.get("preferred-wall") || "";
+      const problem = dateProblem(preferredWall, eventDate);
+      if (problem) {
+        inquiryStatus.textContent = problem;
+        if (preferredWall) bookingWall.value = preferredWall;
+        selectedDate = eventDate;
+        bookingDate.value = eventDate;
+        visibleMonth = parseDateKey(eventDate);
+        renderCalendar();
+        formDate.focus();
         return;
       }
 
