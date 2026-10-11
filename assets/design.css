@@ -107,6 +107,7 @@ body { font-size: 17px; }
 .scroll-stars,
 .scroll-review-author,
 .scroll-review a { font-size: 15px; }
+.scroll-review-source { font-size: 14px; color: #4d725e; line-height: 1.6; }
 label,
 .contact-item small,
 .reviews-checked,
