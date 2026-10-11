@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { validSnapshot } from '../assets/review-loop-feed.mjs';
+const sample=JSON.parse(readFileSync(new URL('../assets/reviews-public.json',import.meta.url),'utf8'));
+const now=Date.parse(sample.fetchedAt)+1000;
+test('accepts complete snapshot and every star rating',()=>{assert.ok(validSnapshot(sample,now)); const f=structuredClone(sample);f.reviews[0].rating=1;assert.ok(validSnapshot(f,now));});
+test('rejects expired, future, partial and unsafe snapshots',()=>{assert.equal(validSnapshot(sample,now+7*86400000),false);for(const patch of [{complete:false},{totalReviewCount:6},{mapsUrl:'javascript:alert(1)'},{fetchedAt:new Date(now+120000).toISOString()}])assert.equal(validSnapshot({...sample,...patch},now),false);});
+test('rejects duplicate IDs and invalid review contents',()=>{const f=structuredClone(sample);f.reviews[1].id=f.reviews[0].id;assert.equal(validSnapshot(f,now),false);f.reviews[1].id='public-other';f.reviews[0].text=Array(26).fill('word').join(' ');assert.equal(validSnapshot(f,now),false);});
+test('current carousel is connected to snapshot module',()=>{const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');assert.match(html,/data-reviews-endpoint="assets\/reviews-public.json"/);assert.match(html,/type="module" src="assets\/review-loop-feed.mjs"/);});

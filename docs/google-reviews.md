@@ -34,3 +34,7 @@ If a check fails or is incomplete, do not advance `fetchedAt` and do not change 
 Validation: `node --test reviews-worker/tests/*.test.js`, `node --check assets/reviews.js`, desktop/mobile browser checks. For an outage, Google permissions changes or invalid credentials, existing content remains available; repair the owner connection and verify a new response rather than fabricating fresh reviews.
 
 References: https://developers.google.com/my-business/reference/rest/v4/accounts.locations.reviews/list and https://developers.google.com/my-business/content/policies
+
+### October 11 carousel reconnection
+The current testimonial-loop loads assets/review-loop-feed.mjs from its data-reviews-endpoint. It preserves the Facebook recommendation separately, replaces Google cards from the complete verified snapshot, and labels the Google rating/count and check date. It checks every five minutes while visible and defers replacement during hover, focus or a manual pause. Invalid/unavailable data retains attributed fallback excerpts; expired loaded data removes the aggregate rating and restores the fallback when interaction ends. The older reviews.js renderer is for the retired carousel markup and is not loaded. The daily snapshot refresh remains the source until the official API migration.
+
