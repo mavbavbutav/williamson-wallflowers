@@ -162,10 +162,32 @@ async function handleInquiry(request, env, corsHeaders) {
       return json({ ok: true, message: 'Inquiry received.' }, 200, corsHeaders);
     }
 
+    // This binding is deliberately scoped to the public inquiry endpoint. The
+    // threshold is generous for ordinary retries and shared household networks.
+    if (env.INQUIRY_RATE_LIMITER) {
+      const ip = request.headers.get('CF-Connecting-IP');
+      if (ip) {
+        const { success } = await env.INQUIRY_RATE_LIMITER.limit({ key: ip });
+        if (!success) {
+          return json({ ok: false, message: 'Too many attempts. Please wait a minute and try again.' }, 429, corsHeaders);
+        }
+      }
+    }
+
     const validationError = validateSubmission(submission);
 
     if (validationError) {
       return json({ ok: false, message: validationError }, 400, corsHeaders);
+    }
+
+    const turnstileToken = submission['cf-turnstile-response'];
+    if (!env.TURNSTILE_SECRET_KEY || typeof turnstileToken !== 'string' || !turnstileToken || turnstileToken.length > 2048) {
+      return json({ ok: false, message: 'Please complete the spam check and try again.' }, 400, corsHeaders);
+    }
+
+    const turnstileValid = await verifyInquiryTurnstile(turnstileToken, request, env);
+    if (!turnstileValid) {
+      return json({ ok: false, message: 'The spam check could not be verified. Please try again.' }, 400, corsHeaders);
     }
 
     const internalResult = await sendInternalNotification(submission, env);
@@ -186,6 +208,9 @@ async function handleInquiry(request, env, corsHeaders) {
     return json({ ok: true, message: 'Inquiry sent.' }, 200, corsHeaders);
   } catch (error) {
     console.error('Wallflowers inquiry form error', error);
+    if (error?.status === 413) {
+      return json({ ok: false, message: 'The inquiry is too large. Please shorten the event details and try again.' }, 413, corsHeaders);
+    }
     return json({ ok: false, message: 'Inquiry could not be sent right now.' }, 500, corsHeaders);
   }
 }
@@ -8840,9 +8865,17 @@ function getApiBaseUrl(env) {
 
 async function readSubmission(request) {
   const contentType = request.headers.get('Content-Type') || '';
+  const body = await request.clone().arrayBuffer();
+  if (body.byteLength > 16 * 1024) {
+    const error = new Error('Inquiry request is too large.');
+    error.status = 413;
+    throw error;
+  }
 
   if (contentType.includes('application/json')) {
-    return request.json();
+    const parsed = await request.json();
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value]));
   }
 
   const formData = await request.formData();
@@ -8857,7 +8890,7 @@ async function readSubmission(request) {
 
 function validateSubmission(submission) {
   for (const field of REQUIRED_FIELDS) {
-    if (!submission[field]) {
+    if (typeof submission[field] !== 'string' || !submission[field].trim()) {
       return `Missing required field: ${getLabel(field)}`;
     }
   }
@@ -8866,7 +8899,76 @@ function validateSubmission(submission) {
     return 'Please enter a valid email address.';
   }
 
+  if (submission.name.length > 120) return 'Please keep your name under 120 characters.';
+  if (submission.email.length > 254) return 'Please enter an email address under 255 characters.';
+
+  if (submission['event-date'] != null && typeof submission['event-date'] !== 'string') {
+    return 'Please choose today or a future event date.';
+  }
+  const eventDate = submission['event-date'] || '';
+  if (eventDate && !isPlausibleInquiryDate(eventDate)) {
+    return 'Please choose today or a future event date.';
+  }
+
+  const fieldLimits = [
+    ['event-type', 100, 'Event Type'],
+    ['venue', 200, 'Venue / Location'],
+    ['preferred-wall', 100, 'Preferred Wall'],
+    ['ask-time-capsule', 20, 'Wallflower Time Capsule'],
+    ['details', 3000, 'Event Details']
+  ];
+  for (const [field, maxLength, label] of fieldLimits) {
+    if (submission[field] != null && typeof submission[field] !== 'string') {
+      return `Please enter valid text for ${label}.`;
+    }
+    if ((submission[field] || '').length > maxLength) {
+      return `${label} must be ${maxLength} characters or fewer.`;
+    }
+  }
+
   return '';
+}
+
+function isPlausibleInquiryDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+
+  const [year, month, day] = value.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) {
+    return false;
+  }
+
+  const todayParts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(new Date());
+  const today = Object.fromEntries(todayParts.map((part) => [part.type, part.value]));
+  const todayKey = `${today.year}-${today.month}-${today.day}`;
+  return value >= todayKey;
+}
+
+async function verifyInquiryTurnstile(token, request, env) {
+  try {
+    const body = new URLSearchParams({
+      secret: env.TURNSTILE_SECRET_KEY,
+      response: token
+    });
+    const ip = request.headers.get('CF-Connecting-IP');
+    if (ip) body.set('remoteip', ip);
+
+    const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body
+    });
+    if (!response.ok) return false;
+
+    const result = await response.json();
+    const allowedHostnames = new Set(['williamsonwallflowers.com', 'www.williamsonwallflowers.com']);
+    return result.success === true && result.action === 'inquiry' && allowedHostnames.has(result.hostname);
+  } catch (error) {
+    console.error('Turnstile verification failed', error?.message || error);
+    return false;
+  }
 }
 
 async function sendInternalNotification(submission, env) {

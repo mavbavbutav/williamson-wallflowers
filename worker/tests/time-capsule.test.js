@@ -70,6 +70,9 @@ test('inquiry emails include Wallflower Time Capsule interest', async () => {
   const sentEmails = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
+    if (String(url).includes('/turnstile/v0/siteverify')) {
+      return Response.json({ success: true, hostname: 'williamsonwallflowers.com', action: 'inquiry' });
+    }
     sentEmails.push({ url, body: JSON.parse(init.body) });
     return new Response('', { status: 202 });
   };
@@ -78,15 +81,16 @@ test('inquiry emails include Wallflower Time Capsule interest', async () => {
     const formData = new FormData();
     formData.set('name', 'Taylor Smith');
     formData.set('email', 'taylor@example.com');
-    formData.set('event-date', '2026-09-19');
+    formData.set('event-date', '2027-09-19');
     formData.set('event-type', 'Wedding');
     formData.set('preferred-wall', 'The Secret Garden');
     formData.set('ask-time-capsule', 'yes');
+    formData.set('cf-turnstile-response', 'valid-test-token');
 
     const response = await worker.fetch(new Request('https://williamsonwallflowers.com/', {
       method: 'POST',
       body: formData
-    }), { ...BASE_ENV, resend: 'resend-test-key' });
+    }), { ...BASE_ENV, TURNSTILE_SECRET_KEY: 'test-secret', resend: 'resend-test-key' });
 
     assert.equal(response.status, 200);
     assert.equal(sentEmails.length, 2);

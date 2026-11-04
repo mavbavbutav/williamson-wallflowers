@@ -1729,6 +1729,7 @@
                 </span>
               </label>
 
+              <div class="cf-turnstile" data-sitekey="REPLACE_WITH_TURNSTILE_SITE_KEY" data-action="inquiry"></div>
               <button class="text-button" type="submit">Start your inquiry</button>
               <p class="form-status" id="inquiryStatus" role="status" aria-live="polite"></p>
             </form>
@@ -2142,6 +2143,11 @@
         return;
       }
 
+      if (!formData.get("cf-turnstile-response")) {
+        inquiryStatus.textContent = "Please complete the spam check before sending your inquiry.";
+        return;
+      }
+
       const eventDate = formData.get("event-date") || "";
       const preferredWall = formData.get("preferred-wall") || "";
       const problem = dateProblem(preferredWall, eventDate);
@@ -2169,10 +2175,12 @@
 
         if (!response.ok) {
           inquiryStatus.textContent = result.message || "Inquiry could not be sent right now. Please email Jami directly.";
+          if (window.turnstile) window.turnstile.reset();
           return;
         }
 
         inquiryForm.reset();
+        if (window.turnstile) window.turnstile.reset();
         inquiryStatus.textContent = result.message || "Inquiry sent.";
         openConfirmationModal();
       } catch (error) {
@@ -2183,5 +2191,6 @@
   </script>
 <script src="assets/enhancements.js"></script>
 <script type="module" src="assets/review-loop-feed.mjs"></script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </body>
 </html>

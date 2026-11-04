@@ -22,6 +22,7 @@ The public flower wall site stays static on GitHub Pages. The Moments frontend i
    ```bash
    npx wrangler secret put resend
    npx wrangler secret put MOMENTS_ADMIN_TOKEN
+   npx wrangler secret put TURNSTILE_SECRET_KEY
    ```
 
 6. Apply the D1 migration and deploy:
@@ -51,6 +52,21 @@ The Worker sends with the display name `Williamson Wallflowers` from the verifie
 ```text
 Williamson Wallflowers <noreply@jjentertainmentsolutions.com>
 ```
+
+## Inquiry spam protection
+
+The public inquiry form uses a hidden honeypot, browser-side date checks, Cloudflare Turnstile, Worker-side date and field validation, and an approximate per-IP rate limit of five requests per minute. The Worker requires a Turnstile Siteverify success for the `inquiry` action and the `williamsonwallflowers.com` or `www` hostname before it sends email. Event dates are optional, but supplied dates must be real calendar dates on or after today in America/Chicago. Venue and message language are not spam signals.
+
+Before deploying the form change:
+
+1. Create a Managed Turnstile widget allowing `williamsonwallflowers.com` and `www.williamsonwallflowers.com`.
+2. Replace `REPLACE_WITH_TURNSTILE_SITE_KEY` in the root `index.html` with the widget's public sitekey.
+3. Set the widget secret as the Worker secret with `npx wrangler secret put TURNSTILE_SECRET_KEY`.
+4. Confirm that the `INQUIRY_RATE_LIMITER` namespace ID in `wrangler.toml` is unused in the Cloudflare account; choose another unique positive integer if needed.
+5. From `worker/`, run `npm test` and `npm run check`, then deploy the Worker with `npx wrangler deploy`.
+6. Publish the site change through its normal GitHub Pages workflow, then submit one test inquiry on the live site and confirm both internal and applicant emails arrive.
+
+Turnstile test keys may be used in local development with a test secret; production secret keys reject test tokens. Keep the production secret in Wrangler secrets and never place it in `index.html`.
 
 ## Wallflower Moments URLs
 

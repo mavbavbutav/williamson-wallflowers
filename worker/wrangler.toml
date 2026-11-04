@@ -14,6 +14,15 @@ PUBLIC_SITE_URL = "https://williamsonwallflowers.com"
 MOMENTS_API_URL = "https://williamson-wallflowers-inquiry.johnmartinferguson.workers.dev"
 ALLOWED_ORIGINS = "https://williamsonwallflowers.com,https://www.williamsonwallflowers.com,https://williamson-wallflowers-inquiry.johnmartinferguson.workers.dev,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000,http://localhost:8787,http://127.0.0.1:8787"
 
+# Change namespace_id if it is already used by another Worker in this Cloudflare account.
+[[ratelimits]]
+name = "INQUIRY_RATE_LIMITER"
+namespace_id = "611042026"
+
+  [ratelimits.simple]
+  limit = 5
+  period = 60
+
 [[d1_databases]]
 binding = "MOMENTS_DB"
 database_name = "williamson-wallflowers-moments"
